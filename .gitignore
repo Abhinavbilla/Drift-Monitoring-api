@@ -1,0 +1,29 @@
+@"
+# Secrets
+.env
+google_credentials.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database
+drift.db
+*.db
+
+# Large files
+*.csv
+*.arff
+*.dat
+*.parquet
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+"@ | Out-File -FilePath ".gitignore" -Encoding UTF8
