@@ -1,7 +1,7 @@
 ```markdown
 # Drift-Monitoring-api
 
-**Production‑grade drift monitoring for machine learning models**
+**Production-grade drift monitoring for machine learning models**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -9,20 +9,20 @@
 
 ---
 
-## 🎯 Overview
+## Overview
 
-**Drift‑Monitoring‑api** is a production‑ready MLOps platform that automatically detects distribution shifts in your ML features – before they impact your business.
+**Drift-Monitoring-api** is a production-ready MLOps platform that automatically detects distribution shifts in your ML features – before they impact your business.
 
 It combines:
-- **KS‑test** for continuous feature drift
+- **KS-test** for continuous feature drift
 - **PSI (Population Stability Index)** for categorical feature drift
-- **IQR (3× interquartile range)** for real‑time anomaly detection
+- **IQR (3× interquartile range)** for real-time anomaly detection
 
-All wrapped in an interactive Streamlit dashboard and a high‑performance FastAPI backend with Google OAuth authentication.
+All wrapped in an interactive Streamlit dashboard and a high-performance FastAPI backend with Google OAuth authentication.
 
 ---
 
-## 📊 Benchmarks
+## Benchmarks
 
 Validated on the **NYC Citi Bike dataset** (4.5M rows, 7 monitored features) with independently verified ground truth.
 
@@ -32,7 +32,7 @@ Validated on the **NYC Citi Bike dataset** (4.5M rows, 7 monitored features) wit
 | **Recall** | **0.945** |
 | **F1 Score** | **0.972** |
 
-### Per‑feature detection rate (real production data)
+### Per-feature detection rate (real production data)
 
 | Feature | Effect Size | Detection Rate |
 |---------|-------------|----------------|
@@ -44,7 +44,7 @@ Validated on the **NYC Citi Bike dataset** (4.5M rows, 7 monitored features) wit
 | `pickup_latitude` | KS=0.0189 | 53% |
 | `gender_id` (categorical) | PSI=0.043 | 0% (no practical drift) |
 
-> ℹ️ Detection rate correlates with effect size – this is expected statistical behaviour, not a system flaw.
+> Detection rate correlates with effect size – this is expected statistical behaviour, not a system flaw.
 
 ### Recommended production batch size: **20,000 rows**
 
@@ -60,14 +60,33 @@ Validated on the **NYC Citi Bike dataset** (4.5M rows, 7 monitored features) wit
 
 ---
 
-## 🧠 How It Works
+## How It Works
 
 | Feature Type | Detection Method |
 |--------------|------------------|
-| Continuous | KS‑test (p < 0.05) |
+| Continuous | KS-test (p < 0.05) |
 | Categorical | PSI (threshold > 0.2) |
-| Real‑time anomalies | IQR (3×) |
+| Real-time anomalies | IQR (3×) |
 
-### High‑level architecture
+---
 
+## Quick Start
+
+### Prerequisites
+- Python 3.10+
+- [Google OAuth credentials](https://console.cloud.google.com/apis/credentials)
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/Abhinavbilla/Drift-Monitoring-api.git
+cd Drift-Monitoring-api
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your Google OAuth client ID, secret, and a cookie key
 ```
