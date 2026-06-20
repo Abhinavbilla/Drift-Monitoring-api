@@ -9,7 +9,7 @@ load_dotenv()
 API_KEY = os.getenv("API_KEY")
 if not API_KEY:
     raise ValueError("❌ API_KEY not found in environment. Please set it in .env file.")
-API_BASE = "http://127.0.0.1:8000"
+API_BASE = "http://api:8000"
 MODEL_ID = "citi_bike_v1"
 
 HEADERS = {"X-API-Key": API_KEY}

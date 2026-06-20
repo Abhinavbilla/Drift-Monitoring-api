@@ -323,11 +323,7 @@ class RegisterRequest(BaseModel):
 
 @app.post("/register", tags=["Security"])
 def register_user(request: Request, payload: RegisterRequest):
-    # Only allow requests from localhost
-    client_host = request.client.host
-    if client_host not in ["127.0.0.1", "localhost", "::1"]:
-        raise HTTPException(status_code=403, detail="Registration only allowed from localhost")
-    
+
     owner_email = payload.owner_email
     owner_name = payload.owner_name
 

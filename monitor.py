@@ -4,7 +4,7 @@ import schedule
 from datetime import datetime
 
 # The URL of your local FastAPI server
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://api:8000"
 PROJECT_ID = "project_alpha"
 
 def trigger_slack_alert(drift_ratio: float):

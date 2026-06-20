@@ -37,14 +37,20 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from sklearn.metrics import confusion_matrix, classification_report, precision_score, recall_score, f1_score
+import os
+from dotenv import load_dotenv
 
+# Load environment variables from .env
+load_dotenv()
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise ValueError("❌ API_KEY not found in environment. Please set it in .env file.")
 PRODUCTION_BATCH_SIZE = 25000
 # ============================================
 # CONFIGURATION
 # ============================================
-API_BASE = "http://127.0.0.1:8000"
+API_BASE = "http://api:8000"
 MODEL_ID = "citi_bike_v1"
-API_KEY = "sk-drift-ca86936c632dc064bea7eeb55725bc5d"             # Replace with your real API key
 HEADERS = {"X-API-Key": API_KEY}
 
 CONTINUOUS_FEATURES = [

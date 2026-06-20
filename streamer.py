@@ -19,7 +19,7 @@ if not API_KEY:
  
 PROJECT_ID = "credit card fraud detector"
 CSV_PATH = "creditcard.csv"         # <-- Path to your Kaggle dataset
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://api:8000"
 
 HEADERS = {"X-API-Key": API_KEY}
 SAFE_PROJECT_ID = urllib.parse.quote(PROJECT_ID)

@@ -294,7 +294,7 @@ def render_developer_portal(user_data):
     st.info(f"Verified Account: **{user_data['email']}**")
     
     if st.button("Generate / Retrieve API Key", type="primary"):
-        BACKEND_URL = "http://127.0.0.1:8000/register"
+        BACKEND_URL = os.getenv("BACKEND_URL", "http://api:8000/register")
         payload = {
             "owner_name": user_data['name'],
             "owner_email": user_data['email']
@@ -313,13 +313,13 @@ def render_developer_portal(user_data):
 # ---------------------------------------------------------
 # 2. AUTHENTICATION & GATEKEEPER
 # ---------------------------------------------------------
+
 authenticator = Authenticate(
     secret_credentials_path='google_credentials.json',
     cookie_name='drift_cookie',
-    cookie_key=os.getenv('COOKIE_KEY'), 
+    cookie_key=os.getenv('COOKIE_KEY'),
     redirect_uri='http://localhost:8501'
 )
-
 authenticator.check_authentification()
 authenticator.login()
 
@@ -467,7 +467,7 @@ if active_project == "➕ Add New Model":
                 payload = {"reference_data": clean_dict}
                 
                 try:
-                    profile_response = requests.post("http://127.0.0.1:8000/profile", json=payload, headers=headers)
+                    profile_response = requests.post("http://api:8000/profile", json=payload, headers=headers)
                     if profile_response.status_code == 200:
                         smart_profiles = {p["name"]: p for p in profile_response.json()}
                     else:
@@ -603,7 +603,7 @@ if active_project == "➕ Add New Model":
                         headers = {"X-API-Key": user_api_key}
 
                         response = requests.post(
-                            f"http://127.0.0.1:8000/fit/{safe_model_id}",
+                            f"http://api:8000/fit/{safe_model_id}",
                             json=payload,
                             headers=headers
                         )
@@ -915,7 +915,7 @@ elif active_project != "No Models Assigned":
                 headers = {"X-API-Key": user_api_key}               
                 # Send the DELETE request to your FastAPI backend
                 response = requests.delete(
-                    f"http://127.0.0.1:8000/models/{safe_model_id}", 
+                    f"http://api:8000/models/{safe_model_id}", 
                     headers=headers
                 )               
                 if response.status_code == 200:
@@ -960,7 +960,7 @@ else:
             
             st.text_input("New Model ID (e.g., fraud_detection_v1)", disabled=True)
             st.file_uploader(
-                "Upload Training Data (CSV / DAT) - Max 2GB total",  # <-- label updated
+                "Upload Training Data (CSV / DAT) - Max 2GB total",  
                 disabled=True
             )           
             # UNIQUE KEY 1 ADDED HERE
@@ -1024,7 +1024,7 @@ else:
                 
                 try:
                     profile_response = requests.post(
-                        "http://127.0.0.1:8000/profile",
+                        "http://api:8000/profile",
                         json=payload,
                         headers=headers
                     )
@@ -1157,7 +1157,7 @@ else:
                         headers = {"X-API-Key": user_api_key}
                         
                         response = requests.post(
-                            f"http://127.0.0.1:8000/fit/{safe_model_id}",
+                            f"http://api:8000/fit/{safe_model_id}",
                             json=payload,
                             headers=headers
                         )
@@ -1170,8 +1170,9 @@ else:
                                 f"{len(categorical_cols)} categorical features."
                             )
                             st.balloons()
+                            time.sleep(1.5)
                             st.session_state.selected_model = new_model_id  # ← THE MISSING LINE
-                            time.sleep(0.5)
+                            
                             st.rerun()
                         else:
                             st.error(f"Backend Error: {response.text}")
