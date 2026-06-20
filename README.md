@@ -1,4 +1,3 @@
-```markdown
 # Drift-Monitoring-api
 
 **Production-grade drift monitoring for machine learning models**
@@ -6,6 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.136.1-009688.svg)](https://fastapi.tiangolo.com/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.58.0-FF4B4B.svg)](https://streamlit.io/)
+[![SQLite](https://img.shields.io/badge/SQLite-3.0-003B57.svg)](https://www.sqlite.org/)
 
 ---
 
@@ -32,7 +34,7 @@ Validated on the **NYC Citi Bike dataset** (4.5M rows, 7 monitored features) wit
 | **Recall** | **0.945** |
 | **F1 Score** | **0.972** |
 
-### Per-feature detection rate (real production data)
+### Per-feature detection rate
 
 | Feature | Effect Size | Detection Rate |
 |---------|-------------|----------------|
@@ -79,14 +81,6 @@ Validated on the **NYC Citi Bike dataset** (4.5M rows, 7 monitored features) wit
 ### Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/Abhinavbilla/Drift-Monitoring-api.git
 cd Drift-Monitoring-api
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your Google OAuth client ID, secret, and a cookie key
-```
