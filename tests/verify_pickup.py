@@ -6,7 +6,6 @@ with fresh random seeds (20-35, different from original 0-14).
 import requests
 import pandas as pd
 import time
-
 import os
 from dotenv import load_dotenv
 
@@ -16,8 +15,9 @@ load_dotenv()
 API_KEY = os.getenv("API_KEY")
 if not API_KEY:
     raise ValueError("❌ API_KEY not found in environment. Please set it in .env file.")
+
+API_BASE = "http://127.0.0.1:8000"
 MODEL_ID = "citi_bike_v1"
-API_KEY = "sk-drift-ca86936c632dc064bea7eeb55725bc5d"
 HEADERS = {"X-API-Key": API_KEY}
 
 print("Loading production data...")
