@@ -317,7 +317,7 @@ authenticator = Authenticate(
     secret_credentials_path='/etc/secrets/google_credentials.json',  
     cookie_name='drift_cookie',
     cookie_key=os.getenv('COOKIE_KEY'),
-    redirect_uri='http://localhost:8501'
+    redirect_uri='https://drift-monitoring-dashboard.onrender.com'
 )
 authenticator.check_authentification()
 authenticator.login()
