@@ -294,7 +294,7 @@ def render_developer_portal(user_data):
     st.info(f"Verified Account: **{user_data['email']}**")
     
     if st.button("Generate / Retrieve API Key", type="primary"):
-        BACKEND_URL = os.getenv("BACKEND_URL", "http://api:8000/register")
+        BACKEND_URL = os.getenv("BACKEND_URL", "http://api:8000")
         payload = {
             "owner_name": user_data['name'],
             "owner_email": user_data['email']
