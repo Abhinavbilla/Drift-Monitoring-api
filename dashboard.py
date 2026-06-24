@@ -313,9 +313,8 @@ def render_developer_portal(user_data):
 # ---------------------------------------------------------
 # 2. AUTHENTICATION & GATEKEEPER
 # ---------------------------------------------------------
-
 authenticator = Authenticate(
-    secret_credentials_path='google_credentials.json',
+    secret_credentials_path='/etc/secrets/google_credentials.json',  
     cookie_name='drift_cookie',
     cookie_key=os.getenv('COOKIE_KEY'),
     redirect_uri='http://localhost:8501'
