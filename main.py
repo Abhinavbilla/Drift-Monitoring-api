@@ -107,7 +107,43 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+@app.get("/baseline/{project_id}", tags=["Management"])
+def get_baseline(project_id: str, client: dict = Depends(verify_access)):
+    """Returns the IQR fences and feature types for a project."""
+    import sqlite3
+    import json
+    conn = sqlite3.connect("drift.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT iqr_fences, feature_types FROM baselines WHERE project_id = ?", (project_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Baseline not found")
+    fences = json.loads(row[0])   # list of dicts with 'feature_name', 'q1', 'q3'
+    feature_types = json.loads(row[1])  # dict of {feature_name: "continuous"|"categorical"}
+    return {"fences": fences, "feature_types": feature_types}
 
+@app.get("/logs/{project_id}", tags=["Management"])
+def get_logs(project_id: str, client: dict = Depends(verify_access)):
+    """Returns the recent logs for a project (last 1000)."""
+    import sqlite3
+    import json
+    conn = sqlite3.connect("drift.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT input_data, score, is_ood FROM logs WHERE project_id = ? ORDER BY rowid DESC LIMIT 1000",
+        (project_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    logs = []
+    for row in rows:
+        logs.append({
+            "input_data": json.loads(row[0]), 
+            "score": row[1],
+            "is_ood": row[2]
+        })
+    return logs
 # ---------------------------------------------------------
 # ENDPOINT 0: GENERATE SECURE KEYS (ADMIN)
 # ---------------------------------------------------------
@@ -315,6 +351,20 @@ def check_system_health(project_id: str, client_name: str = Depends(verify_acces
         drift_ratio=ratio
     )
     
+
+@app.get("/projects", tags=["Management"])
+def list_projects(client: dict = Depends(verify_access)):
+    """
+    Returns a list of project IDs for the authenticated user.
+    """
+    conn = sqlite3.connect("drift.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM projects WHERE owner_email = ?", (client["email"],))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    projects = [row[0] for row in rows]
+    return {"projects": projects}
 
 
 class RegisterRequest(BaseModel):

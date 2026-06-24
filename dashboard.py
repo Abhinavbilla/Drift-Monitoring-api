@@ -1,5 +1,4 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import json
 import plotly.graph_objects as go
@@ -16,6 +15,7 @@ import csv
 import gzip
 import zipfile
 import importlib.util
+import time
 DEFAULT_BASELINE_SAMPLE_SIZE = 50000
 DEFAULT_PRODUCTION_BATCH_SIZE = 25000
 # ---------------------------------------------------------
@@ -65,7 +65,7 @@ st.markdown("""
 
 # Load the .env file
 load_dotenv()
-
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 # ---------------------------------------------------------
 # HELPER: Read either a .csv or .dat uploaded file
 # ---------------------------------------------------------
@@ -294,13 +294,12 @@ def render_developer_portal(user_data):
     st.info(f"Verified Account: **{user_data['email']}**")
     
     if st.button("Generate / Retrieve API Key", type="primary"):
-        BACKEND_URL = os.getenv("BACKEND_URL", "http://api:8000")
         payload = {
             "owner_name": user_data['name'],
             "owner_email": user_data['email']
         }
         try:
-            response = requests.post(BACKEND_URL, json=payload)
+            response = requests.post(f"{BACKEND_URL}/register", json=payload)
             if response.status_code == 200:
                 key = response.json().get("api_key")
                 st.success("API Key successfully provisioned!")
@@ -317,7 +316,7 @@ authenticator = Authenticate(
     secret_credentials_path='/etc/secrets/google_credentials.json',  
     cookie_name='drift_cookie',
     cookie_key=os.getenv('COOKIE_KEY'),
-    redirect_uri='https://drift-monitoring-dashboard.onrender.com'
+    redirect_uri=os.getenv("REDIRECT_URI", "https://drift-monitoring-dashboard.onrender.com")
 )
 authenticator.check_authentification()
 authenticator.login()
@@ -331,13 +330,20 @@ user_info = st.session_state.get('user_info', {})
 current_user_email = user_info.get('email', '').lower()
 
 # 1. Fetch the user's API key from the local SQLite DB (only DB call we keep)
-conn = sqlite3.connect('drift.db')
-cursor = conn.cursor()
-cursor.execute("SELECT key FROM api_keys WHERE owner_email = ?", (current_user_email,))
-key_row = cursor.fetchone()
-conn.close()
-
-user_api_key = key_row[0] if key_row else None
+# 1. Fetch the user's API key from the backend using their email
+user_api_key = None
+try:
+    response = requests.post(
+        f"{BACKEND_URL}/register",
+        json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
+        timeout=10
+    )
+    if response.status_code == 200:
+        user_api_key = response.json().get("api_key")
+    else:
+        user_api_key = None
+except Exception:
+    user_api_key = None
 
 # 2. Ask the backend for the list of projects using the API key
 allowed_projects = []
@@ -369,14 +375,20 @@ if st.sidebar.button("Logout"):
 
 st.sidebar.markdown("<h2>Control Panel</h2>", unsafe_allow_html=True)
 
-# 1. Fetch the user's API key from the local SQLite DB (only DB call we keep)
-conn = sqlite3.connect('drift.db')
-cursor = conn.cursor()
-cursor.execute("SELECT key FROM api_keys WHERE owner_email = ?", (current_user_email,))
-key_row = cursor.fetchone()
-conn.close()
-
-user_api_key = key_row[0] if key_row else None
+# 1. Fetch the user's API key from the backend using their email
+user_api_key = None
+try:
+    response = requests.post(
+        f"{BACKEND_URL}/register",
+        json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
+        timeout=10
+    )
+    if response.status_code == 200:
+        user_api_key = response.json().get("api_key")
+    else:
+        user_api_key = None
+except Exception:
+    user_api_key = None
 
 # 2. Ask the backend for the list of projects using the API key
 allowed_projects = []
@@ -435,226 +447,217 @@ if active_project == "➕ Add New Model":
     st.markdown("### Start Monitoring a New Model")
     st.write("Upload your training datasets to initialize a new monitoring pipeline.")
     
-    # Grab their API key from the DB
-    conn = sqlite3.connect("drift.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT key FROM api_keys WHERE owner_email = ?", (current_user_email,))
-    key_row = cursor.fetchone()
-    conn.close()
-    
-    if not key_row:
+    # Fetch the user's API key from the backend
+    user_api_key = None
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/register",
+            json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            user_api_key = resp.json().get("api_key")
+    except Exception:
+        pass
+
+    if not user_api_key:
         st.error("Error: Could not locate your API credentials.")
-    else:
-        user_api_key = key_row[0]
+        st.stop()
+
+    # New unique keys so Streamlit doesn't throw DuplicateElement errors
+    new_model_id = st.text_input("New Model ID (e.g., churn_predictor_v2)", key="add_new_proj_id")
+    
+    uploaded_files = st.file_uploader(
+        "Upload Training Data (CSV / DAT) - Max 2GB total",
+        type=["csv", "dat"],
+        key="add_new_files", 
+        accept_multiple_files=True
+    )
+    
+    st.warning(
+        "⚠️ **Notice:** If your combined training files approach or exceed the max 2GB limit, "
+        "please upload your primary dataset first, then upload subsequent files sequentially."
+    )
+    
+    # ==========================================
+    # NEW: SMART SCHEMA CONFIGURATION UI
+    # ==========================================
+    schema_mapping = {}  # ← Correct indentation (same level as new_model_id)
+    
+    if uploaded_files:
+        st.markdown("<br> 🗂️ Step 2: Verify Data Schema", unsafe_allow_html=True)
         
-        # New unique keys so Streamlit doesn't throw DuplicateElement errors
-        new_model_id = st.text_input("New Model ID (e.g., churn_predictor_v2)", key="add_new_proj_id")
-        
-        uploaded_files = st.file_uploader(
-            "Upload Training Data (CSV / DAT) - Max 2GB total",
-            type=["csv", "dat"],
-            key="add_new_files", 
-            accept_multiple_files=True
-        )
-        
-        st.warning(
-            "⚠️ **Notice:** If your combined training files approach or exceed the max 2GB limit, "
-            "please upload your primary dataset first, then upload subsequent files sequentially."
-        )
-        
-        # ==========================================
-        # NEW: SMART SCHEMA CONFIGURATION UI
-        # ==========================================
-        schema_mapping = {} 
-        
-        if uploaded_files:
-            st.markdown("<br> 🗂️ Step 2: Verify Data Schema", unsafe_allow_html=True)
+        # 1. Load full files and take an unbiased random sample
+        train_dfs = []
+        for f in uploaded_files:
+            train_dfs.append(read_uploaded_file(f))
             
-            # 1. Load full files and take an unbiased random sample
-            train_dfs = []
-            for f in uploaded_files:
-                train_dfs.append(read_uploaded_file(f))
-                
-            # Combine all uploaded files into one massive dataframe
-            combined_df = pd.concat(train_dfs, ignore_index=True)
+        # Combine all uploaded files into one massive dataframe
+        combined_df = pd.concat(train_dfs, ignore_index=True)
+        
+        preview_df = combined_df.sample(n=min(10000,len(combined_df)), random_state=42).reset_index(drop=True)
+        
+        # 2. Ask the backend for mathematical recommendations
+        with st.spinner("Analyzing dataset signals..."):
+            headers = {"X-API-Key": user_api_key}
+            raw_dict = preview_df.to_dict(orient="list")
             
-           
-            preview_df = combined_df.sample(n=min(10000,len(combined_df)), random_state=42).reset_index(drop=True)
+            clean_dict = {
+                col: [None if pd.isna(v) else v for v in vals]
+                for col, vals in raw_dict.items()
+            }
             
-            # 2. Ask the backend for mathematical recommendations
-            with st.spinner("Analyzing dataset signals..."):
-                headers = {"X-API-Key": user_api_key}
-                # --- THE UNBREAKABLE FIX ---
-                # 1. Extract the data into standard Python lists
-                raw_dict = preview_df.to_dict(orient="list")
-                
-                # 2. Brutally scrub every Pandas NaN/NaT and replace with standard Python None
-                clean_dict = {
-                    col: [None if pd.isna(v) else v for v in vals]
-                    for col, vals in raw_dict.items()
-                }
-                
-                payload = {"reference_data": clean_dict}
-                
-                try:
-                    profile_response = requests.post("http://api:8000/profile", json=payload, headers=headers)
-                    if profile_response.status_code == 200:
-                        smart_profiles = {p["name"]: p for p in profile_response.json()}
-                    else:
-                        smart_profiles = {}
-                        st.error(f"Profiler Error: {profile_response.text}")
-                except requests.exceptions.ConnectionError:
+            payload = {"reference_data": clean_dict}
+            
+            try:
+                profile_response = requests.post(f"{BACKEND_URL}/profile", json=payload, headers=headers)
+                if profile_response.status_code == 200:
+                    smart_profiles = {p["name"]: p for p in profile_response.json()}
+                else:
                     smart_profiles = {}
-                    st.warning("Could not reach profiler API. Using default schema.")
+                    st.error(f"Profiler Error: {profile_response.text}")
+            except requests.exceptions.ConnectionError:
+                smart_profiles = {}
+                st.warning("Could not reach profiler API. Using default schema.")
 
-            st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
-            
-            # 3. Build the Stateful UI using the AI's recommendations
-            for col in preview_df.columns:
-                col_intel = smart_profiles.get(col, {})
-                monitor = col_intel.get("monitor", "Review")
-                reason  = col_intel.get("reason", "Could not classify — recommend manual review")
+        st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
+        
+        # 3. Build the Stateful UI using the AI's recommendations
+        for col in preview_df.columns:
+            col_intel = smart_profiles.get(col, {})
+            monitor = col_intel.get("monitor", "Review")
+            reason = col_intel.get("reason", "Could not classify — recommend manual review")
 
-                if monitor is True:
+            if monitor is True:
+                suggested_idx = 0
+            elif monitor == "Categorical":
+                suggested_idx = 1
+            elif monitor is False:
+                suggested_idx = 2
+            else:
+                best = col_intel.get("best_guess", "ignore")
+                if best == "continuous":
                     suggested_idx = 0
-                elif monitor == "Categorical":
+                elif best == "categorical":
                     suggested_idx = 1
-                elif monitor is False:
+                else:
                     suggested_idx = 2
-                else:   # monitor == "Review"
-                    best = col_intel.get("best_guess", "ignore")
-                    if best == "continuous":
-                        suggested_idx = 0
-                    elif best == "categorical":
-                        suggested_idx = 1
-                    else:
-                        suggested_idx = 2
-                
-                # PERSISTENCE FIX: 
-                # Use a specific key for this column
-                state_key = f"schema_{col}"
-                
-                # REFRESH LOGIC: 
-                # If this is a new run OR the profiler recommendation changed, update the state
-                if state_key not in st.session_state or st.session_state.get(f"last_rec_{col}") != suggested_idx:
-                    st.session_state[state_key] = suggested_idx
-                    st.session_state[f"last_rec_{col}"] = suggested_idx
+            
+            state_key = f"schema_{col}"
+            
+            if state_key not in st.session_state or st.session_state.get(f"last_rec_{col}") != suggested_idx:
+                st.session_state[state_key] = suggested_idx
+                st.session_state[f"last_rec_{col}"] = suggested_idx
 
-                c1, c2 = st.columns([1, 2])
-                with c1:
-                    st.markdown(f"**{col}**")
-                    st.caption(f"Reason: {reason}")
-                with c2:
-                    # Optional: Show a warning if the profiler failed
-                    if monitor == "Review":
-                        st.warning(f"⚠️ **{col}** needs review.")
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.markdown(f"**{col}**")
+                st.caption(f"Reason: {reason}")
+            with c2:
+                if monitor == "Review":
+                    st.warning(f"⚠️ **{col}** needs review.")
 
-                    # 1. Define your options explicitly
-                    role_options = [
-                        "📊 Continuous Feature (Monitor for Drift)",
-                        "🔠 Categorical Feature (Monitor for Drift)",
-                        "📝 Ignore (Unique IDs / Free Text / Target)"
+                role_options = [
+                    "📊 Continuous Feature (Monitor for Drift)",
+                    "🔠 Categorical Feature (Monitor for Drift)",
+                    "📝 Ignore (Unique IDs / Free Text / Target)"
+                ]
+
+                current_index = st.session_state[state_key]
+                if isinstance(current_index, str):
+                    current_index = role_options.index(current_index) if current_index in role_options else 0
+                    st.session_state[state_key] = current_index
+
+                role = st.selectbox(
+                    "Column Role",
+                    options=role_options,
+                    index=current_index,
+                    key=state_key,
+                    label_visibility="collapsed"
+                )
+                schema_mapping[col] = role
+                
+        st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
+
+    # ==========================================
+    # STEP 3: START MONITORING WITH FILTERED SCHEMA
+    # ==========================================
+    if st.button("Start Monitoring Model", type="primary", key="btn_add_new_model"):
+        if not new_model_id or not uploaded_files:
+            st.warning("Please provide a Model ID and upload at least one file.")
+        else:
+            with st.spinner("Processing datasets and starting monitoring..."):
+                try:
+                    # Split confirmed schema into continuous vs categorical
+                    continuous_cols = [
+                        col for col, role in schema_mapping.items()
+                        if "Continuous" in role and col in combined_df.columns
+                    ]
+                    categorical_cols = [
+                        col for col, role in schema_mapping.items()
+                        if "Categorical" in role and col in combined_df.columns
                     ]
 
-                    # 2. Ensure your session state holds an integer, not a label
-                    # (This logic handles the conversion if your state was accidentally set to a string)
-                    current_index = st.session_state[state_key]
-                    if isinstance(current_index, str):
-                        # Fallback: if a string snuck into state, find its position
-                        current_index = role_options.index(current_index) if current_index in role_options else 0
-                        st.session_state[state_key] = current_index
+                    if not continuous_cols and not categorical_cols:
+                        st.warning(
+                            "No columns selected for monitoring. "
+                            "Please mark at least one column as Continuous or Categorical."
+                        )
+                        st.stop()
 
-                    # 3. Now the selectbox is guaranteed to receive an integer
-                    role = st.selectbox(
-                        "Column Role",
-                        options=role_options,
-                        index=current_index,
-                        key=state_key,
-                        label_visibility="collapsed"
-                    )
-                    schema_mapping[col] = role
+                    # Prepare continuous data
+                    continuous_df = combined_df[continuous_cols].select_dtypes(
+                        include=['number']
+                    ).dropna()
                     
-            st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
+                    if len(continuous_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
+                        continuous_df = continuous_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
 
-        # ==========================================
-        # STEP 3: START MONITORING WITH FILTERED SCHEMA
-        # ==========================================
-        if st.button("Start Monitoring Model", type="primary", key="btn_add_new_model"):
-            if not new_model_id or not uploaded_files:
-                st.warning("Please provide a Model ID and upload at least one file.")
-            else:
-                with st.spinner("Processing datasets and starting monitoring..."):
-                    try:
-                        # Split confirmed schema into continuous vs categorical
-                        continuous_cols = [
-                            col for col, role in schema_mapping.items()
-                            if "Continuous" in role and col in combined_df.columns
-                        ]
-                        categorical_cols = [
-                            col for col, role in schema_mapping.items()
-                            if "Categorical" in role and col in combined_df.columns
-                        ]
+                    # Prepare categorical data
+                    categorical_df = combined_df[categorical_cols].dropna() \
+                        if categorical_cols else pd.DataFrame()
+                    if len(categorical_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
+                        categorical_df = categorical_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
 
-                        if not continuous_cols and not categorical_cols:
-                            st.warning(
-                                "No columns selected for monitoring. "
-                                "Please mark at least one column as Continuous or Categorical."
-                            )
-                            st.stop()
-
-                        # Prepare continuous data
-                        continuous_df = combined_df[continuous_cols].select_dtypes(
-                            include=['number']
-                        ).dropna()
-                        
-                        if len(continuous_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
-                            continuous_df = continuous_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
-
-                        # Prepare categorical data
-                        categorical_df = combined_df[categorical_cols].dropna() \
-                            if categorical_cols else pd.DataFrame()
-                        if len(categorical_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
-                            categorical_df = categorical_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
-
-                        # NaN scrub both payloads before sending
-                        def scrub(df):
-                            raw = df.to_dict(orient="list")
-                            return {
-                                col: [None if pd.isna(v) else v for v in vals]
-                                for col, vals in raw.items()
-                            }
-
-                        payload = {
-                            "reference_data": scrub(continuous_df),
-                            "categorical_data": scrub(categorical_df) if not categorical_df.empty else {}
+                    # NaN scrub both payloads before sending
+                    def scrub(df):
+                        raw = df.to_dict(orient="list")
+                        return {
+                            col: [None if pd.isna(v) else v for v in vals]
+                            for col, vals in raw.items()
                         }
 
-                        safe_model_id = new_model_id.strip().replace(" ", "%20")
-                        headers = {"X-API-Key": user_api_key}
+                    payload = {
+                        "reference_data": scrub(continuous_df),
+                        "categorical_data": scrub(categorical_df) if not categorical_df.empty else {}
+                    }
 
-                        response = requests.post(
-                            f"http://api:8000/fit/{safe_model_id}",
-                            json=payload,
-                            headers=headers
+                    safe_model_id = new_model_id.strip().replace(" ", "%20")
+                    headers = {"X-API-Key": user_api_key}
+
+                    # ✅ FIXED: Uses BACKEND_URL instead of hardcoded http://api
+                    response = requests.post(
+                        f"{BACKEND_URL}/fit/{safe_model_id}",
+                        json=payload,
+                        headers=headers
+                    )
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        st.success(
+                            f"Successfully started monitoring '{new_model_id}'! "
+                            f"Watching {len(continuous_cols)} continuous and "
+                            f"{len(categorical_cols)} categorical features."
                         )
+                        st.balloons()
+                        time.sleep(1.5)
+                        st.session_state.selected_model = new_model_id  
+                        st.rerun()
+                    else:
+                        st.error(f"Backend Error: {response.text}")
 
-                        if response.status_code == 200:
-                            result = response.json()
-                            st.success(
-                                f"Successfully started monitoring '{new_model_id}'! "
-                                f"Watching {len(continuous_cols)} continuous and "
-                                f"{len(categorical_cols)} categorical features."
-                            )
-                            st.balloons()
-                            time.sleep(1.5)
-                            # Explicitly set both the tracking variable AND the selectbox’s value
-                            st.session_state.selected_model = new_model_id  
-                            st.rerun()
-                        else:
-                            st.error(f"Backend Error: {response.text}")
-
-                    except Exception as e:
-                        st.error(f"Error processing files: {str(e)}")
+                except Exception as e:
+                    st.error(f"Error processing files: {str(e)}")
 
 elif active_project != "No Models Assigned":
     
@@ -673,47 +676,76 @@ elif active_project != "No Models Assigned":
         if st.button("Sync Telemetry", use_container_width=True):
             st.rerun()
 
-    # --- FETCH DATA FOR THE ACTIVE PROJECT ---
-    conn = sqlite3.connect("drift.db")
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT iqr_fences FROM baselines WHERE project_id = ?", (active_project,))
-    baseline_row = cursor.fetchone()
+    # --- FETCH DATA FOR THE ACTIVE PROJECT VIA API ---
 
-    # --- CLEANED FENCES CODE ---
+
+    if 'user_api_key' not in locals() or not user_api_key:
+        try:
+            resp = requests.post(
+                f"{BACKEND_URL}/register",
+                json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                user_api_key = resp.json().get("api_key")
+        except:
+            user_api_key = None
+
     fences = {}
-    if baseline_row and baseline_row[0]:
-        iqr_data = json.loads(baseline_row[0])
+    logs = []
+
+    if user_api_key:
+        headers = {"X-API-Key": user_api_key}
         
-        for f in iqr_data:
-            if "q1" in f:
-                fences[f["feature_name"]] = {"q1": f["q1"], "q3": f["q3"]}
+        # 1. Fetch baseline (IQR fences)
+        try:
+            resp = requests.get(f"{BACKEND_URL}/baseline/{active_project}", headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                for f in data.get("fences", []):
+                    if "q1" in f and "q3" in f:
+                        fences[f["feature_name"]] = {"q1": f["q1"], "q3": f["q3"]}
+            elif resp.status_code != 404:
+                st.warning("Could not fetch baseline data. Status code: {}".format(resp.status_code))
+        except Exception as e:
+            st.warning("Error fetching baseline: {}".format(str(e)))
+        
+        # 2. Fetch logs (last 1000)
+        try:
+            resp = requests.get(f"{BACKEND_URL}/logs/{active_project}", headers=headers, timeout=10)
+            if resp.status_code == 200:
+                logs = resp.json()
+            elif resp.status_code != 404:
+                st.warning("Could not fetch logs. Status code: {}".format(resp.status_code))
+        except Exception as e:
+            st.warning("Error fetching logs: {}".format(str(e)))
+    else:
+        st.error("No API key available. Please log in again.")
+        st.stop()
 
-    logs_df = pd.read_sql_query(
-        "SELECT * FROM logs WHERE project_id = ? ORDER BY rowid DESC LIMIT 1000", 
-        conn, params=(active_project,)
-    )
-    conn.close()
-
-    if logs_df.empty:
+    if not logs:
         st.info(f"No real-time logs found for {active_project} yet.")
         st.markdown("<br>", unsafe_allow_html=True)
         tab4 = st.tabs(["🔑 Developer Portal"])[0]
         with tab4:
             render_developer_portal(user_info)
-    else: 
+    else:
+        # Convert logs to DataFrame
+        logs_df = pd.DataFrame(logs)  # columns: input_data, score, is_ood
+        # Reverse to have chronological order (oldest first, but the API returns newest first)
         logs_df = logs_df.iloc[::-1].reset_index(drop=True)
 
         # --- DATA PROCESSING ---
         parsed_features = logs_df["input_data"].apply(json.loads)
         features_df = pd.json_normalize(parsed_features)
         full_df = pd.concat([features_df, logs_df[["score", "is_ood"]]], axis=1)
-        full_df['Timeline'] = [f"Window Req #{i+1}" for i in range(len(full_df))] 
+        full_df['Timeline'] = [f"Window Req #{i+1}" for i in range(len(full_df))]
 
         total_requests = len(full_df)
         anomalies = full_df["is_ood"].sum()
         anomaly_rate = (anomalies / total_requests) * 100 if total_requests > 0 else 0
 
+    # ... (the rest of your code for tabs, metrics, charts remains unchanged)
         # --- CUSTOM ADAPTIVE METRICS ---
         st.markdown("<br>", unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
@@ -918,46 +950,45 @@ elif active_project != "No Models Assigned":
     
     # --- 6. DANGER ZONE (Model Deletion) ---
     st.markdown("<br><hr style='opacity: 0.2;'>", unsafe_allow_html=True)
-    
+
     with st.expander("⚙️ Danger Zone: Stop Monitoring"):
         st.warning(f"Warning: This will permanently delete the monitoring pipeline and all associated telemetry for **{active_project}**.")
         
-        # Use a distinct key to avoid button conflicts
         if st.button("🗑️ Delete Model & Stop Monitoring", type="primary", use_container_width=True):
-            
             with st.spinner("Wiping model data from backend database..."):
-                import urllib.parse
-                import sqlite3
                 
-                # --- NEW: Fetch the API key for the current user ---
-                conn = sqlite3.connect("drift.db")
-                cursor = conn.cursor()
-                cursor.execute("SELECT key FROM api_keys WHERE owner_email = ?", (current_user_email,))
-                key_row = cursor.fetchone()
-                conn.close()
+                # --- FETCH API KEY VIA BACKEND (no SQLite) ---
+                user_api_key = None
+                try:
+                    resp = requests.post(
+                        f"{BACKEND_URL}/register",
+                        json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
+                        timeout=10
+                    )
+                    if resp.status_code == 200:
+                        user_api_key = resp.json().get("api_key")
+                except Exception:
+                    pass
                 
-                if not key_row:
+                if not user_api_key:
                     st.error("Authentication Error: Could not find your API key.")
-                    st.stop()                   
-                user_api_key = key_row[0]              
-                # Format the ID safely for the URL
+                    st.stop()
+                
                 safe_model_id = urllib.parse.quote(active_project.strip())
-                headers = {"X-API-Key": user_api_key}               
-                # Send the DELETE request to your FastAPI backend
+                headers = {"X-API-Key": user_api_key}
+                
                 response = requests.delete(
-                    f"http://api:8000/models/{safe_model_id}", 
+                    f"{BACKEND_URL}/models/{safe_model_id}", 
                     headers=headers
-                )               
+                )
+                
                 if response.status_code == 200:
                     st.success(f"Successfully stopped monitoring {active_project}. All data wiped.")
-                    import time
                     time.sleep(1)
                     
-                    # Clear the Streamlit session state so it forgets the deleted model
                     if "selected_model" in st.session_state:
                         del st.session_state["selected_model"]
                     
-                    # Hard reload to update the sidebar list
                     st.rerun()
                 else:
                     st.error(f"Failed to delete model: {response.text}")
@@ -966,14 +997,20 @@ elif active_project != "No Models Assigned":
 # ---------------------------------------------------------
 else:
     st.title("Welcome to Drift Sentinel")  
-    # --- CHECK FOR API KEY FIRST ---
-    conn = sqlite3.connect("drift.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT key FROM api_keys WHERE owner_email = ?", (current_user_email,))
-    key_row = cursor.fetchone()
-    conn.close()  
-    has_api_key = key_row is not None
-    user_api_key = key_row[0] if has_api_key else None  
+    # --- FETCH API KEY VIA BACKEND (no SQLite) ---
+    user_api_key = None
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/register",
+            json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            user_api_key = resp.json().get("api_key")
+    except Exception:
+        pass
+    has_api_key = user_api_key is not None
+    
     # ==========================================
     # STATE A: BRAND NEW USER (NO API KEY)
     # ==========================================
@@ -1053,11 +1090,7 @@ else:
                 payload = {"reference_data": clean_dict}
                 
                 try:
-                    profile_response = requests.post(
-                        "http://api:8000/profile",
-                        json=payload,
-                        headers=headers
-                    )
+                    profile_response = requests.post(f"{BACKEND_URL}/profile", json=payload, headers=headers)
                     if profile_response.status_code == 200:
                         smart_profiles = {p["name"]: p for p in profile_response.json()}
                     else:
@@ -1186,11 +1219,7 @@ else:
                         safe_model_id = new_model_id.strip().replace(" ", "%20")
                         headers = {"X-API-Key": user_api_key}
                         
-                        response = requests.post(
-                            f"http://api:8000/fit/{safe_model_id}",
-                            json=payload,
-                            headers=headers
-                        )
+                        response = requests.post(f"{BACKEND_URL}/fit/{safe_model_id}", json=payload, headers=headers)
                         
                         if response.status_code == 200:
                             result = response.json()
@@ -1201,7 +1230,7 @@ else:
                             )
                             st.balloons()
                             time.sleep(1.5)
-                            st.session_state.selected_model = new_model_id  # ← THE MISSING LINE
+                            st.session_state.selected_model = new_model_id
                             
                             st.rerun()
                         else:

@@ -1,0 +1,27 @@
+# Use Python base image
+FROM python:3.10-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
+COPY . .
+
+# Apply the patch for streamlit-google-auth (if needed)
+RUN cp /app/patched_init.py /usr/local/lib/python3.10/site-packages/streamlit_google_auth/__init__.py 2>/dev/null || true
+
+# Expose the port
+EXPOSE 8000
+
+# Run the Streamlit dashboard
+CMD ["streamlit", "run", "dashboard.py", "--server.port=8000", "--server.address=0.0.0.0"]
