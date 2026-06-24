@@ -330,21 +330,35 @@ if not st.session_state.get('connected'):
 user_info = st.session_state.get('user_info', {})
 current_user_email = user_info.get('email', '').lower()
 
-# Connect to SQLite to get authorized projects
+# 1. Fetch the user's API key from the local SQLite DB (only DB call we keep)
 conn = sqlite3.connect('drift.db')
 cursor = conn.cursor()
-
-# We select 'id' because your logs table links via project_id
-cursor.execute("SELECT id FROM projects WHERE owner_email = ?", (current_user_email,))
-rows = cursor.fetchall()
+cursor.execute("SELECT key FROM api_keys WHERE owner_email = ?", (current_user_email,))
+key_row = cursor.fetchone()
 conn.close()
 
-# Clean up the data
-allowed_projects = [row[0] for row in rows]
+user_api_key = key_row[0] if key_row else None
+
+# 2. Ask the backend for the list of projects using the API key
+allowed_projects = []
+if user_api_key:
+    headers = {"X-API-Key": user_api_key}
+    try:
+        response = requests.get(f"{BACKEND_URL}/projects", headers=headers, timeout=10)
+        if response.status_code == 200:
+            allowed_projects = response.json().get("projects", [])
+        else:
+            allowed_projects = []
+    except Exception:
+        allowed_projects = []
+else:
+    allowed_projects = []
+
+# 3. Format the list for the sidebar
 if not allowed_projects:
     allowed_projects = ["No Models Assigned"]
 else:
-    allowed_projects.append("➕ Add New Model")  
+    allowed_projects.append("➕ Add New Model")
 
 
 # --- 3. RENDER YOUR SIDEBAR ---
@@ -355,18 +369,35 @@ if st.sidebar.button("Logout"):
 
 st.sidebar.markdown("<h2>Control Panel</h2>", unsafe_allow_html=True)
 
-# 1. Fetch updated project list from DB (Crucial for reactivity)
+# 1. Fetch the user's API key from the local SQLite DB (only DB call we keep)
 conn = sqlite3.connect('drift.db')
 cursor = conn.cursor()
-cursor.execute("SELECT id FROM projects WHERE owner_email = ?", (current_user_email,))
-rows = cursor.fetchall()
+cursor.execute("SELECT key FROM api_keys WHERE owner_email = ?", (current_user_email,))
+key_row = cursor.fetchone()
 conn.close()
 
-allowed_projects = [row[0] for row in rows]
+user_api_key = key_row[0] if key_row else None
+
+# 2. Ask the backend for the list of projects using the API key
+allowed_projects = []
+if user_api_key:
+    headers = {"X-API-Key": user_api_key}
+    try:
+        response = requests.get(f"{BACKEND_URL}/projects", headers=headers, timeout=10)
+        if response.status_code == 200:
+            allowed_projects = response.json().get("projects", [])
+        else:
+            allowed_projects = []
+    except Exception:
+        allowed_projects = []
+else:
+    allowed_projects = []
+
+# 3. Format the list for the sidebar
 if not allowed_projects:
     allowed_projects = ["No Models Assigned"]
 else:
-    allowed_projects.append("➕ Add New Model") 
+    allowed_projects.append("➕ Add New Model")
 
 # 2. Set default if state is missing
 if 'selected_model' not in st.session_state:
