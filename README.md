@@ -1,4 +1,4 @@
-# Drift Sentinel
+# Drift Monitoring API
 
 > A REST API for detecting distribution shifts in machine learning features — before they silently degrade your models in production.
 
@@ -7,6 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg?style=for-the-badge)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.136.1-009688.svg?style=for-the-badge)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.58.0-FF4B4B.svg?style=for-the-badge)](https://streamlit.io/)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge)](https://www.docker.com/)
 
 **[→ Try the live dashboard](https://drift-monitoring-dashboard.onrender.com/)**
 
@@ -21,7 +22,7 @@ Most ML teams catch model degradation too late — after it's already affecting 
 3. Weeks or months pass → underlying data silently shifts
 4. Model performance erodes → nobody notices until the damage is done
 
-Drift Sentinel addresses this by continuously comparing your live production data against a locked baseline distribution. When a feature's distribution shifts beyond a statistically meaningful threshold, the system flags it — before it becomes a business problem.
+Drift Monitoring API addresses this by continuously comparing your live production data against a locked baseline distribution. When a feature's distribution shifts beyond a statistically meaningful threshold, the system flags it — before it becomes a business problem.
 
 ---
 
@@ -35,13 +36,14 @@ Drift Sentinel addresses this by continuously comparing your live production dat
 6. [Tech Stack](#tech-stack)
 7. [Project Structure](#project-structure)
 8. [Installation](#installation)
-9. [Usage](#usage)
-10. [API Reference](#api-reference)
-11. [Testing and Validation Methodology](#testing-and-validation-methodology)
-12. [Known Limitations](#known-limitations)
-13. [Future Plans](#future-plans)
-14. [License](#license)
-15. [About](#about)
+9. [Deployment](#deployment)
+10. [Usage](#usage)
+11. [API Reference](#api-reference)
+12. [Testing and Validation Methodology](#testing-and-validation-methodology)
+13. [Known Limitations](#known-limitations)
+14. [Future Plans](#future-plans)
+15. [License](#license)
+16. [About](#about)
 
 ---
 
@@ -70,7 +72,7 @@ This API is built specifically for **structured, tabular data**. It is not desig
 
 **Why this scope?**
 
-KS-test, PSI, and IQR-based methods are mathematically grounded in continuous and categorical feature distributions. Unstructured data requires fundamentally different approaches (embedding drift, perceptual hashing, NLP-specific metrics) that are out of scope here. Drift Sentinel focuses on doing structured tabular monitoring well rather than doing everything poorly.
+KS-test, PSI, and IQR-based methods are mathematically grounded in continuous and categorical feature distributions. Unstructured data requires fundamentally different approaches (embedding drift, perceptual hashing, NLP-specific metrics) that are out of scope here. Drift Monitoring API focuses on doing structured tabular monitoring well rather than doing everything poorly.
 
 ---
 
@@ -97,11 +99,15 @@ Every incoming prediction is individually scored against IQR fences computed fro
 
 **Multi-format File Ingestion**
 
-The file reader handles encoding detection automatically (UTF-8, CP1252, Latin-1, ISO-8859-1), parses ARFF attribute headers, detects libsvm-format .dat files, reads all sheets from multi-sheet Excel files with a schema consistency warning, and handles gzip and zip compressed inputs without requiring pre-processing.
+The file reader (implemented in `dashboard.py`) handles encoding detection automatically (UTF-8, CP1252, Latin-1, ISO-8859-1), parses ARFF attribute headers, detects libsvm-format .dat files, reads all sheets from multi-sheet Excel files with a schema consistency warning, and handles gzip and zip compressed inputs without requiring pre-processing.
 
 **Secure Multi-tenant Architecture**
 
 Each user authenticates via Google OAuth, gets a provisioned API key, and can only access monitoring data for their own projects. The developer portal exposes key generation directly from the dashboard UI.
+
+**Containerized Deployment**
+
+The entire stack — FastAPI backend, Streamlit dashboard, and supervisor process management — is containerized with Docker and orchestrated via `docker-compose.yml`, making it straightforward to deploy on any cloud provider.
 
 ---
 
@@ -113,7 +119,7 @@ The system is split into three layers that interact in a defined sequence:
 
 Takes a sample of your uploaded training data and computes a set of mathematical signals for each column: cardinality ratio, dominant value ratio, monotonicity, string length consistency, structured pattern detection, and dtype analysis after attempted coercion. These signals feed a routing decision that classifies each column as continuous, categorical, or ignored — with a reasoning string attached to every decision so it's auditable in the UI.
 
-### 2. Baseline Storage (`crud.py`)
+### 2. Baseline Storage (`crud.py`, `db/crud.py`)
 
 Once the user confirms the schema, the system computes and stores two kinds of baseline statistics in SQLite:
 
@@ -124,7 +130,7 @@ These are the reference distributions everything in production gets compared aga
 
 ### 3. Drift Detection (`drift/detector.py`)
 
-At inference time, incoming production batches are compared against the stored baseline. Continuous features go through a two-sample KS-test. Categorical features go through PSI computed against the stored frequency table. Individual predictions are also scored against IQR fences for real-time anomaly detection.
+At inference time, incoming production batches are compared against the stored baseline. Continuous features go through a two-sample KS-test. Categorical features go through PSI computed against the stored frequency table. Individual predictions are also scored against IQR fences for real-time anomaly detection. CUSUM-based sequential detection is also available via `drift/cusum.py` for tracking gradual shifts over time.
 
 ### The Full Flow
 
@@ -180,18 +186,18 @@ Zero false positives across all 15 trials. The 6.1% missed detections are concen
 | Feature | Method | Effect Size | Detection Rate |
 |---------|--------|-------------|----------------|
 | `trip_duration` | KS-test | KS=0.0924 | 100% |
-| `month` | PSI | PSI=16.27 | 100% |
+| `month` (categorical) | PSI | PSI=16.27 | 100% |
 | `pickup_longitude` | KS-test | KS=0.0219 | 100% |
 | `dropoff_latitude` | KS-test | KS=0.0195 | 100% |
 | `dropoff_longitude` | KS-test | KS=0.0206 | 87% |
 | `pickup_latitude` | KS-test | KS=0.0189 | 53% |
-| `gender_id` | PSI | PSI=0.043 | 0% — correctly stable |
+| `gender_id` (categorical) | PSI | PSI=0.043 | 0% — correctly stable |
 
 `gender_id` shows 0% detection because its PSI is 0.043, well below the 0.2 threshold. Chi-square flags it as significant (p≈0) due to sample size, but PSI correctly identifies the shift as practically negligible. This is the intended behavior.
 
 ### Batch Size Recommendation
 
-Detection rate scales with batch size in a smooth, monotonically increasing curve — consistent with expected KS-test power scaling. Based on this sweep, **15,000–20,000 rows per batch** sits at the knee of the curve, capturing most available sensitivity without the diminishing-returns cost of larger batches.
+Detection rate scales with batch size in a smooth, monotonically increasing curve — consistent with expected KS-test power scaling. Based on this sweep, **15,000–20,000 rows per batch** sits at the knee of the curve.
 
 | Batch Size | Recall | F1 |
 |------------|--------|----|
@@ -231,9 +237,10 @@ The validation suite caught two real bugs, both fixed before the final numbers a
 | Dashboard | Streamlit |
 | Database | SQLite |
 | Authentication | Google OAuth 2.0 |
-| Drift Detection | scipy (KS-test), custom PSI |
+| Drift Detection | scipy (KS-test), custom PSI, CUSUM |
 | Visualizations | Plotly |
 | Data Processing | pandas, numpy |
+| Containerization | Docker, docker-compose |
 | Deployment | Render |
 
 ---
@@ -243,32 +250,63 @@ The validation suite caught two real bugs, both fixed before the final numbers a
 ```
 drift-monitoring-api/
 │
-├── main.py                   # FastAPI application, all endpoints
-├── crud.py                   # Database read/write operations
-├── dashboard.py              # Streamlit frontend
-├── migrate.py                # SQLite schema migrations
+├── main.py                    # FastAPI application and all API endpoints
+├── dashboard.py               # Streamlit frontend and file ingestion logic
+├── models.py                  # Pydantic request/response models
+├── crud.py                    # Top-level database operations
+├── database.py                # SQLite connection and initialization
+├── migrate.py                 # Schema migrations
+├── fix_db.py                  # Database repair utilities
+├── check_db.py                # Baseline inspection and diagnostics
+├── add_column.py              # Migration helper for adding columns
+├── injector.py                # Test data injection utility
+├── monitor.py                 # Standalone monitoring script
+├── streamer.py                # Data streaming utility
+├── universal_streamer.py      # Multi-format streaming utility
+├── split_citi_bike.py         # Dataset splitting script for validation
+├── patched_init.py            # Initialization patches
 │
-├── drift/
-│   └── detector.py           # KS-test, PSI, IQR detection engines
+├── Dockerfile                 # Backend container definition
+├── Dockerfile.dashboard       # Dashboard container definition
+├── docker-compose.yml         # Multi-container orchestration
+├── supervisor.conf            # Process management configuration
+├── requirements.txt           # Python dependencies
+├── runtime.txt                # Python version pin for Render
+├── .env.example               # Environment variable template
+├── .gitignore
 │
 ├── utils/
-│   ├── profiler.py           # Automatic column classification
-│   └── file_reader.py        # Multi-format file ingestion
+│   ├── profiler.py            # Automatic column classification engine
+│   └── helpers.py             # Shared utility functions
 │
-├── tests/
-│   └── test_drift_engine.py  # Four-part validation suite
+├── drift/
+│   ├── detector.py            # KS-test, PSI, and IQR detection engines
+│   ├── alerts.py              # Alert triggering and notification logic
+│   ├── baseline.py            # Baseline computation utilities
+│   └── cusum.py               # CUSUM sequential drift detection
 │
-├── data/                     # Sample datasets for testing
-├── .env.example              # Environment variable template
-├── requirements.txt
-└── README.md
+├── adapters/
+│   ├── base.py                # Abstract adapter interface
+│   ├── image.py               # Image data adapter (future use)
+│   └── tabular.py             # Tabular data adapter
+│
+├── db/
+│   └── crud.py                # Database CRUD operations layer
+│
+├── data/                      # Sample datasets for testing and validation
+└── tests/
+    └── test_drift_engine.py   # Four-part validation suite
 ```
+
+> Files not committed to version control: `google_credentials.json`, `drift.db`, `.env`, `.streamlit/secrets.toml`
 
 ---
 
 ## Installation
 
-**Prerequisites:** Python 3.10+, a Google Cloud project with OAuth 2.0 credentials configured.
+**Prerequisites:** Python 3.10+, Docker (optional but recommended), a Google Cloud project with OAuth 2.0 credentials configured.
+
+### Option A: Local Setup (without Docker)
 
 ```bash
 # Clone the repository
@@ -312,7 +350,37 @@ uvicorn main:app --reload
 streamlit run dashboard.py
 ```
 
-The dashboard will be available at `http://localhost:8501` and the API at `http://localhost:8000`. The interactive API docs are at `http://localhost:8000/docs`.
+The dashboard will be available at `http://localhost:8501` and the API at `http://localhost:8000`. Interactive API docs are at `http://localhost:8000/docs`.
+
+### Option B: Docker Compose
+
+```bash
+# Copy and fill in environment variables
+cp .env.example .env
+
+# Build and start all services
+docker-compose up --build
+```
+
+This starts both the FastAPI backend and the Streamlit dashboard as separate containers managed by the compose file.
+
+---
+
+## Deployment
+
+Drift Monitoring API is containerized with Docker and deployed on **Render** using two separate container services — one for the FastAPI backend and one for the Streamlit dashboard — coordinated via `docker-compose.yml`.
+
+**Live deployment:** [https://drift-monitoring-dashboard.onrender.com/](https://drift-monitoring-dashboard.onrender.com/)
+
+To deploy your own instance on Render:
+
+1. Fork the repository
+2. Create a new Web Service on Render pointing to your fork
+3. Set the environment variables (`COOKIE_KEY`, `GOOGLE_CLIENT_ID`) in the Render dashboard
+4. Add `google_credentials.json` content as a secret file or environment variable
+5. Render will automatically build and deploy using the `Dockerfile`
+
+> Note: The free Render tier spins the service down after inactivity. The first request after a period of inactivity may take 30–60 seconds to respond.
 
 ---
 
@@ -388,7 +456,7 @@ print(response.json())
 |----------|--------|-------------|
 | `/register` | POST | Provision an API key for a new user |
 | `/fit/{project_id}` | POST | Lock a baseline from training data |
-| `/analyze/{project_id}` | POST | Compare a production batch against baseline |
+| `/analyze/{project_id}` | POST | Compare a production batch against the stored baseline |
 | `/profile` | POST | Profile a dataset's columns without locking a baseline |
 | `/docs` | GET | Interactive Swagger UI |
 
@@ -401,7 +469,7 @@ Full request/response schemas are available at `/docs` when the server is runnin
 The validation suite (`tests/test_drift_engine.py`) implements a four-part evaluation framework:
 
 **Part 1 — Ground Truth Verification**
-Establishes which features actually drifted using `scipy.stats.ks_2samp` (continuous) and PSI (categorical), completely independent of the API. This is the baseline against which everything else is evaluated.
+Establishes which features actually drifted using `scipy.stats.ks_2samp` (continuous) and PSI (categorical), completely independent of the API. This is the reference against which all detection results are evaluated.
 
 **Part 2 — Synthetic Drift Sensitivity**
 Injects controlled distributional shifts at three severity levels (mild: 0.5σ, moderate: 1.5σ, severe: 3.0σ) and measures detection rate across 10 independent trials per level. Answers the question: "at what magnitude does the engine start reliably catching shifts?"
@@ -430,7 +498,7 @@ python tests/test_drift_engine.py
 
 **Batch-based detection only.** The system compares distributions over a batch of incoming data. It does not currently support online/streaming drift detection where each individual data point updates a running estimate. Point anomalies are caught via IQR scoring, but distributional drift requires a batch.
 
-**Single-table baselines.** Each project has one baseline. If your model is retrained and the new model operates on a shifted feature distribution (intentionally), you need to re-fit the baseline manually. There is no automatic baseline versioning yet.
+**Single baseline per project.** Each project has one active baseline. If your model is retrained and the new model operates on a shifted feature distribution (intentionally), you need to re-fit the baseline manually. There is no automatic baseline versioning yet.
 
 **SQLite at scale.** SQLite is appropriate for moderate traffic and single-server deployments. High-concurrency production environments would benefit from migrating the storage layer to PostgreSQL.
 
