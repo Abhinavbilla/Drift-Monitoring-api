@@ -4,7 +4,7 @@
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Render-46E3B7?style=for-the-badge)](https://drift-monitoring-dashboard.onrender.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg?style=for-the-badge)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-blue.svg?style=for-the-badge)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.136.1-009688.svg?style=for-the-badge)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.42.0-FF4B4B.svg?style=for-the-badge)](https://streamlit.io/)
 [![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge)](https://www.docker.com/)
@@ -29,21 +29,22 @@ Drift Monitoring API addresses this by continuously comparing your live producti
 ## Table of Contents
 
 1. [Live Demo](#live-demo)
-2. [Scope and Supported Data](#scope-and-supported-data)
-3. [Key Features](#key-features)
-4. [How It Works](#how-it-works)
-5. [Validation Results](#validation-results)
-6. [Tech Stack](#tech-stack)
-7. [Project Structure](#project-structure)
-8. [Installation](#installation)
-9. [Deployment](#deployment)
-10. [Usage](#usage)
-11. [API Reference](#api-reference)
-12. [Testing and Validation Methodology](#testing-and-validation-methodology)
-13. [Known Limitations](#known-limitations)
-14. [Future Plans](#future-plans)
-15. [License](#license)
-16. [About](#about)
+2. [Quick Start for API Users](#quick-start-for-api-users)
+3. [Scope and Supported Data](#scope-and-supported-data)
+4. [Key Features](#key-features)
+5. [How It Works](#how-it-works)
+6. [Validation Results](#validation-results)
+7. [Tech Stack](#tech-stack)
+8. [Project Structure](#project-structure)
+9. [Installation](#installation)
+10. [Deployment](#deployment)
+11. [Usage](#usage)
+12. [API Reference](#api-reference)
+13. [Testing and Validation Methodology](#testing-and-validation-methodology)
+14. [Known Limitations](#known-limitations)
+15. [Future Plans](#future-plans)
+16. [License](#license)
+17. [About](#about)
 
 ---
 
@@ -54,6 +55,75 @@ The dashboard is deployed on Render and open to try:
 **[https://drift-monitoring-dashboard.onrender.com/](https://drift-monitoring-dashboard.onrender.com/)**
 
 > Note: The free Render tier spins down after inactivity. The first load may take 30–60 seconds to wake up.
+
+---
+
+## Quick Start for API Users
+
+You don't need to clone this repository or install anything to start using the API. The live deployment is open and ready.
+
+**Base URL:** `https://drift-monitoring-dashboard.onrender.com`
+
+### Step 1: Get an API Key
+
+Visit the [live dashboard](https://drift-monitoring-dashboard.onrender.com/), sign in with Google, and click **Generate API Key** in the Developer Portal tab. Your key will be displayed once and should be saved securely.
+
+### Step 2: Lock a Baseline
+
+Send your training data to the `/fit` endpoint. This locks the reference distribution that all future production batches will be compared against.
+
+```python
+import requests
+
+API_KEY = "your_api_key"
+MODEL_ID = "my_model_v1"
+BASE_URL = "https://drift-monitoring-dashboard.onrender.com"
+
+payload = {
+    "reference_data": {
+        "age": [25, 34, 45, 29, 52, 38, 41],
+        "transaction_amount": [120.5, 89.0, 340.2, 55.8, 210.0, 175.3, 98.6],
+        "merchant_category": ["retail", "food", "retail", "travel", "food", "retail", "food"]
+    }
+}
+
+response = requests.post(
+    f"{BASE_URL}/fit/{MODEL_ID}",
+    json=payload,
+    headers={"X-API-Key": API_KEY}
+)
+
+print(response.json())
+```
+
+### Step 3: Analyze a Production Batch
+
+Once a baseline is locked, send production batches to `/analyze`. The API returns a drift verdict per feature and a top-level system alert flag.
+
+```python
+payload = {
+    "production_data": {
+        "age": [55, 61, 70, 48, 63, 57, 72],
+        "transaction_amount": [890.0, 1200.5, 750.0, 980.3, 1100.0, 860.0, 920.0],
+        "merchant_category": ["luxury", "luxury", "travel", "luxury", "luxury", "travel", "luxury"]
+    }
+}
+
+response = requests.post(
+    f"{BASE_URL}/analyze/{MODEL_ID}",
+    json=payload,
+    headers={"X-API-Key": API_KEY}
+)
+
+print(response.json())
+# {"system_alert_triggered": true, "feature_metrics": {...}}
+```
+
+### Step 4: Explore the Full API
+
+Interactive docs with all endpoints, request schemas, and response examples are available at:
+
+**[https://drift-monitoring-dashboard.onrender.com/docs](https://drift-monitoring-dashboard.onrender.com/docs)**
 
 ---
 
@@ -119,7 +189,7 @@ The system is split into three layers that interact in a defined sequence:
 
 Takes a sample of your uploaded training data and computes a set of mathematical signals for each column: cardinality ratio, dominant value ratio, monotonicity, string length consistency, structured pattern detection, and dtype analysis after attempted coercion. These signals feed a routing decision that classifies each column as continuous, categorical, or ignored — with a reasoning string attached to every decision so it's auditable in the UI.
 
-### 2. Baseline Storage (`crud.py`, `db/crud.py`)
+### 2. Baseline Storage (`db/crud.py`)
 
 Once the user confirms the schema, the system computes and stores two kinds of baseline statistics in SQLite:
 
@@ -237,7 +307,7 @@ The validation suite caught two real bugs, both fixed before the final numbers a
 | Dashboard | Streamlit |
 | Database | SQLite |
 | Authentication | Google OAuth 2.0 |
-| Drift Detection | scipy (KS-test), custom PSI, CUSUM |
+| Drift Detection | scipy (KS-test), custom PSI, custom CUSUM (`drift/cusum.py`) |
 | Visualizations | Plotly |
 | Data Processing | pandas, numpy |
 | Containerization | Docker, docker-compose |
@@ -253,25 +323,16 @@ drift-monitoring-api/
 ├── main.py                    # FastAPI application and all API endpoints
 ├── dashboard.py               # Streamlit frontend and file ingestion logic
 ├── models.py                  # Pydantic request/response models
-├── crud.py                    # Top-level database operations
-├── database.py                # SQLite connection and initialization
-├── migrate.py                 # Schema migrations
-├── fix_db.py                  # Database repair utilities
-├── check_db.py                # Baseline inspection and diagnostics
-├── add_column.py              # Migration helper for adding columns
-├── injector.py                # Test data injection utility
-├── monitor.py                 # Standalone monitoring script
-├── streamer.py                # Data streaming utility
-├── universal_streamer.py      # Multi-format streaming utility
-├── split_citi_bike.py         # Dataset splitting script for validation
+├── migrate.py                 # SQLite schema migrations
 ├── patched_init.py            # Initialization patches
+├── README.md
 │
 ├── Dockerfile                 # Backend container definition
 ├── Dockerfile.dashboard       # Dashboard container definition
 ├── docker-compose.yml         # Multi-container orchestration
-├── supervisor.conf            # Process management configuration
+├── supervisord.conf           # Process management configuration
 ├── requirements.txt           # Python dependencies
-├── runtime.txt                # Python version pin for Render
+├── runtime.txt                # Python version pin for Render (python-3.12.4)
 ├── .env.example               # Environment variable template
 ├── .gitignore
 │
@@ -283,19 +344,18 @@ drift-monitoring-api/
 │   ├── detector.py            # KS-test, PSI, and IQR detection engines
 │   ├── alerts.py              # Alert triggering and notification logic
 │   ├── baseline.py            # Baseline computation utilities
-│   └── cusum.py               # CUSUM sequential drift detection
+│   └── cusum.py               # Custom CUSUM sequential drift detection
 │
 ├── adapters/
 │   ├── base.py                # Abstract adapter interface
-│   ├── image.py               # Image data adapter (future use)
 │   └── tabular.py             # Tabular data adapter
 │
 ├── db/
 │   └── crud.py                # Database CRUD operations layer
 │
 ├── data/                      # Sample datasets for testing and validation
-└── tests/
-    └── test_drift_engine.py   # Four-part validation suite
+├── tests/                     # Validation and test scripts
+└── .streamlit/                # Streamlit config (not committed, contains secrets.toml)
 ```
 
 > Files not committed to version control: `google_credentials.json`, `drift.db`, `.env`, `.streamlit/secrets.toml`
@@ -304,7 +364,7 @@ drift-monitoring-api/
 
 ## Installation
 
-**Prerequisites:** Python 3.10+, Docker (optional but recommended), a Google Cloud project with OAuth 2.0 credentials configured.
+**Prerequisites:** Python 3.12+, Docker (optional but recommended), a Google Cloud project with OAuth 2.0 credentials configured.
 
 ### Option A: Local Setup (without Docker)
 
@@ -328,7 +388,12 @@ Copy `.env.example` to `.env` and fill in your values:
 ```env
 COOKIE_KEY=your_random_secret_key
 GOOGLE_CLIENT_ID=your_google_oauth_client_id
+GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
+REDIRECT_URI=http://localhost:8501
+BACKEND_URL=http://localhost:8000
 ```
+
+> For local development, `REDIRECT_URI` must match the port where Streamlit is running.
 
 Place your `google_credentials.json` (downloaded from Google Cloud Console) in the project root. This file is listed in `.gitignore` and should never be committed.
 
@@ -368,17 +433,36 @@ This starts both the FastAPI backend and the Streamlit dashboard as separate con
 
 ## Deployment
 
-Drift Monitoring API is containerized with Docker and deployed on **Render** using two separate container services — one for the FastAPI backend and one for the Streamlit dashboard — coordinated via `docker-compose.yml`.
+Drift Monitoring API is containerized with Docker and deployed on **Render** using two separate container services — one for the FastAPI backend and one for the Streamlit dashboard.
 
 **Live deployment:** [https://drift-monitoring-dashboard.onrender.com/](https://drift-monitoring-dashboard.onrender.com/)
 
 To deploy your own instance on Render:
 
 1. Fork the repository
-2. Create a new Web Service on Render pointing to your fork
-3. Set the environment variables (`COOKIE_KEY`, `GOOGLE_CLIENT_ID`) in the Render dashboard
-4. Add `google_credentials.json` content as a secret file or environment variable
-5. Render will automatically build and deploy using the `Dockerfile`
+2. Create two Web Services on Render pointing to your fork — one using `Dockerfile` (backend) and one using `Dockerfile.dashboard` (dashboard)
+3. Set environment variables per service as follows:
+
+**Backend service:**
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `COOKIE_KEY` | Random secret key for session cookies |
+
+**Dashboard service:**
+
+| Variable | Description |
+|----------|-------------|
+| `BACKEND_URL` | Full URL of the deployed backend service |
+| `REDIRECT_URI` | Full URL of the deployed dashboard service |
+| `COOKIE_KEY` | Same secret key used in the backend |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+
+4. Add `google_credentials.json` as a **Secret File** (not an environment variable) for the Dashboard service. In the Render dashboard, go to your Dashboard service → Secret Files → add the file at path `google_credentials.json`
+5. Render will automatically build and deploy each service using the respective Dockerfile
 
 > Note: The free Render tier spins the service down after inactivity. The first request after a period of inactivity may take 30–60 seconds to respond.
 
@@ -458,6 +542,10 @@ print(response.json())
 | `/fit/{project_id}` | POST | Lock a baseline from training data |
 | `/analyze/{project_id}` | POST | Compare a production batch against the stored baseline |
 | `/profile` | POST | Profile a dataset's columns without locking a baseline |
+| `/projects` | GET | List all projects for the authenticated user |
+| `/baseline/{project_id}` | GET | Fetch IQR fences and feature types for a project |
+| `/logs/{project_id}` | GET | Retrieve recent logs for a project |
+| `/models/{model_id}` | DELETE | Permanently delete a model and associated data |
 | `/docs` | GET | Interactive Swagger UI |
 
 Full request/response schemas are available at `/docs` when the server is running.
@@ -468,16 +556,16 @@ Full request/response schemas are available at `/docs` when the server is runnin
 
 The validation suite (`tests/test_drift_engine.py`) implements a four-part evaluation framework:
 
-**Part 1 — Ground Truth Verification**
+**Part 1 — Ground Truth Verification:**
 Establishes which features actually drifted using `scipy.stats.ks_2samp` (continuous) and PSI (categorical), completely independent of the API. This is the reference against which all detection results are evaluated.
 
-**Part 2 — Synthetic Drift Sensitivity**
+**Part 2 — Synthetic Drift Sensitivity:**
 Injects controlled distributional shifts at three severity levels (mild: 0.5σ, moderate: 1.5σ, severe: 3.0σ) and measures detection rate across 10 independent trials per level. Answers the question: "at what magnitude does the engine start reliably catching shifts?"
 
-**Part 3 — Confusion Matrix Evaluation**
+**Part 3 — Confusion Matrix Evaluation:**
 Builds a full confusion matrix from three types of test cases: real baseline batches (should not trigger), real production batches (labeled using Part 1 ground truth), and synthetically drifted batches (known positive). Reports Precision, Recall, and F1 via scikit-learn rather than an invented weighted formula.
 
-**Part 4 — Detection Latency**
+**Part 4 — Detection Latency:**
 Gradually increases the proportion of drifted samples in a fixed-size batch until an alert fires. Reports the minimum percentage of drifted data required to trigger detection for each feature.
 
 To run the validation suite:
@@ -494,13 +582,13 @@ python tests/test_drift_engine.py
 
 ## Known Limitations
 
-**Categorical drift sensitivity depends on PSI threshold.** The current threshold (PSI > 0.2) is the industry-standard cutoff for "significant population shift." Features with genuine but small proportional shifts (like `gender_id` in the Citi Bike validation, PSI=0.043) will correctly not trigger alerts, even if chi-square would flag them as statistically significant at large sample sizes. Whether this is a limitation or correct behavior depends on your use case.
+**Categorical drift sensitivity depends on PSI threshold:** The current threshold (PSI > 0.2) is the industry-standard cutoff for "significant population shift." Features with genuine but small proportional shifts (like `gender_id` in the Citi Bike validation, PSI=0.043) will correctly not trigger alerts, even if chi-square would flag them as statistically significant at large sample sizes. Whether this is a limitation or correct behavior depends on your use case.
 
-**Batch-based detection only.** The system compares distributions over a batch of incoming data. It does not currently support online/streaming drift detection where each individual data point updates a running estimate. Point anomalies are caught via IQR scoring, but distributional drift requires a batch.
+**Batch-based detection only:** The system compares distributions over a batch of incoming data. It does not currently support online/streaming drift detection where each individual data point updates a running estimate. Point anomalies are caught via IQR scoring, but distributional drift requires a batch.
 
-**Single baseline per project.** Each project has one active baseline. If your model is retrained and the new model operates on a shifted feature distribution (intentionally), you need to re-fit the baseline manually. There is no automatic baseline versioning yet.
+**Single baseline per project:** Each project has one active baseline. If your model is retrained and the new model operates on a shifted feature distribution (intentionally), you need to re-fit the baseline manually. There is no automatic baseline versioning yet.
 
-**SQLite at scale.** SQLite is appropriate for moderate traffic and single-server deployments. High-concurrency production environments would benefit from migrating the storage layer to PostgreSQL.
+**SQLite at scale:** SQLite is appropriate for moderate traffic and single-server deployments. High-concurrency production environments would benefit from migrating the storage layer to PostgreSQL.
 
 ---
 
@@ -512,6 +600,7 @@ python tests/test_drift_engine.py
 - Time-windowed drift detection (rolling window rather than fixed baseline)
 - PostgreSQL support for production-scale deployments
 - REST API client SDK (Python package)
+- Extend drift detection support to unstructured data (text, images, audio, video) using embedding-based drift metrics and perceptual hashing
 
 ---
 
@@ -525,8 +614,8 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 Built by **Abhinav Billa**, B.Tech Mathematics and Computing, Indian Institute of Science (IISc), Bangalore.
 
-This project started from a paper on out-of-distribution detection and statistical process control, and evolved into a general-purpose drift monitoring platform over several months of iterative development and debugging.
+This project started from a paper on out-of-distribution detection and statistical process control, and evolved into a general-purpose drift monitoring platform over several days of iterative development and debugging.
 
-The validation methodology — particularly the decision to use PSI rather than chi-square for categorical ground truth, and the per-case confusion matrix breakdown that isolated a silent key-type bug — came from treating the validation suite as a first-class engineering artifact rather than an afterthought.
+The validation methodology, particularly the decision to use PSI rather than chi-square for categorical ground truth, and the per-case confusion matrix breakdown that isolated a silent key-type bug, came from treating the validation suite as a first-class engineering artifact rather than an afterthought.
 
 **GitHub:** [Abhinavbilla](https://github.com/Abhinavbilla)
