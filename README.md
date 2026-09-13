@@ -60,68 +60,13 @@ The dashboard is deployed on Render and open to try:
 
 ## Quick Start for API Users
 
-You don't need to clone this repository or install anything to start using the API. The live deployment is open and ready.
+The primary way to use this project is through the [live dashboard](https://drift-monitoring-dashboard.onrender.com/) — sign in with Google and you're authenticated for every action the UI exposes (locking baselines, analyzing batches, deleting models). There's no API key to generate or manage: the dashboard mints a short-lived session token from your Google login automatically, behind the scenes.
 
-**Base URL:** `https://drift-monitoring-dashboard.onrender.com`
+> **Programmatic access (outside the dashboard) currently has no self-serve credential flow.** Since auth is derived directly from Google login rather than a static key, there's no `/register`-style endpoint to hand you a long-lived credential to embed in your own script. See [Known Limitations](#known-limitations).
 
-### Step 1: Get an API Key
+### Locking a Baseline and Analyzing Batches
 
-Visit the [live dashboard](https://drift-monitoring-dashboard.onrender.com/), sign in with Google, and click **Generate API Key** in the Developer Portal tab. Your key will be displayed once and should be saved securely.
-
-### Step 2: Lock a Baseline
-
-Send your training data to the `/fit` endpoint. This locks the reference distribution that all future production batches will be compared against.
-
-```python
-import requests
-
-API_KEY = "your_api_key"
-MODEL_ID = "my_model_v1"
-BASE_URL = "https://drift-monitoring-dashboard.onrender.com"
-
-payload = {
-    "reference_data": {
-        "age": [25, 34, 45, 29, 52, 38, 41],
-        "transaction_amount": [120.5, 89.0, 340.2, 55.8, 210.0, 175.3, 98.6],
-        "merchant_category": ["retail", "food", "retail", "travel", "food", "retail", "food"]
-    }
-}
-
-response = requests.post(
-    f"{BASE_URL}/fit/{MODEL_ID}",
-    json=payload,
-    headers={"X-API-Key": API_KEY}
-)
-
-print(response.json())
-```
-
-### Step 3: Analyze a Production Batch
-
-Once a baseline is locked, send production batches to `/analyze`. The API returns a drift verdict per feature and a top-level system alert flag.
-
-```python
-payload = {
-    "production_data": {
-        "age": [55, 61, 70, 48, 63, 57, 72],
-        "transaction_amount": [890.0, 1200.5, 750.0, 980.3, 1100.0, 860.0, 920.0],
-        "merchant_category": ["luxury", "luxury", "travel", "luxury", "luxury", "travel", "luxury"]
-    }
-}
-
-response = requests.post(
-    f"{BASE_URL}/analyze/{MODEL_ID}",
-    json=payload,
-    headers={"X-API-Key": API_KEY}
-)
-
-print(response.json())
-# {"system_alert_triggered": true, "feature_metrics": {...}}
-```
-
-### Step 4: Explore the Full API
-
-Interactive docs with all endpoints, request schemas, and response examples are available at:
+Both happen through the dashboard's UI: upload training data to lock a baseline (`/fit` under the hood), then upload a production batch to check for drift (`/analyze` under the hood). The endpoints themselves are documented at `/docs` if you want to see their request/response shapes.
 
 **[https://drift-monitoring-dashboard.onrender.com/docs](https://drift-monitoring-dashboard.onrender.com/docs)**
 
@@ -173,7 +118,7 @@ The file reader (implemented in `dashboard.py`) handles encoding detection autom
 
 **Secure Multi-tenant Architecture**
 
-Each user authenticates via Google OAuth, gets a provisioned API key, and can only access monitoring data for their own projects. The developer portal exposes key generation directly from the dashboard UI.
+Each user authenticates via Google OAuth and can only access monitoring data for their own projects. Backend requests are authorized with a short-lived session token minted from that login (signed with a secret shared between the dashboard and backend) — there's no separate API key to provision or manage.
 
 **Containerized Deployment**
 
@@ -473,20 +418,19 @@ To deploy your own instance on Render:
 ### First-Time Setup
 
 1. Open the dashboard and sign in with Google OAuth
-2. Click **Generate API Key** in the Developer Portal tab to provision your credentials
-3. Upload your training data (CSV, Excel, JSON, Parquet, or ARFF)
-4. Review the auto-generated schema — the profiler will classify each column and explain its reasoning
-5. Adjust any misclassified columns using the dropdowns, then click **Start Monitoring**
+2. Upload your training data (CSV, Excel, JSON, Parquet, or ARFF)
+3. Review the auto-generated schema — the profiler will classify each column and explain its reasoning
+4. Adjust any misclassified columns using the dropdowns, then click **Start Monitoring**
 
 ### Sending Production Data
 
-Once a baseline is locked, send production batches to the `/analyze` endpoint:
+Production batches are sent to the `/analyze` endpoint through the dashboard's upload flow. Direct programmatic calls to `/analyze` require a valid session token in the `Authorization` header (see [Known Limitations](#known-limitations) — there's currently no self-serve way to obtain one outside the dashboard's own login flow):
 
 ```python
 import requests
 
-API_KEY = "your_api_key"
 MODEL_ID = "your_model_id"
+SESSION_TOKEN = "..."  # minted from a Google login, see dashboard.py's mint_session_token
 
 payload = {
     "production_data": {
@@ -499,7 +443,7 @@ payload = {
 response = requests.post(
     f"http://localhost:8000/analyze/{MODEL_ID}",
     json=payload,
-    headers={"X-API-Key": API_KEY}
+    headers={"Authorization": f"Bearer {SESSION_TOKEN}"}
 )
 
 print(response.json())
@@ -538,7 +482,6 @@ print(response.json())
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/register` | POST | Provision an API key for a new user |
 | `/fit/{project_id}` | POST | Lock a baseline from training data |
 | `/analyze/{project_id}` | POST | Compare a production batch against the stored baseline |
 | `/profile` | POST | Profile a dataset's columns without locking a baseline |
@@ -589,6 +532,8 @@ python tests/test_drift_engine.py
 **Single baseline per project:** Each project has one active baseline. If your model is retrained and the new model operates on a shifted feature distribution (intentionally), you need to re-fit the baseline manually. There is no automatic baseline versioning yet.
 
 **SQLite at scale:** SQLite is appropriate for moderate traffic and single-server deployments. High-concurrency production environments would benefit from migrating the storage layer to PostgreSQL.
+
+**No self-serve credential flow for programmatic API access:** Backend authentication is derived directly from Google login (the dashboard mints a short-lived session token after you sign in) rather than a static, separately-provisioned API key. This removes a class of "forgotten API key sitting in a script" risk, but it also means there's currently no way to obtain a valid credential for calling `/fit` or `/analyze` from your own external script without going through the dashboard's own login flow. A proper service-account/personal-access-token feature would be needed to support that use case again.
 
 ---
 

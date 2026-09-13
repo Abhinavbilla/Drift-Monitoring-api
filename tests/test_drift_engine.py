@@ -32,6 +32,7 @@ Run:
 """
 
 import time
+import jwt
 import requests
 import numpy as np
 import pandas as pd
@@ -42,16 +43,36 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env
 load_dotenv()
-API_KEY = os.getenv("API_KEY")
-if not API_KEY:
-    raise ValueError("❌ API_KEY not found in environment. Please set it in .env file.")
+COOKIE_KEY = os.getenv("COOKIE_KEY")
+if not COOKIE_KEY:
+    raise ValueError("❌ COOKIE_KEY not found in environment. Please set it in .env file.")
+VALIDATION_OWNER_EMAIL = os.getenv("VALIDATION_OWNER_EMAIL", "validation-suite@drift-sentinel.local")
+
+
+def _mint_session_token(email: str) -> str:
+    """
+    Backend auth is now derived from Google login (see dashboard.py's
+    mint_session_token) rather than a static API key. This script has no
+    browser/OAuth flow of its own, but since it already has direct access
+    to COOKIE_KEY (the same secret shared with the backend), it can
+    legitimately mint its own validation-suite session token the same way.
+    """
+    payload = {
+        "email": email,
+        "name": "Validation Suite",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 3600,
+    }
+    return jwt.encode(payload, COOKIE_KEY, algorithm="HS256")
+
+
 PRODUCTION_BATCH_SIZE = 25000
 # ============================================
 # CONFIGURATION
 # ============================================
 API_BASE = "http://api:8000"
 MODEL_ID = "citi_bike_v1"
-HEADERS = {"X-API-Key": API_KEY}
+HEADERS = {"Authorization": f"Bearer {_mint_session_token(VALIDATION_OWNER_EMAIL)}"}
 
 CONTINUOUS_FEATURES = [
     "pickup_longitude",

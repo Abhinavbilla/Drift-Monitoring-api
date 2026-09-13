@@ -1,9 +1,9 @@
 import sqlite3
+import jwt
 import pandas as pd
-import secrets
 from typing import Dict, List, Any
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status
-from fastapi.security import APIKeyHeader
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from drift.alerts import send_drift_email
@@ -25,11 +25,8 @@ from adapters.text import TextAdapter
 from adapters.image import ImageAdapter
 from utils.profiler import profile_columns
 from drift.alerts import check_drift_alert
-from google.oauth2 import id_token
-from google.auth.transport import requests as google_requests
 import os
 from dotenv import load_dotenv
-from fastapi import Request
 
 # Load environment variables from .env file
 load_dotenv()
@@ -38,47 +35,38 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 if not GOOGLE_CLIENT_ID:
     raise ValueError("Missing GOOGLE_CLIENT_ID in environment variables")
 
+COOKIE_KEY = os.getenv("COOKIE_KEY")
+if not COOKIE_KEY:
+    raise ValueError("Missing COOKIE_KEY in environment variables")
 
-def verify_google_token(token: str) -> dict:
-    """Verify the Google ID token and return the user info."""
+# ---------------------------------------------------------
+# SECURITY: SESSION TOKENS DERIVED FROM GOOGLE LOGIN
+# ---------------------------------------------------------
+# The dashboard authenticates users via Google OAuth, then mints a
+# short-lived session token locally (signed with this same COOKIE_KEY,
+# shared between both services) rather than provisioning a separate
+# long-lived API key. No Google API calls happen per-request here — we
+# only verify the signature/expiry of a token our own frontend minted.
+bearer_scheme = HTTPBearer(auto_error=True)
+
+def verify_access(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)) -> dict:
+    """Validates the session token minted by the dashboard after Google login."""
     try:
-        info = id_token.verify_oauth2_token(
-            token,
-            google_requests.Request(),
-            audience=GOOGLE_CLIENT_ID
-        )
-        if info.get('iss') not in ['accounts.google.com', 'https://accounts.google.com']:
-            raise ValueError('Wrong issuer.')
-        return info
-    except Exception as e:
-        raise HTTPException(
-            status_code=401,
-            detail=f"Invalid Google token: {str(e)}"
-        )
-
-# ---------------------------------------------------------
-# SECURITY VAULT CONFIGURATION
-# ---------------------------------------------------------
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
-
-def verify_access(api_key: str = Security(api_key_header)):
-    """Validates the incoming API Key against the SQLite database."""
-    conn = sqlite3.connect("drift.db")
-    cursor = conn.cursor()
-    
-    # UPDATED: Select owner_email as well!
-    cursor.execute("SELECT owner_name, owner_email, is_active FROM api_keys WHERE key = ?", (api_key,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if not row or not row[2]: # row[2] is now is_active
+        payload = jwt.decode(credentials.credentials, COOKIE_KEY, algorithms=["HS256"])
+    except jwt.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Access Denied: Invalid, missing, or revoked Security Key."
+            detail="Access Denied: Invalid or expired session token."
         )
-        
-    # Return a dictionary with both the name and email
-    return {"name": row[0], "email": row[1]}
+
+    email = payload.get("email")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Access Denied: Malformed session token."
+        )
+
+    return {"name": payload.get("name", "User"), "email": email}
 
 
 # ---------------------------------------------------------
@@ -88,22 +76,6 @@ def verify_access(api_key: str = Security(api_key_header)):
 async def lifespan(app: FastAPI):
     # Initialize main tables via your crud module
     crud.init_db()
-    
-    # Dynamically ensure the security table exists without needing to edit crud.py
-    conn = sqlite3.connect("drift.db")
-    cursor = conn.cursor()
-    # Updated CREATE TABLE command to include owner_email
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS api_keys (
-            key TEXT PRIMARY KEY, 
-            owner_name TEXT, 
-            owner_email TEXT, 
-            is_active BOOLEAN DEFAULT 1
-        )
-    ''')
-    conn.commit()
-    conn.close()
-    
     yield
 
 app = FastAPI(
@@ -151,25 +123,6 @@ def get_logs(project_id: str, client: dict = Depends(verify_access)):
             "is_ood": row[2]
         })
     return logs
-# ---------------------------------------------------------
-# ENDPOINT 0: GENERATE SECURE KEYS (ADMIN)
-# ---------------------------------------------------------
-@app.post("/admin/generate_key", tags=["Security"])
-def generate_key(owner_name: str):
-    """Generates a highly secure, unique API key for a new user or team."""
-    new_key = f"sk-drift-{secrets.token_hex(16)}"
-    
-    conn = sqlite3.connect("drift.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO api_keys (key, owner_name) VALUES (?, ?)", (new_key, owner_name))
-    conn.commit()
-    conn.close()
-    
-    return {
-        "owner": owner_name, 
-        "api_key": new_key, 
-        "message": "Save this key securely! It will not be shown again."
-    }
 # 1. Define the Expected Request Data
 class ProfileRequest(BaseModel):
     reference_data: Dict[str, List[Any]]
@@ -483,36 +436,6 @@ def list_projects(client: dict = Depends(verify_access)):
     
     projects = [row[0] for row in rows]
     return {"projects": projects}
-
-
-class RegisterRequest(BaseModel):
-    owner_name: str
-    owner_email: str
-
-@app.post("/register", tags=["Security"])
-def register_user(request: Request, payload: RegisterRequest):
-
-    owner_email = payload.owner_email
-    owner_name = payload.owner_name
-
-    conn = sqlite3.connect("drift.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT key FROM api_keys WHERE owner_email = ?", (owner_email,))
-    existing = cursor.fetchone()
-
-    if existing:
-        api_key = existing[0]
-    else:
-        new_key = f"sk-drift-{secrets.token_hex(16)}"
-        cursor.execute(
-            "INSERT INTO api_keys (key, owner_name, owner_email) VALUES (?, ?, ?)",
-            (new_key, owner_name, owner_email)
-        )
-        api_key = new_key
-
-    conn.commit()
-    conn.close()
-    return {"message": "Registration successful", "api_key": api_key}
 
 
 # ---------------------------------------------------------
