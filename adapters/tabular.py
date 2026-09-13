@@ -1,6 +1,9 @@
 from typing import Dict, Any
 
-class TabularAdapter:
+from adapters.base import BaseAdapter
+
+
+class TabularAdapter(BaseAdapter):
     def __init__(self, feature_configs: Dict[str, Dict[str, str]] = None):
         """
         Holds configurations for incoming production data.
@@ -28,5 +31,12 @@ class TabularAdapter:
             # Otherwise, it's a number, so strictly cast it to float
             else:
                 cleaned_data[feature] = float(value)
-                
+
         return cleaned_data
+
+    def transform(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        ABC compliance passthrough: DistributionDetector already consumes
+        dict-of-lists directly, so no transformation is needed here.
+        """
+        return raw_data

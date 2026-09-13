@@ -29,7 +29,10 @@ def init_db():
             feature_types TEXT,
             reference_data TEXT,
             iqr_fences TEXT,
-            categorical_baselines TEXT
+            categorical_baselines TEXT,
+            modality TEXT DEFAULT 'tabular',
+            embedding_reference TEXT,
+            embedding_model TEXT
         )
     ''')
 
@@ -41,6 +44,18 @@ def init_db():
             is_ood INTEGER
         )
     ''')
+
+    # Self-healing migration for DBs created before the multimodal (v2.0)
+    # columns existed — avoids requiring a separate manual migration step.
+    for _column, ddl in [
+        ("modality", "ALTER TABLE baselines ADD COLUMN modality TEXT DEFAULT 'tabular'"),
+        ("embedding_reference", "ALTER TABLE baselines ADD COLUMN embedding_reference TEXT"),
+        ("embedding_model", "ALTER TABLE baselines ADD COLUMN embedding_model TEXT"),
+    ]:
+        try:
+            cursor.execute(ddl)
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     conn.commit()
     conn.close()
@@ -142,19 +157,60 @@ def get_baseline(project_id: str) -> dict:
     """Retrieves the model state and parses the JSON back into Python dictionaries."""
     conn = get_connection()
     cursor = conn.cursor()
-    
-    cursor.execute('SELECT feature_types, reference_data, iqr_fences FROM baselines WHERE project_id = ?', (project_id,))
+
+    cursor.execute(
+        'SELECT feature_types, reference_data, iqr_fences, modality, embedding_reference, embedding_model '
+        'FROM baselines WHERE project_id = ?',
+        (project_id,)
+    )
     row = cursor.fetchone()
     conn.close()
-    
+
     if not row:
         return None
-        
+
     return {
-        "feature_types": json.loads(row[0]),
-        "reference_data": json.loads(row[1]),
-        "iqr_fences": json.loads(row[2])
+        "feature_types": json.loads(row[0]) if row[0] else {},
+        "reference_data": json.loads(row[1]) if row[1] else {},
+        "iqr_fences": json.loads(row[2]) if row[2] else [],
+        "modality": row[3] or "tabular",
+        "embedding_reference": json.loads(row[4]) if row[4] else None,
+        "embedding_model": row[5],
     }
+
+
+def insert_embedding_baseline(project_id: str, modality: str, embeddings, model_name: str, max_reference_samples: int = 3000):
+    """
+    Stores a text/image baseline as raw reference embeddings, capped at
+    max_reference_samples, so the Domain Classifier Test has real vectors
+    to retrain against on every /analyze call (mirrors how DistributionDetector
+    re-fits from raw arrays for tabular baselines).
+    """
+    embeddings_list = np.asarray(embeddings)
+    if len(embeddings_list) > max_reference_samples:
+        rng = np.random.default_rng(42)
+        idx = rng.choice(len(embeddings_list), size=max_reference_samples, replace=False)
+        embeddings_list = embeddings_list[idx]
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO baselines
+            (project_id, feature_types, reference_data, iqr_fences, categorical_baselines,
+             modality, embedding_reference, embedding_model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        project_id,
+        json.dumps({}),
+        json.dumps({}),
+        json.dumps([]),
+        json.dumps({}),
+        modality,
+        json.dumps(embeddings_list.tolist()),
+        model_name,
+    ))
+    conn.commit()
+    conn.close()
 
 def insert_log(project_id: str, input_data: dict, score: float, is_ood: int):
     conn = get_connection()

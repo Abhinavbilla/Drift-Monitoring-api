@@ -62,3 +62,34 @@ class HealthCheckResponse(BaseModel):
     system_status: str = Field(description="Overall health status of the monitored project ('Healthy' or 'Degraded').")
     is_burst_alert: bool = Field(description="True if the recent anomaly rate exceeds the safety threshold.")
     drift_ratio: float = Field(description="The exact percentage of recent requests flagged as anomalous (0.0 to 1.0).")
+
+
+
+
+# ---------------------------------------------------------
+# TEXT / IMAGE (EMBEDDING-BASED) DRIFT MONITORING — v2.0
+# ---------------------------------------------------------
+
+class FitTextBaselineRequest(BaseModel):
+    reference_texts: List[str] = Field(
+        ..., description="Baseline batch of raw strings to lock as the reference distribution."
+    )
+
+class AnalyzeTextBatchRequest(BaseModel):
+    production_texts: List[str] = Field(
+        ..., description="Recent batch of raw strings to compare against the text baseline."
+    )
+
+class FitImageBaselineRequest(BaseModel):
+    reference_images: List[str] = Field(
+        ..., description="Baseline batch of base64-encoded images to lock as the reference distribution."
+    )
+
+class AnalyzeImageBatchRequest(BaseModel):
+    production_images: List[str] = Field(
+        ..., description="Recent batch of base64-encoded images to compare against the image baseline."
+    )
+
+class EmbeddingFitResponse(BaseModel):
+    status: str
+    message: str

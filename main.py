@@ -9,16 +9,22 @@ from pydantic import BaseModel
 from drift.alerts import send_drift_email
 # Importing custom modules
 from models import (
-    FitBaselineRequest, FitBaselineResponse, 
-    PredictRequest, PredictResponse, 
+    FitBaselineRequest, FitBaselineResponse,
+    PredictRequest, PredictResponse,
     AnalyzeBatchRequest, AnalyzeBatchResponse,
-    HealthCheckResponse  
+    HealthCheckResponse,
+    FitTextBaselineRequest, AnalyzeTextBatchRequest,
+    FitImageBaselineRequest, AnalyzeImageBatchRequest,
+    EmbeddingFitResponse,
 )
 from db import crud
 from drift.detector import compute_iqr_anomalies, DistributionDetector
+from drift.embedding_detector import EmbeddingDriftDetector
 from adapters.tabular import TabularAdapter
+from adapters.text import TextAdapter
+from adapters.image import ImageAdapter
 from utils.profiler import profile_columns
-from drift.alerts import check_drift_alert  
+from drift.alerts import check_drift_alert
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 import os
@@ -109,19 +115,20 @@ app = FastAPI(
 
 @app.get("/baseline/{project_id}", tags=["Management"])
 def get_baseline(project_id: str, client: dict = Depends(verify_access)):
-    """Returns the IQR fences and feature types for a project."""
+    """Returns the IQR fences, feature types, and modality for a project."""
     import sqlite3
     import json
     conn = sqlite3.connect("drift.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT iqr_fences, feature_types FROM baselines WHERE project_id = ?", (project_id,))
+    cursor.execute("SELECT iqr_fences, feature_types, modality FROM baselines WHERE project_id = ?", (project_id,))
     row = cursor.fetchone()
     conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="Baseline not found")
-    fences = json.loads(row[0])   # list of dicts with 'feature_name', 'q1', 'q3'
-    feature_types = json.loads(row[1])  # dict of {feature_name: "continuous"|"categorical"}
-    return {"fences": fences, "feature_types": feature_types}
+    fences = json.loads(row[0]) if row[0] else []   # list of dicts with 'feature_name', 'q1', 'q3'
+    feature_types = json.loads(row[1]) if row[1] else {}  # dict of {feature_name: "continuous"|"categorical"}
+    modality = row[2] or "tabular"
+    return {"fences": fences, "feature_types": feature_types, "modality": modality}
 
 @app.get("/logs/{project_id}", tags=["Management"])
 def get_logs(project_id: str, client: dict = Depends(verify_access)):
@@ -327,6 +334,111 @@ def analyze_production_batch(
     return AnalyzeBatchResponse(
         system_alert_triggered=report["system_alert_triggered"],
         feature_metrics=report["feature_metrics"]
+    )
+
+# ---------------------------------------------------------
+# ENDPOINTS: TEXT DRIFT MONITORING (v2.0 — Domain Classifier Test)
+# ---------------------------------------------------------
+@app.post("/fit/{project_id}/text", response_model=EmbeddingFitResponse, tags=["Machine Learning"])
+def fit_text_baseline(project_id: str, request: FitTextBaselineRequest, client: dict = Depends(verify_access)):
+    """Embeds a baseline batch of text and locks it as the reference distribution."""
+    embeddings = TextAdapter().transform(request.reference_texts)
+
+    crud.insert_embedding_baseline(
+        project_id=project_id,
+        modality="text",
+        embeddings=embeddings,
+        model_name=TextAdapter.model_name,
+    )
+    crud.create_project(project_id, f"Project {project_id}", client["email"])
+
+    return EmbeddingFitResponse(
+        status="success",
+        message=f"Text baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
+    )
+
+
+@app.post("/analyze/{project_id}/text", response_model=AnalyzeBatchResponse, tags=["Analytics"])
+def analyze_text_batch(
+    project_id: str,
+    request: AnalyzeTextBatchRequest,
+    background_tasks: BackgroundTasks,
+    client: dict = Depends(verify_access)
+):
+    """Compares a production text batch against the locked text baseline via the Domain Classifier Test."""
+    state = crud.get_baseline(project_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Baseline not found. Call /fit/{project_id}/text first.")
+    if state["modality"] != "text":
+        raise HTTPException(status_code=400, detail=f"Project '{project_id}' has a '{state['modality']}' baseline, not 'text'.")
+
+    cur_embeddings = TextAdapter().transform(request.production_texts)
+    result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+
+    if result["drift_detected"]:
+        background_tasks.add_task(
+            send_drift_email,
+            project_id=project_id,
+            owner_email=client["email"],
+            flagged_features=["embedding_drift"]
+        )
+
+    return AnalyzeBatchResponse(
+        system_alert_triggered=result["drift_detected"],
+        feature_metrics={"embedding_drift": result}
+    )
+
+
+# ---------------------------------------------------------
+# ENDPOINTS: IMAGE DRIFT MONITORING (v2.0 — Domain Classifier Test)
+# ---------------------------------------------------------
+@app.post("/fit/{project_id}/image", response_model=EmbeddingFitResponse, tags=["Machine Learning"])
+def fit_image_baseline(project_id: str, request: FitImageBaselineRequest, client: dict = Depends(verify_access)):
+    """Embeds a baseline batch of images and locks it as the reference distribution."""
+    embeddings = ImageAdapter().transform(request.reference_images)
+
+    crud.insert_embedding_baseline(
+        project_id=project_id,
+        modality="image",
+        embeddings=embeddings,
+        model_name=ImageAdapter.model_name,
+    )
+    crud.create_project(project_id, f"Project {project_id}", client["email"])
+
+    return EmbeddingFitResponse(
+        status="success",
+        message=f"Image baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
+    )
+
+
+@app.post("/analyze/{project_id}/image", response_model=AnalyzeBatchResponse, tags=["Analytics"])
+def analyze_image_batch(
+    project_id: str,
+    request: AnalyzeImageBatchRequest,
+    background_tasks: BackgroundTasks,
+    client: dict = Depends(verify_access)
+):
+    """Compares a production image batch against the locked image baseline via the Domain Classifier Test."""
+    state = crud.get_baseline(project_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Baseline not found. Call /fit/{project_id}/image first.")
+    if state["modality"] != "image":
+        raise HTTPException(status_code=400, detail=f"Project '{project_id}' has a '{state['modality']}' baseline, not 'image'.")
+
+    cur_embeddings = ImageAdapter().transform(request.production_images)
+    result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+
+    if result["drift_detected"]:
+        background_tasks.add_task(
+            send_drift_email,
+            project_id=project_id,
+            owner_email=client["email"],
+            flagged_features=["embedding_drift"]
+        )
+
+    return AnalyzeBatchResponse(
+        system_alert_triggered=result["drift_detected"],
+        feature_metrics={"embedding_drift": result}
     )
 
 # ---------------------------------------------------------

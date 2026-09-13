@@ -12,7 +12,10 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements and install Python packages
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# torch/torchvision pulled from the CPU-only wheel index to avoid bundling
+# CUDA libraries we'll never use in this container — keeps the image smaller.
+RUN pip install --no-cache-dir torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .

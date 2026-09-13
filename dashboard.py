@@ -16,6 +16,7 @@ import gzip
 import zipfile
 import importlib.util
 import time
+import base64
 DEFAULT_BASELINE_SAMPLE_SIZE = 50000
 DEFAULT_PRODUCTION_BATCH_SIZE = 25000
 # ---------------------------------------------------------
@@ -66,6 +67,39 @@ st.markdown("""
 # Load the .env file
 load_dotenv()
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+
+
+def get_or_fetch_api_key(user_info: dict, force_refresh: bool = False):
+    """
+    Returns the current user's API key, cached in st.session_state so
+    /register is hit once per browser session instead of on every script
+    rerun. Streamlit reruns the whole script on every widget interaction,
+    and a dropped/reconnected WebSocket (e.g. Render's proxy idling out a
+    connection) triggers a rerun too — previously this fired ~6-7 redundant
+    /register calls per rerun, which under sustained reconnect churn was
+    enough to trip a 429 on the deployed backend.
+    """
+    if not force_refresh and st.session_state.get("user_api_key"):
+        return st.session_state.user_api_key
+
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/register",
+            json={
+                "owner_name": user_info.get("name", "User"),
+                "owner_email": user_info.get("email", "").lower(),
+            },
+            timeout=10
+        )
+        if resp.status_code == 200:
+            key = resp.json().get("api_key")
+            st.session_state.user_api_key = key
+            return key
+    except Exception:
+        pass
+    return None
+
+
 # ---------------------------------------------------------
 # HELPER: Read either a .csv or .dat uploaded file
 # ---------------------------------------------------------
@@ -294,26 +328,172 @@ def render_developer_portal(user_data):
     st.info(f"Verified Account: **{user_data['email']}**")
     
     if st.button("Generate / Retrieve API Key", type="primary"):
-        payload = {
-            "owner_name": user_data['name'],
-            "owner_email": user_data['email']
-        }
-        try:
-            response = requests.post(f"{BACKEND_URL}/register", json=payload)
-            if response.status_code == 200:
-                key = response.json().get("api_key")
-                st.success("API Key successfully provisioned!")
-                st.code(key, language="text")
+        key = get_or_fetch_api_key(user_data, force_refresh=True)
+        if key:
+            st.success("API Key successfully provisioned!")
+            st.code(key, language="text")
+        else:
+            st.error("Failed to provision key. Make sure the backend is reachable and try again.")
+
+# ---------------------------------------------------------
+# v2.0: TEXT / IMAGE (EMBEDDING-BASED) MONITORING HELPERS
+# ---------------------------------------------------------
+
+def render_embedding_fit_ui(modality: str, user_api_key: str, key_prefix: str):
+    """
+    Shared 'lock a baseline' flow for text/image projects (Domain Classifier
+    Test). Mirrors the tabular flow's shape (model ID -> upload -> fit ->
+    success) but with modality-appropriate ingestion. No schema-confirmation
+    step, since there's no per-column classification for a single embedding
+    batch — only one baseline embedding matrix per project.
+    """
+    new_model_id = st.text_input(
+        f"New Model ID (e.g., {modality}_monitor_v1)", key=f"{key_prefix}_{modality}_id"
+    )
+
+    reference_texts, reference_images = None, None
+
+    if modality == "text":
+        uploaded = st.file_uploader(
+            "Upload Reference Text (.txt = one document per line, or .csv)",
+            type=["txt", "csv"], key=f"{key_prefix}_{modality}_file"
+        )
+        if uploaded is not None:
+            if uploaded.name.lower().endswith(".csv"):
+                df = _read_csv_with_encoding_fallback(uploaded, sep=None, engine='python')
+                text_col = st.selectbox("Which column holds the text?", df.columns, key=f"{key_prefix}_{modality}_col")
+                reference_texts = df[text_col].dropna().astype(str).tolist()
             else:
-                st.error(f"Failed to provision key. Backend returned status code: {response.status_code}")
-        except requests.exceptions.ConnectionError:
-            st.error("Failed to connect to the backend server. Make sure your FastAPI server is running on port 8000.")
+                lines = uploaded.getvalue().decode("utf-8", errors="ignore").splitlines()
+                reference_texts = [line for line in lines if line.strip()]
+        ready = bool(new_model_id and reference_texts)
+    else:
+        uploaded_images = st.file_uploader(
+            "Upload Reference Images (JPEG/PNG, multiple files)",
+            type=["jpg", "jpeg", "png"], accept_multiple_files=True, key=f"{key_prefix}_{modality}_files"
+        )
+        if uploaded_images:
+            reference_images = [base64.b64encode(f.getvalue()).decode("ascii") for f in uploaded_images]
+        ready = bool(new_model_id and reference_images)
+
+    if st.button("Start Monitoring Model", type="primary", key=f"{key_prefix}_{modality}_btn"):
+        if not ready:
+            st.warning("Please provide a Model ID and upload reference data.")
+        else:
+            with st.spinner(f"Embedding {modality} baseline and locking monitoring pipeline..."):
+                try:
+                    headers = {"X-API-Key": user_api_key}
+                    safe_model_id = new_model_id.strip().replace(" ", "%20")
+                    payload = (
+                        {"reference_texts": reference_texts} if modality == "text"
+                        else {"reference_images": reference_images}
+                    )
+                    response = requests.post(
+                        f"{BACKEND_URL}/fit/{safe_model_id}/{modality}",
+                        json=payload, headers=headers
+                    )
+                    if response.status_code == 200:
+                        st.success(f"Successfully started monitoring '{new_model_id}' ({modality})!")
+                        st.balloons()
+                        time.sleep(1.5)
+                        st.session_state.selected_model = new_model_id
+                        st.rerun()
+                    else:
+                        st.error(f"Backend Error: {response.text}")
+                except Exception as e:
+                    st.error(f"Error processing files: {str(e)}")
+
+
+def render_embedding_analyze_ui(modality: str, project_id: str, user_api_key: str, user_info: dict):
+    """
+    Minimal batch-analysis panel for text/image projects: upload a
+    comparison batch, run the Domain Classifier Test, show the AUC +
+    verdict inline. There's no live per-item log stream here since
+    real-time/streaming embedding scoring is out of scope (batch-only,
+    matching the existing tabular limitation).
+    """
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.info(
+        f"This is a **{modality}** monitoring project. Drift is evaluated batch-by-batch "
+        "via the Domain Classifier Test (no live per-item telemetry for this modality)."
+    )
+
+    production_texts, production_images = None, None
+
+    if modality == "text":
+        uploaded = st.file_uploader(
+            "Upload a Production Text Batch (.txt or .csv) to Analyze",
+            type=["txt", "csv"], key=f"analyze_{modality}_{project_id}"
+        )
+        if uploaded is not None:
+            if uploaded.name.lower().endswith(".csv"):
+                df = _read_csv_with_encoding_fallback(uploaded, sep=None, engine='python')
+                text_col = st.selectbox("Which column holds the text?", df.columns, key=f"analyze_{modality}_col_{project_id}")
+                production_texts = df[text_col].dropna().astype(str).tolist()
+            else:
+                lines = uploaded.getvalue().decode("utf-8", errors="ignore").splitlines()
+                production_texts = [line for line in lines if line.strip()]
+        ready = production_texts is not None
+    else:
+        uploaded_images = st.file_uploader(
+            "Upload a Production Image Batch to Analyze",
+            type=["jpg", "jpeg", "png"], accept_multiple_files=True, key=f"analyze_{modality}_{project_id}"
+        )
+        if uploaded_images:
+            production_images = [base64.b64encode(f.getvalue()).decode("ascii") for f in uploaded_images]
+        ready = production_images is not None
+
+    if st.button("Analyze Batch", type="primary", key=f"analyze_btn_{modality}_{project_id}"):
+        if not ready:
+            st.warning("Please upload a production batch first.")
+        else:
+            with st.spinner("Running Domain Classifier Test..."):
+                headers = {"X-API-Key": user_api_key}
+                payload = (
+                    {"production_texts": production_texts} if modality == "text"
+                    else {"production_images": production_images}
+                )
+                try:
+                    resp = requests.post(
+                        f"{BACKEND_URL}/analyze/{project_id}/{modality}",
+                        json=payload, headers=headers, timeout=120
+                    )
+                    if resp.status_code == 200:
+                        metric = resp.json()["feature_metrics"]["embedding_drift"]
+                        auc = metric["statistic"]
+                        drifted = metric["drift_detected"]
+
+                        mc1, mc2 = st.columns(2)
+                        mc1.markdown(f"<div class='mini-card'><div class='card-title'>Domain Classifier AUC</div><div class='mini-value'>{auc:.4f}</div></div>", unsafe_allow_html=True)
+                        color = "#EF4444" if drifted else "#10B981"
+                        verdict = "DRIFT" if drifted else "STABLE"
+                        mc2.markdown(f"<div class='mini-card'><div class='card-title'>Verdict</div><div class='mini-value' style='color:{color};'>{verdict}</div></div>", unsafe_allow_html=True)
+
+                        if drifted:
+                            st.error(f"🚨 Drift detected — AUC {auc:.4f} means the classifier can reliably tell the production batch apart from the baseline.")
+                        else:
+                            st.success(f"✅ No significant drift — AUC {auc:.4f} is close to 0.5 (indistinguishable from baseline).")
+                    else:
+                        st.error(f"Backend Error: {resp.text}")
+                except Exception as e:
+                    st.error(f"Error analyzing batch: {str(e)}")
+
+    st.markdown("<br><hr style='opacity: 0.2;'>", unsafe_allow_html=True)
+    render_developer_portal(user_info)
+
 
 # ---------------------------------------------------------
 # 2. AUTHENTICATION & GATEKEEPER
 # ---------------------------------------------------------
+_RENDER_CREDENTIALS_PATH = '/etc/secrets/google_credentials.json'
+_LOCAL_CREDENTIALS_PATH = 'google_credentials.json'
+credentials_path = (
+    _RENDER_CREDENTIALS_PATH if os.path.exists(_RENDER_CREDENTIALS_PATH)
+    else _LOCAL_CREDENTIALS_PATH
+)
+
 authenticator = Authenticate(
-    secret_credentials_path='/etc/secrets/google_credentials.json',  
+    secret_credentials_path=credentials_path,
     cookie_name='drift_cookie',
     cookie_key=os.getenv('COOKIE_KEY'),
     redirect_uri=os.getenv("REDIRECT_URI", "https://drift-monitoring-dashboard.onrender.com")
@@ -329,21 +509,8 @@ if not st.session_state.get('connected'):
 user_info = st.session_state.get('user_info', {})
 current_user_email = user_info.get('email', '').lower()
 
-# 1. Fetch the user's API key from the local SQLite DB (only DB call we keep)
-# 1. Fetch the user's API key from the backend using their email
-user_api_key = None
-try:
-    response = requests.post(
-        f"{BACKEND_URL}/register",
-        json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
-        timeout=10
-    )
-    if response.status_code == 200:
-        user_api_key = response.json().get("api_key")
-    else:
-        user_api_key = None
-except Exception:
-    user_api_key = None
+# 1. Fetch the user's API key from the backend (cached in session_state)
+user_api_key = get_or_fetch_api_key(user_info)
 
 # 2. Ask the backend for the list of projects using the API key
 allowed_projects = []
@@ -353,12 +520,8 @@ if user_api_key:
         response = requests.get(f"{BACKEND_URL}/projects", headers=headers, timeout=10)
         if response.status_code == 200:
             allowed_projects = response.json().get("projects", [])
-        else:
-            allowed_projects = []
     except Exception:
         allowed_projects = []
-else:
-    allowed_projects = []
 
 # 3. Format the list for the sidebar
 if not allowed_projects:
@@ -374,42 +537,6 @@ if st.sidebar.button("Logout"):
     authenticator.logout()
 
 st.sidebar.markdown("<h2>Control Panel</h2>", unsafe_allow_html=True)
-
-# 1. Fetch the user's API key from the backend using their email
-user_api_key = None
-try:
-    response = requests.post(
-        f"{BACKEND_URL}/register",
-        json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
-        timeout=10
-    )
-    if response.status_code == 200:
-        user_api_key = response.json().get("api_key")
-    else:
-        user_api_key = None
-except Exception:
-    user_api_key = None
-
-# 2. Ask the backend for the list of projects using the API key
-allowed_projects = []
-if user_api_key:
-    headers = {"X-API-Key": user_api_key}
-    try:
-        response = requests.get(f"{BACKEND_URL}/projects", headers=headers, timeout=10)
-        if response.status_code == 200:
-            allowed_projects = response.json().get("projects", [])
-        else:
-            allowed_projects = []
-    except Exception:
-        allowed_projects = []
-else:
-    allowed_projects = []
-
-# 3. Format the list for the sidebar
-if not allowed_projects:
-    allowed_projects = ["No Models Assigned"]
-else:
-    allowed_projects.append("➕ Add New Model")
 
 # 2. Set default if state is missing
 if 'selected_model' not in st.session_state:
@@ -447,217 +574,216 @@ if active_project == "➕ Add New Model":
     st.markdown("### Start Monitoring a New Model")
     st.write("Upload your training datasets to initialize a new monitoring pipeline.")
     
-    # Fetch the user's API key from the backend
-    user_api_key = None
-    try:
-        resp = requests.post(
-            f"{BACKEND_URL}/register",
-            json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            user_api_key = resp.json().get("api_key")
-    except Exception:
-        pass
+    # Fetch the user's API key from the backend (cached in session_state)
+    user_api_key = get_or_fetch_api_key(user_info)
 
     if not user_api_key:
         st.error("Error: Could not locate your API credentials.")
         st.stop()
 
-    # New unique keys so Streamlit doesn't throw DuplicateElement errors
-    new_model_id = st.text_input("New Model ID (e.g., churn_predictor_v2)", key="add_new_proj_id")
-    
-    uploaded_files = st.file_uploader(
-        "Upload Training Data (CSV / DAT) - Max 2GB total",
-        type=["csv", "dat"],
-        key="add_new_files", 
-        accept_multiple_files=True
+    modality_choice = st.radio(
+        "Model Type", ["Tabular", "Text", "Image"], key="add_new_modality", horizontal=True
     )
-    
-    st.warning(
-        "⚠️ **Notice:** If your combined training files approach or exceed the max 2GB limit, "
-        "please upload your primary dataset first, then upload subsequent files sequentially."
-    )
-    
-    # ==========================================
-    # NEW: SMART SCHEMA CONFIGURATION UI
-    # ==========================================
-    schema_mapping = {}  # ← Correct indentation (same level as new_model_id)
-    
-    if uploaded_files:
-        st.markdown("<br> 🗂️ Step 2: Verify Data Schema", unsafe_allow_html=True)
-        
-        # 1. Load full files and take an unbiased random sample
-        train_dfs = []
-        for f in uploaded_files:
-            train_dfs.append(read_uploaded_file(f))
-            
-        # Combine all uploaded files into one massive dataframe
-        combined_df = pd.concat(train_dfs, ignore_index=True)
-        
-        preview_df = combined_df.sample(n=min(10000,len(combined_df)), random_state=42).reset_index(drop=True)
-        
-        # 2. Ask the backend for mathematical recommendations
-        with st.spinner("Analyzing dataset signals..."):
-            headers = {"X-API-Key": user_api_key}
-            raw_dict = preview_df.to_dict(orient="list")
-            
-            clean_dict = {
-                col: [None if pd.isna(v) else v for v in vals]
-                for col, vals in raw_dict.items()
-            }
-            
-            payload = {"reference_data": clean_dict}
-            
-            try:
-                profile_response = requests.post(f"{BACKEND_URL}/profile", json=payload, headers=headers)
-                if profile_response.status_code == 200:
-                    smart_profiles = {p["name"]: p for p in profile_response.json()}
-                else:
-                    smart_profiles = {}
-                    st.error(f"Profiler Error: {profile_response.text}")
-            except requests.exceptions.ConnectionError:
-                smart_profiles = {}
-                st.warning("Could not reach profiler API. Using default schema.")
 
-        st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
-        
-        # 3. Build the Stateful UI using the AI's recommendations
-        for col in preview_df.columns:
-            col_intel = smart_profiles.get(col, {})
-            monitor = col_intel.get("monitor", "Review")
-            reason = col_intel.get("reason", "Could not classify — recommend manual review")
+    if modality_choice == "Text":
+        render_embedding_fit_ui("text", user_api_key, key_prefix="add_new")
+    elif modality_choice == "Image":
+        render_embedding_fit_ui("image", user_api_key, key_prefix="add_new")
+    else:
+        # New unique keys so Streamlit doesn't throw DuplicateElement errors
+        new_model_id = st.text_input("New Model ID (e.g., churn_predictor_v2)", key="add_new_proj_id")
 
-            if monitor is True:
-                suggested_idx = 0
-            elif monitor == "Categorical":
-                suggested_idx = 1
-            elif monitor is False:
-                suggested_idx = 2
-            else:
-                best = col_intel.get("best_guess", "ignore")
-                if best == "continuous":
-                    suggested_idx = 0
-                elif best == "categorical":
-                    suggested_idx = 1
-                else:
-                    suggested_idx = 2
-            
-            state_key = f"schema_{col}"
-            
-            if state_key not in st.session_state or st.session_state.get(f"last_rec_{col}") != suggested_idx:
-                st.session_state[state_key] = suggested_idx
-                st.session_state[f"last_rec_{col}"] = suggested_idx
+        uploaded_files = st.file_uploader(
+            "Upload Training Data (CSV / DAT) - Max 2GB total",
+            type=["csv", "dat"],
+            key="add_new_files",
+            accept_multiple_files=True
+        )
 
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.markdown(f"**{col}**")
-                st.caption(f"Reason: {reason}")
-            with c2:
-                if monitor == "Review":
-                    st.warning(f"⚠️ **{col}** needs review.")
+        st.warning(
+            "⚠️ **Notice:** If your combined training files approach or exceed the max 2GB limit, "
+            "please upload your primary dataset first, then upload subsequent files sequentially."
+        )
 
-                role_options = [
-                    "📊 Continuous Feature (Monitor for Drift)",
-                    "🔠 Categorical Feature (Monitor for Drift)",
-                    "📝 Ignore (Unique IDs / Free Text / Target)"
-                ]
+        # ==========================================
+        # NEW: SMART SCHEMA CONFIGURATION UI
+        # ==========================================
+        schema_mapping = {}  # ← Correct indentation (same level as new_model_id)
 
-                current_index = st.session_state[state_key]
-                if isinstance(current_index, str):
-                    current_index = role_options.index(current_index) if current_index in role_options else 0
-                    st.session_state[state_key] = current_index
+        if uploaded_files:
+            st.markdown("<br> 🗂️ Step 2: Verify Data Schema", unsafe_allow_html=True)
 
-                role = st.selectbox(
-                    "Column Role",
-                    options=role_options,
-                    index=current_index,
-                    key=state_key,
-                    label_visibility="collapsed"
-                )
-                schema_mapping[col] = role
-                
-        st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
+            # 1. Load full files and take an unbiased random sample
+            train_dfs = []
+            for f in uploaded_files:
+                train_dfs.append(read_uploaded_file(f))
 
-    # ==========================================
-    # STEP 3: START MONITORING WITH FILTERED SCHEMA
-    # ==========================================
-    if st.button("Start Monitoring Model", type="primary", key="btn_add_new_model"):
-        if not new_model_id or not uploaded_files:
-            st.warning("Please provide a Model ID and upload at least one file.")
-        else:
-            with st.spinner("Processing datasets and starting monitoring..."):
+            # Combine all uploaded files into one massive dataframe
+            combined_df = pd.concat(train_dfs, ignore_index=True)
+
+            preview_df = combined_df.sample(n=min(10000,len(combined_df)), random_state=42).reset_index(drop=True)
+
+            # 2. Ask the backend for mathematical recommendations
+            with st.spinner("Analyzing dataset signals..."):
+                headers = {"X-API-Key": user_api_key}
+                raw_dict = preview_df.to_dict(orient="list")
+
+                clean_dict = {
+                    col: [None if pd.isna(v) else v for v in vals]
+                    for col, vals in raw_dict.items()
+                }
+
+                payload = {"reference_data": clean_dict}
+
                 try:
-                    # Split confirmed schema into continuous vs categorical
-                    continuous_cols = [
-                        col for col, role in schema_mapping.items()
-                        if "Continuous" in role and col in combined_df.columns
+                    profile_response = requests.post(f"{BACKEND_URL}/profile", json=payload, headers=headers)
+                    if profile_response.status_code == 200:
+                        smart_profiles = {p["name"]: p for p in profile_response.json()}
+                    else:
+                        smart_profiles = {}
+                        st.error(f"Profiler Error: {profile_response.text}")
+                except requests.exceptions.ConnectionError:
+                    smart_profiles = {}
+                    st.warning("Could not reach profiler API. Using default schema.")
+
+            st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
+
+            # 3. Build the Stateful UI using the AI's recommendations
+            for col in preview_df.columns:
+                col_intel = smart_profiles.get(col, {})
+                monitor = col_intel.get("monitor", "Review")
+                reason = col_intel.get("reason", "Could not classify — recommend manual review")
+
+                if monitor is True:
+                    suggested_idx = 0
+                elif monitor == "Categorical":
+                    suggested_idx = 1
+                elif monitor is False:
+                    suggested_idx = 2
+                else:
+                    best = col_intel.get("best_guess", "ignore")
+                    if best == "continuous":
+                        suggested_idx = 0
+                    elif best == "categorical":
+                        suggested_idx = 1
+                    else:
+                        suggested_idx = 2
+
+                state_key = f"schema_{col}"
+
+                if state_key not in st.session_state or st.session_state.get(f"last_rec_{col}") != suggested_idx:
+                    st.session_state[state_key] = suggested_idx
+                    st.session_state[f"last_rec_{col}"] = suggested_idx
+
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    st.markdown(f"**{col}**")
+                    st.caption(f"Reason: {reason}")
+                with c2:
+                    if monitor == "Review":
+                        st.warning(f"⚠️ **{col}** needs review.")
+
+                    role_options = [
+                        "📊 Continuous Feature (Monitor for Drift)",
+                        "🔠 Categorical Feature (Monitor for Drift)",
+                        "📝 Ignore (Unique IDs / Free Text / Target)"
                     ]
-                    categorical_cols = [
-                        col for col, role in schema_mapping.items()
-                        if "Categorical" in role and col in combined_df.columns
-                    ]
 
-                    if not continuous_cols and not categorical_cols:
-                        st.warning(
-                            "No columns selected for monitoring. "
-                            "Please mark at least one column as Continuous or Categorical."
-                        )
-                        st.stop()
+                    current_index = st.session_state[state_key]
+                    if isinstance(current_index, str):
+                        current_index = role_options.index(current_index) if current_index in role_options else 0
+                        st.session_state[state_key] = current_index
 
-                    # Prepare continuous data
-                    continuous_df = combined_df[continuous_cols].select_dtypes(
-                        include=['number']
-                    ).dropna()
-                    
-                    if len(continuous_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
-                        continuous_df = continuous_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
+                    role = st.selectbox(
+                        "Column Role",
+                        options=role_options,
+                        index=current_index,
+                        key=state_key,
+                        label_visibility="collapsed"
+                    )
+                    schema_mapping[col] = role
 
-                    # Prepare categorical data
-                    categorical_df = combined_df[categorical_cols].dropna() \
-                        if categorical_cols else pd.DataFrame()
-                    if len(categorical_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
-                        categorical_df = categorical_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
+            st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
 
-                    # NaN scrub both payloads before sending
-                    def scrub(df):
-                        raw = df.to_dict(orient="list")
-                        return {
-                            col: [None if pd.isna(v) else v for v in vals]
-                            for col, vals in raw.items()
+        # ==========================================
+        # STEP 3: START MONITORING WITH FILTERED SCHEMA
+        # ==========================================
+        if st.button("Start Monitoring Model", type="primary", key="btn_add_new_model"):
+            if not new_model_id or not uploaded_files:
+                st.warning("Please provide a Model ID and upload at least one file.")
+            else:
+                with st.spinner("Processing datasets and starting monitoring..."):
+                    try:
+                        # Split confirmed schema into continuous vs categorical
+                        continuous_cols = [
+                            col for col, role in schema_mapping.items()
+                            if "Continuous" in role and col in combined_df.columns
+                        ]
+                        categorical_cols = [
+                            col for col, role in schema_mapping.items()
+                            if "Categorical" in role and col in combined_df.columns
+                        ]
+
+                        if not continuous_cols and not categorical_cols:
+                            st.warning(
+                                "No columns selected for monitoring. "
+                                "Please mark at least one column as Continuous or Categorical."
+                            )
+                            st.stop()
+
+                        # Prepare continuous data
+                        continuous_df = combined_df[continuous_cols].select_dtypes(
+                            include=['number']
+                        ).dropna()
+
+                        if len(continuous_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
+                            continuous_df = continuous_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
+
+                        # Prepare categorical data
+                        categorical_df = combined_df[categorical_cols].dropna() \
+                            if categorical_cols else pd.DataFrame()
+                        if len(categorical_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
+                            categorical_df = categorical_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
+
+                        # NaN scrub both payloads before sending
+                        def scrub(df):
+                            raw = df.to_dict(orient="list")
+                            return {
+                                col: [None if pd.isna(v) else v for v in vals]
+                                for col, vals in raw.items()
+                            }
+
+                        payload = {
+                            "reference_data": scrub(continuous_df),
+                            "categorical_data": scrub(categorical_df) if not categorical_df.empty else {}
                         }
 
-                    payload = {
-                        "reference_data": scrub(continuous_df),
-                        "categorical_data": scrub(categorical_df) if not categorical_df.empty else {}
-                    }
+                        safe_model_id = new_model_id.strip().replace(" ", "%20")
+                        headers = {"X-API-Key": user_api_key}
 
-                    safe_model_id = new_model_id.strip().replace(" ", "%20")
-                    headers = {"X-API-Key": user_api_key}
-
-                    # ✅ FIXED: Uses BACKEND_URL instead of hardcoded http://api
-                    response = requests.post(
-                        f"{BACKEND_URL}/fit/{safe_model_id}",
-                        json=payload,
-                        headers=headers
-                    )
-
-                    if response.status_code == 200:
-                        result = response.json()
-                        st.success(
-                            f"Successfully started monitoring '{new_model_id}'! "
-                            f"Watching {len(continuous_cols)} continuous and "
-                            f"{len(categorical_cols)} categorical features."
+                        # ✅ FIXED: Uses BACKEND_URL instead of hardcoded http://api
+                        response = requests.post(
+                            f"{BACKEND_URL}/fit/{safe_model_id}",
+                            json=payload,
+                            headers=headers
                         )
-                        st.balloons()
-                        time.sleep(1.5)
-                        st.session_state.selected_model = new_model_id  
-                        st.rerun()
-                    else:
-                        st.error(f"Backend Error: {response.text}")
 
-                except Exception as e:
-                    st.error(f"Error processing files: {str(e)}")
+                        if response.status_code == 200:
+                            result = response.json()
+                            st.success(
+                                f"Successfully started monitoring '{new_model_id}'! "
+                                f"Watching {len(continuous_cols)} continuous and "
+                                f"{len(categorical_cols)} categorical features."
+                            )
+                            st.balloons()
+                            time.sleep(1.5)
+                            st.session_state.selected_model = new_model_id
+                            st.rerun()
+                        else:
+                            st.error(f"Backend Error: {response.text}")
+
+                    except Exception as e:
+                        st.error(f"Error processing files: {str(e)}")
 
 elif active_project != "No Models Assigned":
     
@@ -678,30 +804,22 @@ elif active_project != "No Models Assigned":
 
     # --- FETCH DATA FOR THE ACTIVE PROJECT VIA API ---
 
-
     if 'user_api_key' not in locals() or not user_api_key:
-        try:
-            resp = requests.post(
-                f"{BACKEND_URL}/register",
-                json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
-                timeout=10
-            )
-            if resp.status_code == 200:
-                user_api_key = resp.json().get("api_key")
-        except:
-            user_api_key = None
+        user_api_key = get_or_fetch_api_key(user_info)
 
     fences = {}
     logs = []
+    modality = "tabular"
 
     if user_api_key:
         headers = {"X-API-Key": user_api_key}
-        
-        # 1. Fetch baseline (IQR fences)
+
+        # 1. Fetch baseline (IQR fences + modality)
         try:
             resp = requests.get(f"{BACKEND_URL}/baseline/{active_project}", headers=headers, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
+                modality = data.get("modality", "tabular")
                 for f in data.get("fences", []):
                     if "q1" in f and "q3" in f:
                         fences[f["feature_name"]] = {"q1": f["q1"], "q3": f["q3"]}
@@ -709,21 +827,24 @@ elif active_project != "No Models Assigned":
                 st.warning("Could not fetch baseline data. Status code: {}".format(resp.status_code))
         except Exception as e:
             st.warning("Error fetching baseline: {}".format(str(e)))
-        
-        # 2. Fetch logs (last 1000)
-        try:
-            resp = requests.get(f"{BACKEND_URL}/logs/{active_project}", headers=headers, timeout=10)
-            if resp.status_code == 200:
-                logs = resp.json()
-            elif resp.status_code != 404:
-                st.warning("Could not fetch logs. Status code: {}".format(resp.status_code))
-        except Exception as e:
-            st.warning("Error fetching logs: {}".format(str(e)))
+
+        # 2. Fetch logs (last 1000) — tabular-only, since text/image drift is batch-based only
+        if modality == "tabular":
+            try:
+                resp = requests.get(f"{BACKEND_URL}/logs/{active_project}", headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    logs = resp.json()
+                elif resp.status_code != 404:
+                    st.warning("Could not fetch logs. Status code: {}".format(resp.status_code))
+            except Exception as e:
+                st.warning("Error fetching logs: {}".format(str(e)))
     else:
         st.error("No API key available. Please log in again.")
         st.stop()
 
-    if not logs:
+    if modality != "tabular":
+        render_embedding_analyze_ui(modality, active_project, user_api_key, user_info)
+    elif not logs:
         st.info(f"No real-time logs found for {active_project} yet.")
         st.markdown("<br>", unsafe_allow_html=True)
         tab4 = st.tabs(["🔑 Developer Portal"])[0]
@@ -956,20 +1077,9 @@ elif active_project != "No Models Assigned":
         
         if st.button("🗑️ Delete Model & Stop Monitoring", type="primary", use_container_width=True):
             with st.spinner("Wiping model data from backend database..."):
-                
-                # --- FETCH API KEY VIA BACKEND (no SQLite) ---
-                user_api_key = None
-                try:
-                    resp = requests.post(
-                        f"{BACKEND_URL}/register",
-                        json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
-                        timeout=10
-                    )
-                    if resp.status_code == 200:
-                        user_api_key = resp.json().get("api_key")
-                except Exception:
-                    pass
-                
+
+                user_api_key = get_or_fetch_api_key(user_info)
+
                 if not user_api_key:
                     st.error("Authentication Error: Could not find your API key.")
                     st.stop()
@@ -996,19 +1106,8 @@ elif active_project != "No Models Assigned":
 # 5. ONBOARDING / LOCKOUT (If they have no models)
 # ---------------------------------------------------------
 else:
-    st.title("Welcome to Drift Sentinel")  
-    # --- FETCH API KEY VIA BACKEND (no SQLite) ---
-    user_api_key = None
-    try:
-        resp = requests.post(
-            f"{BACKEND_URL}/register",
-            json={"owner_name": user_info.get('name', 'User'), "owner_email": current_user_email},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            user_api_key = resp.json().get("api_key")
-    except Exception:
-        pass
+    st.title("Welcome to Drift Sentinel")
+    user_api_key = get_or_fetch_api_key(user_info)
     has_api_key = user_api_key is not None
     
     # ==========================================
@@ -1039,207 +1138,216 @@ else:
         st.success("API Credentials Verified! Let's get your first model online.")
         st.markdown("### Start Monitoring First Model")
         st.write("Upload your training datasets to start monitoring the model.")
-        
-        new_model_id = st.text_input("New Model ID (e.g : fraud_detection_v1)", key="new_proj")
-        
-        uploaded_files = st.file_uploader(
-            "Upload Training Data (CSV / DAT) - Max 2GB total",
-            type=["csv", "dat"],
-            key="new_file",
-            accept_multiple_files=True
+
+        onboarding_modality = st.radio(
+            "Model Type", ["Tabular", "Text", "Image"], key="onboarding_modality", horizontal=True
         )
-        
-        st.warning(
-            "⚠️ **Notice:** If your combined training files approach or exceed the max 2GB limit, "
-            "please upload your primary dataset first, then upload subsequent files sequentially."
-        )
-        
-        # ==========================================
-        # NEW: SMART SCHEMA CONFIGURATION UI
-        # ==========================================
-        schema_mapping = {}
-        
-        if uploaded_files:
-            st.markdown("<br>🗂️ Step 2: Verify Data Schema", unsafe_allow_html=True)
-            
-            # 1. Load full files and take an unbiased random sample
-            train_dfs = []
-            for f in uploaded_files:
-                train_dfs.append(read_uploaded_file(f))
-            
-            # Combine all uploaded files into one massive dataframe
-            combined_df = pd.concat(train_dfs, ignore_index=True)
-            st.session_state.combined_df = combined_df  # store to avoid recompute on button click
-            
-            
-            preview_df = combined_df.sample(
-                n=min(10000,len(combined_df)), random_state=42
-            ).reset_index(drop=True)
-            
-            # 2. Ask the backend for mathematical recommendations
-            with st.spinner("Analyzing dataset signals..."):
-                headers = {"X-API-Key": user_api_key}
-                raw_dict = preview_df.to_dict(orient="list")
-                
-                # Scrub every Pandas NaN/NaT and replace with standard Python None
-                clean_dict = {
-                    col: [None if pd.isna(v) else v for v in vals]
-                    for col, vals in raw_dict.items()
-                }
-                
-                payload = {"reference_data": clean_dict}
-                
-                try:
-                    profile_response = requests.post(f"{BACKEND_URL}/profile", json=payload, headers=headers)
-                    if profile_response.status_code == 200:
-                        smart_profiles = {p["name"]: p for p in profile_response.json()}
-                    else:
-                        smart_profiles = {}
-                        st.error(f"Profiler Error: {profile_response.text}")
-                except requests.exceptions.ConnectionError:
-                    smart_profiles = {}
-                    st.warning("Could not reach profiler API. Using default schema.")
-            
-            st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
-            
-            # 3. Build the Stateful UI using the AI's recommendations
-            for col in preview_df.columns:
-                col_intel = smart_profiles.get(col, {})
-                monitor = col_intel.get("monitor", "Review")
-                reason = col_intel.get("reason", "Could not classify — recommend manual review")
-                
-                # Determine the 'suggested' index from the profiler
-                if monitor is True:
-                    suggested_idx = 0
-                elif monitor == "Categorical":
-                    suggested_idx = 1
-                else:
-                    suggested_idx = 2
-                
-                state_key = f"schema_{col}"
-                
-                # If this is a new run OR the profiler recommendation changed, update the state
-                if state_key not in st.session_state or st.session_state.get(f"last_rec_{col}") != suggested_idx:
-                    st.session_state[state_key] = suggested_idx
-                    st.session_state[f"last_rec_{col}"] = suggested_idx
-                
-                c1, c2 = st.columns([1, 2])
-                with c1:
-                    st.markdown(f"**{col}**")
-                    st.caption(f"Reason: {reason}")
-                
-                with c2:
-                    if monitor == "Review":
-                        st.warning(f"⚠️ **{col}** needs review.")
-                    
-                    role_options = [
-                        "📊 Continuous Feature (Monitor for Drift)",
-                        "🔠 Categorical Feature (Monitor for Drift)",
-                        "📝 Ignore (Unique IDs / Free Text / Target)"
-                    ]
-                    
-                    current_index = st.session_state[state_key]
-                    if isinstance(current_index, str):
-                        current_index = role_options.index(current_index) if current_index in role_options else 0
-                        st.session_state[state_key] = current_index
-                    
-                    role = st.selectbox(
-                        "Column Role",
-                        options=role_options,
-                        index=current_index,
-                        key=state_key,
-                        label_visibility="collapsed"
-                    )
-                    schema_mapping[col] = role
-            
-            st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
-        
-        # ==========================================
-        # THE START MONITORING BUTTON (with schema)
-        # ==========================================
-        if st.button("Start Monitoring Model", type="primary", key="unlocked_btn"):
-            if not new_model_id:
-                st.warning("Please provide a Model ID.")
-            elif not uploaded_files:
-                st.warning("Please upload at least one CSV or DAT file.")
-            elif not schema_mapping:
-                st.warning("Please verify the data schema above before starting monitoring.")
-            else:
-                with st.spinner("Processing datasets and starting monitoring..."):
+
+        if onboarding_modality == "Text":
+            render_embedding_fit_ui("text", user_api_key, key_prefix="onboarding")
+        elif onboarding_modality == "Image":
+            render_embedding_fit_ui("image", user_api_key, key_prefix="onboarding")
+        else:
+            new_model_id = st.text_input("New Model ID (e.g : fraud_detection_v1)", key="new_proj")
+
+            uploaded_files = st.file_uploader(
+                "Upload Training Data (CSV / DAT) - Max 2GB total",
+                type=["csv", "dat"],
+                key="new_file",
+                accept_multiple_files=True
+            )
+
+            st.warning(
+                "⚠️ **Notice:** If your combined training files approach or exceed the max 2GB limit, "
+                "please upload your primary dataset first, then upload subsequent files sequentially."
+            )
+
+            # ==========================================
+            # NEW: SMART SCHEMA CONFIGURATION UI
+            # ==========================================
+            schema_mapping = {}
+
+            if uploaded_files:
+                st.markdown("<br>🗂️ Step 2: Verify Data Schema", unsafe_allow_html=True)
+
+                # 1. Load full files and take an unbiased random sample
+                train_dfs = []
+                for f in uploaded_files:
+                    train_dfs.append(read_uploaded_file(f))
+
+                # Combine all uploaded files into one massive dataframe
+                combined_df = pd.concat(train_dfs, ignore_index=True)
+                st.session_state.combined_df = combined_df  # store to avoid recompute on button click
+
+
+                preview_df = combined_df.sample(
+                    n=min(10000,len(combined_df)), random_state=42
+                ).reset_index(drop=True)
+
+                # 2. Ask the backend for mathematical recommendations
+                with st.spinner("Analyzing dataset signals..."):
+                    headers = {"X-API-Key": user_api_key}
+                    raw_dict = preview_df.to_dict(orient="list")
+
+                    # Scrub every Pandas NaN/NaT and replace with standard Python None
+                    clean_dict = {
+                        col: [None if pd.isna(v) else v for v in vals]
+                        for col, vals in raw_dict.items()
+                    }
+
+                    payload = {"reference_data": clean_dict}
+
                     try:
-                        # Retrieve combined_df from session state to avoid recompute
-                        combined_df = st.session_state.get("combined_df", pd.DataFrame())
-                        
-                        # Split confirmed schema into continuous vs categorical
-                        continuous_cols = [
-                            col for col, role in schema_mapping.items()
-                            if "Continuous" in role and col in combined_df.columns
-                        ]
-                        categorical_cols = [
-                            col for col, role in schema_mapping.items()
-                            if "Categorical" in role and col in combined_df.columns
-                        ]
-                        
-                        if not continuous_cols and not categorical_cols:
-                            st.warning(
-                                "No columns selected for monitoring. "
-                                "Please mark at least one column as Continuous or Categorical."
-                            )
-                            st.stop()
-                        
-                        # Prepare continuous data
-                        
-                        continuous_df = combined_df[continuous_cols].select_dtypes(
-                            include=['number']
-                        ).dropna()
-                        if len(continuous_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
-                            continuous_df = continuous_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
-                        
-                        # Prepare categorical data
-                        categorical_df = combined_df[categorical_cols].dropna() \
-                            if categorical_cols else pd.DataFrame()
-                        if len(categorical_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
-                            categorical_df = categorical_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
-                        
-                        # NaN scrub both payloads before sending
-                        def scrub(df):
-                            if df.empty:
-                                return {}
-                            raw = df.to_dict(orient="list")
-                            return {
-                                col: [None if pd.isna(v) else v for v in vals]
-                                for col, vals in raw.items()
-                            }
-                        
-                        payload = {
-                            "reference_data": scrub(continuous_df),
-                            "categorical_data": scrub(categorical_df)
-                        }
-                        
-                        safe_model_id = new_model_id.strip().replace(" ", "%20")
-                        headers = {"X-API-Key": user_api_key}
-                        
-                        response = requests.post(f"{BACKEND_URL}/fit/{safe_model_id}", json=payload, headers=headers)
-                        
-                        if response.status_code == 200:
-                            result = response.json()
-                            st.success(
-                                f"Successfully started monitoring '{new_model_id}'! "
-                                f"Watching {len(continuous_cols)} continuous and "
-                                f"{len(categorical_cols)} categorical features."
-                            )
-                            st.balloons()
-                            time.sleep(1.5)
-                            st.session_state.selected_model = new_model_id
-                            
-                            st.rerun()
+                        profile_response = requests.post(f"{BACKEND_URL}/profile", json=payload, headers=headers)
+                        if profile_response.status_code == 200:
+                            smart_profiles = {p["name"]: p for p in profile_response.json()}
                         else:
-                            st.error(f"Backend Error: {response.text}")
-                        
-                    except Exception as e:
-                        st.error(f"Error processing files: {str(e)}")
-    
+                            smart_profiles = {}
+                            st.error(f"Profiler Error: {profile_response.text}")
+                    except requests.exceptions.ConnectionError:
+                        smart_profiles = {}
+                        st.warning("Could not reach profiler API. Using default schema.")
+
+                st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
+
+                # 3. Build the Stateful UI using the AI's recommendations
+                for col in preview_df.columns:
+                    col_intel = smart_profiles.get(col, {})
+                    monitor = col_intel.get("monitor", "Review")
+                    reason = col_intel.get("reason", "Could not classify — recommend manual review")
+
+                    # Determine the 'suggested' index from the profiler
+                    if monitor is True:
+                        suggested_idx = 0
+                    elif monitor == "Categorical":
+                        suggested_idx = 1
+                    else:
+                        suggested_idx = 2
+
+                    state_key = f"schema_{col}"
+
+                    # If this is a new run OR the profiler recommendation changed, update the state
+                    if state_key not in st.session_state or st.session_state.get(f"last_rec_{col}") != suggested_idx:
+                        st.session_state[state_key] = suggested_idx
+                        st.session_state[f"last_rec_{col}"] = suggested_idx
+
+                    c1, c2 = st.columns([1, 2])
+                    with c1:
+                        st.markdown(f"**{col}**")
+                        st.caption(f"Reason: {reason}")
+
+                    with c2:
+                        if monitor == "Review":
+                            st.warning(f"⚠️ **{col}** needs review.")
+
+                        role_options = [
+                            "📊 Continuous Feature (Monitor for Drift)",
+                            "🔠 Categorical Feature (Monitor for Drift)",
+                            "📝 Ignore (Unique IDs / Free Text / Target)"
+                        ]
+
+                        current_index = st.session_state[state_key]
+                        if isinstance(current_index, str):
+                            current_index = role_options.index(current_index) if current_index in role_options else 0
+                            st.session_state[state_key] = current_index
+
+                        role = st.selectbox(
+                            "Column Role",
+                            options=role_options,
+                            index=current_index,
+                            key=state_key,
+                            label_visibility="collapsed"
+                        )
+                        schema_mapping[col] = role
+
+                st.markdown("<hr style='opacity: 0.2;'>", unsafe_allow_html=True)
+
+            # ==========================================
+            # THE START MONITORING BUTTON (with schema)
+            # ==========================================
+            if st.button("Start Monitoring Model", type="primary", key="unlocked_btn"):
+                if not new_model_id:
+                    st.warning("Please provide a Model ID.")
+                elif not uploaded_files:
+                    st.warning("Please upload at least one CSV or DAT file.")
+                elif not schema_mapping:
+                    st.warning("Please verify the data schema above before starting monitoring.")
+                else:
+                    with st.spinner("Processing datasets and starting monitoring..."):
+                        try:
+                            # Retrieve combined_df from session state to avoid recompute
+                            combined_df = st.session_state.get("combined_df", pd.DataFrame())
+
+                            # Split confirmed schema into continuous vs categorical
+                            continuous_cols = [
+                                col for col, role in schema_mapping.items()
+                                if "Continuous" in role and col in combined_df.columns
+                            ]
+                            categorical_cols = [
+                                col for col, role in schema_mapping.items()
+                                if "Categorical" in role and col in combined_df.columns
+                            ]
+
+                            if not continuous_cols and not categorical_cols:
+                                st.warning(
+                                    "No columns selected for monitoring. "
+                                    "Please mark at least one column as Continuous or Categorical."
+                                )
+                                st.stop()
+
+                            # Prepare continuous data
+
+                            continuous_df = combined_df[continuous_cols].select_dtypes(
+                                include=['number']
+                            ).dropna()
+                            if len(continuous_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
+                                continuous_df = continuous_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
+
+                            # Prepare categorical data
+                            categorical_df = combined_df[categorical_cols].dropna() \
+                                if categorical_cols else pd.DataFrame()
+                            if len(categorical_df) > DEFAULT_BASELINE_SAMPLE_SIZE:
+                                categorical_df = categorical_df.sample(n=DEFAULT_BASELINE_SAMPLE_SIZE, random_state=42)
+
+                            # NaN scrub both payloads before sending
+                            def scrub(df):
+                                if df.empty:
+                                    return {}
+                                raw = df.to_dict(orient="list")
+                                return {
+                                    col: [None if pd.isna(v) else v for v in vals]
+                                    for col, vals in raw.items()
+                                }
+
+                            payload = {
+                                "reference_data": scrub(continuous_df),
+                                "categorical_data": scrub(categorical_df)
+                            }
+
+                            safe_model_id = new_model_id.strip().replace(" ", "%20")
+                            headers = {"X-API-Key": user_api_key}
+
+                            response = requests.post(f"{BACKEND_URL}/fit/{safe_model_id}", json=payload, headers=headers)
+
+                            if response.status_code == 200:
+                                result = response.json()
+                                st.success(
+                                    f"Successfully started monitoring '{new_model_id}'! "
+                                    f"Watching {len(continuous_cols)} continuous and "
+                                    f"{len(categorical_cols)} categorical features."
+                                )
+                                st.balloons()
+                                time.sleep(1.5)
+                                st.session_state.selected_model = new_model_id
+
+                                st.rerun()
+                            else:
+                                st.error(f"Backend Error: {response.text}")
+
+                        except Exception as e:
+                            st.error(f"Error processing files: {str(e)}")
+
     st.write("---")
     if st.button("Logout", key="logout_fallback"):
         authenticator.logout()
-        
+

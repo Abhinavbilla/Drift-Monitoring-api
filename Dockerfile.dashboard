@@ -12,7 +12,11 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements and install
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# torch/torchvision pulled from the CPU-only wheel index (shared requirements.txt
+# with the backend; the dashboard itself only calls the API, but pip would
+# otherwise resolve the default CUDA-enabled wheels here too).
+RUN pip install --no-cache-dir torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .
