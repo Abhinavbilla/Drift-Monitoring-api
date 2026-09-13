@@ -5,6 +5,14 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.metrics import roc_auc_score
 
+# Empirically, AUC estimates get noisy/unreliable well below this per-batch
+# sample count (see the manual smoke test in the multimodal review: two
+# genuinely same-domain-but-different text batches at n=40 total, 20 unique
+# each, produced a borderline AUC=0.69 against the 0.65 threshold). Below
+# HARD_MIN_SAMPLES the detector's own cross-validation can't run at all.
+RECOMMENDED_MIN_SAMPLES = 40
+HARD_MIN_SAMPLES = 4
+
 
 class EmbeddingDriftDetector:
     """

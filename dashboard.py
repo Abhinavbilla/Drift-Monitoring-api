@@ -18,6 +18,12 @@ import importlib.util
 import time
 import base64
 DEFAULT_BASELINE_SAMPLE_SIZE = 50000
+# Mirrors drift/embedding_detector.py's thresholds (kept as a local constant
+# since the dashboard and backend are separately deployed services that only
+# talk over HTTP, matching this file's existing pattern of not importing
+# backend modules directly).
+EMBEDDING_RECOMMENDED_MIN_SAMPLES = 40
+EMBEDDING_HARD_MIN_SAMPLES = 4
 DEFAULT_PRODUCTION_BATCH_SIZE = 25000
 # ---------------------------------------------------------
 # 1. PAGE SETUP & ADAPTIVE UI CSS (Must be first!)
@@ -352,11 +358,17 @@ def render_embedding_fit_ui(modality: str, user_api_key: str, key_prefix: str):
     )
 
     reference_texts, reference_images = None, None
+    sample_count = 0
 
     if modality == "text":
         uploaded = st.file_uploader(
             "Upload Reference Text (.txt = one document per line, or .csv)",
             type=["txt", "csv"], key=f"{key_prefix}_{modality}_file"
+        )
+        st.caption(
+            f"Recommended: {EMBEDDING_RECOMMENDED_MIN_SAMPLES}+ documents for reliable drift "
+            "detection (small batches produce noisy results). For .txt, one document per line — "
+            "blank lines are skipped."
         )
         if uploaded is not None:
             if uploaded.name.lower().endswith(".csv"):
@@ -366,19 +378,36 @@ def render_embedding_fit_ui(modality: str, user_api_key: str, key_prefix: str):
             else:
                 lines = uploaded.getvalue().decode("utf-8", errors="ignore").splitlines()
                 reference_texts = [line for line in lines if line.strip()]
-        ready = bool(new_model_id and reference_texts)
+            sample_count = len(reference_texts)
     else:
         uploaded_images = st.file_uploader(
             "Upload Reference Images (JPEG/PNG, multiple files)",
             type=["jpg", "jpeg", "png"], accept_multiple_files=True, key=f"{key_prefix}_{modality}_files"
         )
+        st.caption(
+            f"Recommended: {EMBEDDING_RECOMMENDED_MIN_SAMPLES}+ images (JPEG or PNG) for reliable "
+            "drift detection. Mixed sizes are fine — each image is resized automatically."
+        )
         if uploaded_images:
             reference_images = [base64.b64encode(f.getvalue()).decode("ascii") for f in uploaded_images]
-        ready = bool(new_model_id and reference_images)
+            sample_count = len(reference_images)
+
+    if sample_count > 0:
+        if sample_count < EMBEDDING_HARD_MIN_SAMPLES:
+            st.error(f"Only {sample_count} sample(s) loaded — at least {EMBEDDING_HARD_MIN_SAMPLES} are required.")
+        elif sample_count < EMBEDDING_RECOMMENDED_MIN_SAMPLES:
+            st.warning(
+                f"{sample_count} samples loaded — below the recommended {EMBEDDING_RECOMMENDED_MIN_SAMPLES}. "
+                "Drift verdicts on small batches can be noisy."
+            )
+        else:
+            st.caption(f"✓ {sample_count} samples loaded.")
+
+    ready = bool(new_model_id and sample_count >= EMBEDDING_HARD_MIN_SAMPLES)
 
     if st.button("Start Monitoring Model", type="primary", key=f"{key_prefix}_{modality}_btn"):
         if not ready:
-            st.warning("Please provide a Model ID and upload reference data.")
+            st.warning(f"Please provide a Model ID and upload at least {EMBEDDING_HARD_MIN_SAMPLES} reference samples.")
         else:
             with st.spinner(f"Embedding {modality} baseline and locking monitoring pipeline..."):
                 try:
@@ -419,11 +448,16 @@ def render_embedding_analyze_ui(modality: str, project_id: str, user_api_key: st
     )
 
     production_texts, production_images = None, None
+    sample_count = 0
 
     if modality == "text":
         uploaded = st.file_uploader(
             "Upload a Production Text Batch (.txt or .csv) to Analyze",
             type=["txt", "csv"], key=f"analyze_{modality}_{project_id}"
+        )
+        st.caption(
+            f"Recommended: {EMBEDDING_RECOMMENDED_MIN_SAMPLES}+ documents, same format as the "
+            "baseline upload (.txt = one document per line, or .csv)."
         )
         if uploaded is not None:
             if uploaded.name.lower().endswith(".csv"):
@@ -433,19 +467,33 @@ def render_embedding_analyze_ui(modality: str, project_id: str, user_api_key: st
             else:
                 lines = uploaded.getvalue().decode("utf-8", errors="ignore").splitlines()
                 production_texts = [line for line in lines if line.strip()]
-        ready = production_texts is not None
+            sample_count = len(production_texts)
     else:
         uploaded_images = st.file_uploader(
             "Upload a Production Image Batch to Analyze",
             type=["jpg", "jpeg", "png"], accept_multiple_files=True, key=f"analyze_{modality}_{project_id}"
         )
+        st.caption(f"Recommended: {EMBEDDING_RECOMMENDED_MIN_SAMPLES}+ images (JPEG or PNG).")
         if uploaded_images:
             production_images = [base64.b64encode(f.getvalue()).decode("ascii") for f in uploaded_images]
-        ready = production_images is not None
+            sample_count = len(production_images)
+
+    if sample_count > 0:
+        if sample_count < EMBEDDING_HARD_MIN_SAMPLES:
+            st.error(f"Only {sample_count} sample(s) loaded — at least {EMBEDDING_HARD_MIN_SAMPLES} are required.")
+        elif sample_count < EMBEDDING_RECOMMENDED_MIN_SAMPLES:
+            st.warning(
+                f"{sample_count} samples loaded — below the recommended {EMBEDDING_RECOMMENDED_MIN_SAMPLES}. "
+                "The AUC verdict may be noisy at this batch size."
+            )
+        else:
+            st.caption(f"✓ {sample_count} samples loaded.")
+
+    ready = sample_count >= EMBEDDING_HARD_MIN_SAMPLES
 
     if st.button("Analyze Batch", type="primary", key=f"analyze_btn_{modality}_{project_id}"):
         if not ready:
-            st.warning("Please upload a production batch first.")
+            st.warning(f"Please upload at least {EMBEDDING_HARD_MIN_SAMPLES} production samples first.")
         else:
             with st.spinner("Running Domain Classifier Test..."):
                 headers = {"X-API-Key": user_api_key}

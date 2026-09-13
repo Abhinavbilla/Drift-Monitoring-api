@@ -373,7 +373,10 @@ def analyze_text_batch(
         raise HTTPException(status_code=400, detail=f"Project '{project_id}' has a '{state['modality']}' baseline, not 'text'.")
 
     cur_embeddings = TextAdapter().transform(request.production_texts)
-    result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+    try:
+        result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     if result["drift_detected"]:
         background_tasks.add_task(
@@ -426,7 +429,10 @@ def analyze_image_batch(
         raise HTTPException(status_code=400, detail=f"Project '{project_id}' has a '{state['modality']}' baseline, not 'image'.")
 
     cur_embeddings = ImageAdapter().transform(request.production_images)
-    result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+    try:
+        result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     if result["drift_detected"]:
         background_tasks.add_task(
