@@ -74,20 +74,21 @@ Both happen through the dashboard's UI: upload training data to lock a baseline 
 
 ## Scope and Supported Data
 
-This API is built specifically for **structured, tabular data**. It is not designed for images, audio, video, or free-text columns.
+Drift Monitoring API covers three input modalities through one shared adapter/baseline/dashboard architecture: **tabular**, **text**, and **image** data. Tabular uses statistically-grounded methods (KS-test, PSI, IQR); text and image share a single modality-agnostic method (the **Domain Classifier Test**), since both reduce to comparing two sets of embedding vectors.
 
-| Supported | Not Supported |
-|-----------|---------------|
-| CSV, TSV | Images |
-| Excel (.xlsx, .xls) | Audio / Video |
-| JSON, JSON Lines | Free-text (NLP) fields |
-| Parquet | Unstructured data |
-| ARFF (Weka format) | |
-| Compressed (.gz, .zip) | |
+| Modality | Supported Inputs | Detection Method |
+|----------|-------------------|-------------------|
+| Tabular | CSV, TSV, Excel (.xlsx, .xls), JSON, JSON Lines, Parquet, ARFF, compressed (.gz, .zip) | Two-sample KS-test (continuous), PSI (categorical), IQR (real-time) |
+| Text | Batches of raw strings | Domain Classifier Test (AUC-based) on `all-MiniLM-L6-v2` embeddings |
+| Image | JPEG, PNG batches | Domain Classifier Test (AUC-based) on `resnet18` embeddings |
+
+**Not supported:** audio, video, per-token/per-pixel drift localization, and real-time/streaming detection for any modality (all three are batch-based).
 
 **Why this scope?**
 
-KS-test, PSI, and IQR-based methods are mathematically grounded in continuous and categorical feature distributions. Unstructured data requires fundamentally different approaches (embedding drift, perceptual hashing, NLP-specific metrics) that are out of scope here. Drift Monitoring API focuses on doing structured tabular monitoring well rather than doing everything poorly.
+KS-test, PSI, and IQR-based methods are mathematically grounded in continuous and categorical feature distributions, and remain tabular-only. Text and image don't share that mathematical structure with each other or with tabular data, but they *do* share one with each other — both are just vectors once embedded — so a single Domain Classifier Test (train a classifier to distinguish reference vs. current embeddings; AUC well above 0.5 indicates drift) covers both without inventing two separate systems.
+
+> **Validation status:** the tabular path has the full four-part validation methodology behind it (see [Validation Results](#validation-results)) run against a 4.5M-row real-world dataset. The text/image path has been smoke-tested (adapters produce correct, deterministic embeddings; the detector correctly centers near AUC=0.5 on same-distribution data and flags clearly-separated data) and manually verified end-to-end, but has **not** yet been through that same four-part methodology — no precision/recall/F1 numbers are published for it, deliberately, until that's done. One finding from manual testing worth noting: at small batch sizes (~40 samples), two genuinely different-but-same-domain text batches produced a borderline AUC (0.69, just above the 0.65 threshold) — the AUC threshold and/or minimum recommended batch size for text may need tuning once the full validation is run.
 
 ---
 
@@ -112,6 +113,10 @@ Two detection engines run in parallel depending on the feature type:
 
 Every incoming prediction is individually scored against IQR fences computed from the baseline. This catches point anomalies that batch drift metrics would smooth over, giving you two complementary monitoring signals rather than one.
 
+**Text & Image Drift via Domain Classifier Test**
+
+Text and image batches are embedded (`all-MiniLM-L6-v2` for text, `resnet18` for images) and compared using a classifier trained to distinguish reference from current embeddings — cross-validated to avoid the overfitting-inflates-AUC failure mode. An AUC near 0.5 means the two batches are indistinguishable (no drift); an AUC well above it means they're separable (drift). Same conceptual workflow as tabular — lock a baseline, analyze a batch — just a different math under the hood.
+
 **Multi-format File Ingestion**
 
 The file reader (implemented in `dashboard.py`) handles encoding detection automatically (UTF-8, CP1252, Latin-1, ISO-8859-1), parses ARFF attribute headers, detects libsvm-format .dat files, reads all sheets from multi-sheet Excel files with a schema consistency warning, and handles gzip and zip compressed inputs without requiring pre-processing.
@@ -128,37 +133,43 @@ The entire stack — FastAPI backend, Streamlit dashboard, and supervisor proces
 
 ## How It Works
 
-The system is split into three layers that interact in a defined sequence:
+All three modalities converge on one shared pipeline shape — **adapt → (embed, for text/image) → detect → store/report** — implemented behind a common `BaseAdapter` interface (`adapters/base.py`) so baseline storage, `/analyze` routing, and the dashboard treat tabular, text, and image uniformly rather than as separate bolted-together systems.
 
-### 1. Profiler (`utils/profiler.py`)
+### 1. Profiler (`utils/profiler.py`) — tabular only
 
-Takes a sample of your uploaded training data and computes a set of mathematical signals for each column: cardinality ratio, dominant value ratio, monotonicity, string length consistency, structured pattern detection, and dtype analysis after attempted coercion. These signals feed a routing decision that classifies each column as continuous, categorical, or ignored — with a reasoning string attached to every decision so it's auditable in the UI.
+Takes a sample of your uploaded training data and computes a set of mathematical signals for each column: cardinality ratio, dominant value ratio, monotonicity, string length consistency, structured pattern detection, and dtype analysis after attempted coercion. These signals feed a routing decision that classifies each column as continuous, categorical, or ignored — with a reasoning string attached to every decision so it's auditable in the UI. Text and image baselines skip this step entirely — there's no per-column schema to confirm for a single embedding matrix.
 
-### 2. Baseline Storage (`db/crud.py`)
+### 2. Adapters (`adapters/`) — modality-specific ingestion
 
-Once the user confirms the schema, the system computes and stores two kinds of baseline statistics in SQLite:
+- `tabular.py`: passes columnar data through unchanged (KS/PSI/IQR consume it directly)
+- `text.py`: embeds a batch of raw strings via `all-MiniLM-L6-v2` (384-dim)
+- `image.py`: embeds a batch of JPEG/PNG images via `resnet18`'s penultimate layer (512-dim), handling mixed sizes/formats via resize + RGB conversion
 
-- IQR fences (Q1, Q3) for every continuous feature
-- Frequency distribution tables for every categorical feature
+### 3. Baseline Storage (`db/crud.py`)
 
-These are the reference distributions everything in production gets compared against.
+Once the user confirms the schema (tabular) or uploads a reference batch (text/image), the system locks a baseline in SQLite:
 
-### 3. Drift Detection (`drift/detector.py`)
+- Tabular: IQR fences (Q1, Q3) for continuous features, frequency tables for categorical features
+- Text/Image: a capped sample of raw reference embeddings (the Domain Classifier Test needs real vectors to retrain against on every `/analyze` call, not just summary statistics)
 
-At inference time, incoming production batches are compared against the stored baseline. Continuous features go through a two-sample KS-test. Categorical features go through PSI computed against the stored frequency table. Individual predictions are also scored against IQR fences for real-time anomaly detection. CUSUM-based sequential detection is also available via `drift/cusum.py` for tracking gradual shifts over time.
+### 4. Drift Detection (`drift/detector.py`, `drift/embedding_detector.py`)
+
+At inference time, incoming production batches are compared against the stored baseline. Tabular: continuous features go through a two-sample KS-test, categorical through PSI, individual predictions also scored against IQR fences for real-time anomaly detection. Text/Image: current embeddings are compared against the stored reference embeddings via the Domain Classifier Test (cross-validated logistic regression, AUC-based). CUSUM-based sequential detection is also available via `drift/cusum.py` for tabular gradual shifts over time.
 
 ### The Full Flow
 
 ```
-Upload training data
+Upload reference data (tabular / text / image)
         ↓
-Profiler classifies columns (auto + human confirmation)
+Tabular: profiler classifies columns (auto + human confirmation)
+Text/Image: adapter embeds the reference batch
         ↓
-Baseline locked in SQLite (IQR fences + frequency tables)
+Baseline locked in SQLite
         ↓
-Production data sent to /analyze
+Production batch sent to /analyze/{project_id}[/text|/image]
         ↓
-KS-test (continuous) + PSI (categorical) + IQR scoring (real-time)
+Tabular: KS-test + PSI + IQR scoring (real-time)
+Text/Image: Domain Classifier Test (AUC-based)
         ↓
 Results surfaced in Streamlit dashboard
 ```
@@ -251,8 +262,10 @@ The validation suite caught two real bugs, both fixed before the final numbers a
 | API Backend | FastAPI |
 | Dashboard | Streamlit |
 | Database | SQLite |
-| Authentication | Google OAuth 2.0 |
-| Drift Detection | scipy (KS-test), custom PSI, custom CUSUM (`drift/cusum.py`) |
+| Authentication | Google OAuth 2.0 (session tokens signed with PyJWT) |
+| Tabular Drift Detection | scipy (KS-test), custom PSI, custom CUSUM (`drift/cusum.py`) |
+| Text/Image Drift Detection | Domain Classifier Test — scikit-learn (`drift/embedding_detector.py`) |
+| Embeddings | sentence-transformers (`all-MiniLM-L6-v2`), torchvision (`resnet18`) |
 | Visualizations | Plotly |
 | Data Processing | pandas, numpy |
 | Containerization | Docker, docker-compose |
@@ -286,14 +299,17 @@ drift-monitoring-api/
 │   └── helpers.py             # Shared utility functions
 │
 ├── drift/
-│   ├── detector.py            # KS-test, PSI, and IQR detection engines
+│   ├── detector.py            # KS-test, PSI, and IQR detection engines (tabular)
+│   ├── embedding_detector.py  # Domain Classifier Test (text/image)
 │   ├── alerts.py              # Alert triggering and notification logic
 │   ├── baseline.py            # Baseline computation utilities
-│   └── cusum.py               # Custom CUSUM sequential drift detection
+│   └── cusum.py               # Custom CUSUM sequential drift detection (tabular)
 │
 ├── adapters/
-│   ├── base.py                # Abstract adapter interface
-│   └── tabular.py             # Tabular data adapter
+│   ├── base.py                # Shared BaseAdapter interface
+│   ├── tabular.py             # Tabular data adapter
+│   ├── text.py                # Text → sentence-transformer embeddings
+│   └── image.py               # Image → resnet18 embeddings
 │
 ├── db/
 │   └── crud.py                # Database CRUD operations layer
@@ -482,11 +498,15 @@ print(response.json())
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/fit/{project_id}` | POST | Lock a baseline from training data |
-| `/analyze/{project_id}` | POST | Compare a production batch against the stored baseline |
-| `/profile` | POST | Profile a dataset's columns without locking a baseline |
+| `/fit/{project_id}` | POST | Lock a tabular baseline from training data |
+| `/analyze/{project_id}` | POST | Compare a tabular production batch against the stored baseline |
+| `/fit/{project_id}/text` | POST | Lock a text baseline (embeds `reference_texts`) |
+| `/analyze/{project_id}/text` | POST | Compare a text production batch via the Domain Classifier Test |
+| `/fit/{project_id}/image` | POST | Lock an image baseline (embeds base64-encoded `reference_images`) |
+| `/analyze/{project_id}/image` | POST | Compare an image production batch via the Domain Classifier Test |
+| `/profile` | POST | Profile a tabular dataset's columns without locking a baseline |
 | `/projects` | GET | List all projects for the authenticated user |
-| `/baseline/{project_id}` | GET | Fetch IQR fences and feature types for a project |
+| `/baseline/{project_id}` | GET | Fetch IQR fences, feature types, and modality for a project |
 | `/logs/{project_id}` | GET | Retrieve recent logs for a project |
 | `/models/{model_id}` | DELETE | Permanently delete a model and associated data |
 | `/docs` | GET | Interactive Swagger UI |
@@ -521,6 +541,12 @@ python split_citi_bike.py
 python tests/test_drift_engine.py
 ```
 
+**Text/image smoke tests** (`tests/test_embedding_adapters.py`) — not the four-part methodology above, but unit-level checks that the acceptance criteria in the design hold: adapters produce correctly-shaped, deterministic embeddings and tolerate edge cases (empty/long strings, mixed image sizes/formats); the Domain Classifier Test centers near AUC=0.5 on same-distribution data across repeated trials and correctly flags clearly-separated data. Run with:
+
+```bash
+python -m pytest tests/test_embedding_adapters.py -v
+```
+
 ---
 
 ## Known Limitations
@@ -535,6 +561,12 @@ python tests/test_drift_engine.py
 
 **No self-serve credential flow for programmatic API access:** Backend authentication is derived directly from Google login (the dashboard mints a short-lived session token after you sign in) rather than a static, separately-provisioned API key. This removes a class of "forgotten API key sitting in a script" risk, but it also means there's currently no way to obtain a valid credential for calling `/fit` or `/analyze` from your own external script without going through the dashboard's own login flow. A proper service-account/personal-access-token feature would be needed to support that use case again.
 
+**Text/image validation is smoke-tested, not yet fully validated:** Unlike the tabular path's four-part methodology against a 4.5M-row real dataset, the text/image Domain Classifier Test has only been verified with unit-level smoke tests and manual end-to-end checks — no formal precision/recall/F1 numbers exist for it yet (see [Scope and Supported Data](#scope-and-supported-data)). Treat text/image drift verdicts as directionally useful, not benchmarked.
+
+**Embedding model choice is fixed, not tunable:** `all-MiniLM-L6-v2` (text) and `resnet18` (image) were chosen for their small footprint on a free-tier deployment. There's no per-use-case model selection yet — a domain with very different characteristics (e.g. highly technical text, medical imaging) may see worse separability than these general-purpose embeddings provide.
+
+**Heavier container images for text/image support:** `torch`, `torchvision`, and `sentence-transformers` meaningfully increase image size and cold-start time versus the previous tabular-only stack, on top of Render's existing free-tier spin-down behavior.
+
 ---
 
 ## Future Plans
@@ -545,7 +577,9 @@ python tests/test_drift_engine.py
 - Time-windowed drift detection (rolling window rather than fixed baseline)
 - PostgreSQL support for production-scale deployments
 - REST API client SDK (Python package)
-- Extend drift detection support to unstructured data (text, images, audio, video) using embedding-based drift metrics and perceptual hashing
+- Full four-part validation methodology for the text/image Domain Classifier Test, matching the tabular benchmark's rigor
+- Service-account/personal-access-token support for programmatic API access outside the dashboard
+- Extend drift detection to audio and video via embedding-based drift metrics
 
 ---
 
