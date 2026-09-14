@@ -543,6 +543,14 @@ python tests/test_drift_engine.py
 python -m pytest tests/test_embedding_adapters.py -v
 ```
 
+**Text/image four-part validation suite** (`tests/test_embedding_validation.py`) — the real four-part methodology adapted for embedding-based detection, using labeled public datasets as a ground truth proxy: 20 Newsgroups topic categories for text, CIFAR-10 classes for images. Ground truth is verified independently of our embedding pipeline (TF-IDF / raw pixels, not sentence-transformers/resnet18); synthetic severity is the proportion of a different category mixed into a batch (10%/30%/60%) rather than a σ-shift; confusion matrix and detection-latency parts mirror the tabular suite's structure. Run with:
+
+```bash
+python tests/test_embedding_validation.py
+```
+
+> This script's logic has been verified end-to-end (correct API calls, zero false positives on same-category batches, monotonically increasing detection with severity), but as of this writing it has not yet been run to completion against the real datasets to produce publishable numbers — CIFAR-10's ~170MB download was too unreliable on the network available at the time. **No precision/recall/F1/latency numbers for text/image should be treated as final until this script has actually been run to completion and its output reviewed.** Also worth remembering: this validates the *mechanism* using a topic/class-shift proxy, not genuine real-world drift observed over time the way the tabular Citi Bike split was.
+
 ---
 
 ## Known Limitations
