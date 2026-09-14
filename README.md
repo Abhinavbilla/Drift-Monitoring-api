@@ -154,7 +154,7 @@ Once the user confirms the schema (tabular) or uploads a reference batch (text/i
 
 ### 4. Drift Detection (`drift/detector.py`, `drift/embedding_detector.py`)
 
-At inference time, incoming production batches are compared against the stored baseline. Tabular: continuous features go through a two-sample KS-test, categorical through PSI, individual predictions also scored against IQR fences for real-time anomaly detection. Text/Image: current embeddings are compared against the stored reference embeddings via the Domain Classifier Test (cross-validated logistic regression, AUC-based). CUSUM-based sequential detection is also available via `drift/cusum.py` for tabular gradual shifts over time.
+At inference time, incoming production batches are compared against the stored baseline. Tabular: continuous features go through a two-sample KS-test, categorical through PSI, individual predictions also scored against IQR fences for real-time anomaly detection. Text/Image: current embeddings are compared against the stored reference embeddings via the Domain Classifier Test (cross-validated logistic regression, AUC-based).
 
 ### The Full Flow
 
@@ -263,7 +263,7 @@ The validation suite caught two real bugs, both fixed before the final numbers a
 | Dashboard | Streamlit |
 | Database | SQLite |
 | Authentication | Google OAuth 2.0 (session tokens signed with PyJWT) |
-| Tabular Drift Detection | scipy (KS-test), custom PSI, custom CUSUM (`drift/cusum.py`) |
+| Tabular Drift Detection | scipy (KS-test), custom PSI, IQR |
 | Text/Image Drift Detection | Domain Classifier Test — scikit-learn (`drift/embedding_detector.py`) |
 | Embeddings | sentence-transformers (`all-MiniLM-L6-v2`), torchvision (`resnet18`) |
 | Visualizations | Plotly |
@@ -295,15 +295,12 @@ drift-monitoring-api/
 ├── .gitignore
 │
 ├── utils/
-│   ├── profiler.py            # Automatic column classification engine
-│   └── helpers.py             # Shared utility functions
+│   └── profiler.py            # Automatic column classification engine
 │
 ├── drift/
 │   ├── detector.py            # KS-test, PSI, and IQR detection engines (tabular)
 │   ├── embedding_detector.py  # Domain Classifier Test (text/image)
-│   ├── alerts.py              # Alert triggering and notification logic
-│   ├── baseline.py            # Baseline computation utilities
-│   └── cusum.py               # Custom CUSUM sequential drift detection (tabular)
+│   └── alerts.py              # Alert triggering and notification logic
 │
 ├── adapters/
 │   ├── base.py                # Shared BaseAdapter interface
@@ -314,7 +311,6 @@ drift-monitoring-api/
 ├── db/
 │   └── crud.py                # Database CRUD operations layer
 │
-├── data/                      # Sample datasets for testing and validation
 ├── tests/                     # Validation and test scripts
 └── .streamlit/                # Streamlit config (not committed, contains secrets.toml)
 ```
