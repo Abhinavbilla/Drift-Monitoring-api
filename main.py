@@ -16,6 +16,7 @@ from models import (
     FitTextBaselineRequest, AnalyzeTextBatchRequest,
     FitImageBaselineRequest, AnalyzeImageBatchRequest,
     EmbeddingFitResponse,
+    FitJointBaselineRequest, AnalyzeJointBatchRequest,
 )
 from db import crud
 from drift.detector import compute_iqr_anomalies, DistributionDetector
@@ -23,6 +24,7 @@ from drift.embedding_detector import EmbeddingDriftDetector
 from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
 from adapters.image import ImageAdapter
+from adapters.joint import JointAdapter
 from utils.profiler import profile_columns
 from drift.alerts import check_drift_alert
 import os
@@ -383,6 +385,72 @@ def analyze_image_batch(
 
     cur_embeddings = ImageAdapter().transform(request.production_images)
     try:
+        result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if result["drift_detected"]:
+        background_tasks.add_task(
+            send_drift_email,
+            project_id=project_id,
+            owner_email=client["email"],
+            flagged_features=["embedding_drift"]
+        )
+
+    return AnalyzeBatchResponse(
+        system_alert_triggered=result["drift_detected"],
+        feature_metrics={"embedding_drift": result}
+    )
+
+
+# ---------------------------------------------------------
+# ENDPOINTS: JOINT MULTIMODAL CONTEXT DRIFT MONITORING
+# ---------------------------------------------------------
+@app.post("/fit/{project_id}/joint", response_model=EmbeddingFitResponse, tags=["Machine Learning"])
+def fit_joint_baseline(project_id: str, request: FitJointBaselineRequest, client: dict = Depends(verify_access)):
+    """Embeds a baseline batch of joint records (tabular + text + image) and locks it as the reference distribution."""
+    records = [r.model_dump() for r in request.reference_records]
+    adapter = JointAdapter()
+
+    try:
+        tabular_stats = adapter.fit_tabular_schema(records)
+        embeddings = adapter.transform(records, tabular_stats)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    crud.insert_joint_baseline(
+        project_id=project_id,
+        embeddings=embeddings,
+        tabular_stats=tabular_stats,
+        model_name="joint-v1",
+    )
+    crud.create_project(project_id, f"Project {project_id}", client["email"])
+
+    return EmbeddingFitResponse(
+        status="success",
+        message=f"Joint baseline locked for project '{project_id}' with {len(embeddings)} reference records."
+    )
+
+
+@app.post("/analyze/{project_id}/joint", response_model=AnalyzeBatchResponse, tags=["Analytics"])
+def analyze_joint_batch(
+    project_id: str,
+    request: AnalyzeJointBatchRequest,
+    background_tasks: BackgroundTasks,
+    client: dict = Depends(verify_access)
+):
+    """Compares a production batch of joint records against the locked joint baseline via the Domain Classifier Test."""
+    state = crud.get_baseline(project_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Baseline not found. Call /fit/{project_id}/joint first.")
+    if state["modality"] != "joint":
+        raise HTTPException(status_code=400, detail=f"Project '{project_id}' has a '{state['modality']}' baseline, not 'joint'.")
+
+    records = [r.model_dump() for r in request.production_records]
+    tabular_stats = state["feature_types"]
+
+    try:
+        cur_embeddings = JointAdapter().transform(records, tabular_stats)
         result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

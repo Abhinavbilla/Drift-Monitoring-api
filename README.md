@@ -500,6 +500,8 @@ print(response.json())
 | `/analyze/{project_id}/text` | POST | Compare a text production batch via the Domain Classifier Test |
 | `/fit/{project_id}/image` | POST | Lock an image baseline (embeds base64-encoded `reference_images`) |
 | `/analyze/{project_id}/image` | POST | Compare an image production batch via the Domain Classifier Test |
+| `/fit/{project_id}/joint` | POST | Lock a joint baseline from records combining tabular/text/image (`reference_records`) |
+| `/analyze/{project_id}/joint` | POST | Compare a joint production batch via the Domain Classifier Test |
 | `/profile` | POST | Profile a tabular dataset's columns without locking a baseline |
 | `/projects` | GET | List all projects for the authenticated user |
 | `/baseline/{project_id}` | GET | Fetch IQR fences, feature types, and modality for a project |
@@ -570,6 +572,8 @@ python tests/test_embedding_validation.py
 **Embedding model choice is fixed, not tunable:** `all-MiniLM-L6-v2` (text) and `resnet18` (image) were chosen for their small footprint on a free-tier deployment. There's no per-use-case model selection yet — a domain with very different characteristics (e.g. highly technical text, medical imaging) may see worse separability than these general-purpose embeddings provide.
 
 **Heavier container images for text/image support:** `torch`, `torchvision`, and `sentence-transformers` meaningfully increase image size and cold-start time versus the previous tabular-only stack, on top of Render's existing free-tier spin-down behavior.
+
+**Joint multimodal drift can't catch a pure correlation inversion:** `/fit/{project_id}/joint` and `/analyze/{project_id}/joint` detect drift in the *combination* of tabular/text/image fields (e.g. metadata that's individually normal but paired with the wrong image), by concatenating per-modality embeddings into one vector and running the same Domain Classifier Test used for text/image. But that detector (`drift/embedding_detector.py`, deliberately left unmodified) is a linear classifier over concatenated features, which structurally cannot catch the purest form of a joint anomaly: a case where each modality's own marginal distribution is completely unchanged and only the *pairing* between two modalities flips — that requires an XOR-style interaction a linear model can't represent, regardless of sample size. This was proven empirically (see `tests/test_joint_adapter.py`'s `test_pure_correlation_inversion_is_a_known_blind_spot`) rather than assumed. Correlation breaks that come with any marginal movement in a modality, or a shift in which modalities are typically sent together, are unaffected. Dashboard UI for this modality doesn't exist yet either — it's currently API-only.
 
 ---
 

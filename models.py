@@ -93,3 +93,25 @@ class AnalyzeImageBatchRequest(BaseModel):
 class EmbeddingFitResponse(BaseModel):
     status: str
     message: str
+
+
+# ---------------------------------------------------------
+# JOINT MULTIMODAL CONTEXT DRIFT MONITORING
+# ---------------------------------------------------------
+
+class JointRecord(BaseModel):
+    tabular: Optional[Dict[str, Any]] = Field(
+        default=None, description="Structured fields for this record, if present."
+    )
+    text: Optional[str] = Field(default=None, description="Associated text, if present.")
+    image: Optional[str] = Field(default=None, description="Associated base64-encoded image, if present.")
+
+class FitJointBaselineRequest(BaseModel):
+    reference_records: List[JointRecord] = Field(
+        ..., description="Baseline batch of joint records (each with any subset of tabular/text/image) to lock as the reference distribution."
+    )
+
+class AnalyzeJointBatchRequest(BaseModel):
+    production_records: List[JointRecord] = Field(
+        ..., description="Recent batch of joint records to compare against the joint baseline."
+    )

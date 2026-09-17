@@ -212,6 +212,46 @@ def insert_embedding_baseline(project_id: str, modality: str, embeddings, model_
     conn.commit()
     conn.close()
 
+def insert_joint_baseline(project_id: str, embeddings, tabular_stats: dict, model_name: str, max_reference_samples: int = 3000):
+    """
+    Stores a joint-modality baseline: raw reference embeddings (same
+    capping/sampling as insert_embedding_baseline) plus the tabular
+    sub-schema statistics (per-field mean/std or category frequencies)
+    needed to vectorize tabular fields consistently at /analyze time.
+
+    Deliberately a separate function rather than extending
+    insert_embedding_baseline — it repurposes the feature_types column
+    (normally hardcoded to '{}' for text/image rows) to hold tabular_stats
+    instead, and keeping it separate means the text/image code path is
+    provably untouched.
+    """
+    embeddings_arr = np.asarray(embeddings)
+    if len(embeddings_arr) > max_reference_samples:
+        rng = np.random.default_rng(42)
+        idx = rng.choice(len(embeddings_arr), size=max_reference_samples, replace=False)
+        embeddings_arr = embeddings_arr[idx]
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO baselines
+            (project_id, feature_types, reference_data, iqr_fences, categorical_baselines,
+             modality, embedding_reference, embedding_model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        project_id,
+        json.dumps(tabular_stats),
+        json.dumps({}),
+        json.dumps([]),
+        json.dumps({}),
+        "joint",
+        json.dumps(embeddings_arr.tolist()),
+        model_name,
+    ))
+    conn.commit()
+    conn.close()
+
+
 def insert_log(project_id: str, input_data: dict, score: float, is_ood: int):
     conn = get_connection()
     cursor = conn.cursor()
