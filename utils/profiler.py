@@ -1,7 +1,38 @@
 import pandas as pd
 import re
 from dataclasses import dataclass
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
+
+# Shared with compute_signals' own text->numeric promotion rule below, so a
+# column's classification (continuous vs categorical) and its actual cleaned
+# values always agree -- two independent implementations of "80%" drifting
+# apart was exactly the kind of silent inconsistency that let a stray
+# non-numeric cell reach storage uncoerced (see db/crud.py's
+# _calculate_boundaries and tests/test_ingestion_robustness.py).
+NUMERIC_COERCION_THRESHOLD = 0.80
+
+
+def coerce_numeric_column(values: List[Any], threshold: float = NUMERIC_COERCION_THRESHOLD) -> Tuple[Optional[List[float]], int]:
+    """
+    Attempts to coerce a column's raw values to numeric. If the success
+    rate is above `threshold`, returns (cleaned_values, dropped_count) --
+    the successfully-coerced values only, with unconvertible cells dropped
+    rather than crashing downstream on a mixed-type list. If coercion
+    success is below threshold, returns (None, 0): the column should be
+    treated as categorical instead, values unchanged by the caller.
+    """
+    non_null = [x for x in values if x is not None]
+    if not non_null:
+        return [], 0
+
+    series = pd.Series(non_null)
+    coerced = pd.to_numeric(series, errors="coerce")
+    if coerced.notna().mean() <= threshold:
+        return None, 0
+
+    clean_values = coerced.dropna().tolist()
+    dropped = len(non_null) - len(clean_values)
+    return clean_values, dropped
 
 
 @dataclass
@@ -33,7 +64,7 @@ def compute_signals(series: pd.Series, n_rows: int) -> ColumnSignals:
     # --- Feature Coercion ---
     if is_text and not is_datetime:
         coerced = pd.to_numeric(series, errors='coerce')
-        if coerced.notna().mean() > 0.80:
+        if coerced.notna().mean() > NUMERIC_COERCION_THRESHOLD:
             series = coerced
             is_float = pd.api.types.is_float_dtype(series)
             is_integer = pd.api.types.is_integer_dtype(series)

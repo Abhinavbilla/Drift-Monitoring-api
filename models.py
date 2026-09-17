@@ -11,6 +11,10 @@ class FitBaselineResponse(BaseModel):
     inferred_feature_types: Dict[str, str] = Field(
         description="Shows whether the engine classified each feature as 'continuous' or 'categorical'."
     )
+    cleaning_summary: Dict[str, Dict[str, int]] = Field(
+        default_factory=dict,
+        description="Per-column counts of values dropped during ingestion (e.g. non-numeric cells in a continuous column), so silent data loss is visible rather than hidden."
+    )
 
 
 

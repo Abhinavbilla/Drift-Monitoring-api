@@ -25,6 +25,7 @@ DEFAULT_BASELINE_SAMPLE_SIZE = 50000
 # backend modules directly).
 EMBEDDING_RECOMMENDED_MIN_SAMPLES = 40
 EMBEDDING_HARD_MIN_SAMPLES = 4
+TABULAR_RECOMMENDED_MIN_SAMPLES = 40  # matches utils/validation.py's TABULAR_RECOMMENDED_MIN_SAMPLES
 DEFAULT_PRODUCTION_BATCH_SIZE = 25000
 # ---------------------------------------------------------
 # 1. PAGE SETUP & ADAPTIVE UI CSS (Must be first!)
@@ -98,6 +99,21 @@ def mint_session_token(user_info: dict) -> str:
 # ---------------------------------------------------------
 # HELPER: Read either a .csv or .dat uploaded file
 # ---------------------------------------------------------
+
+def _backend_error_detail(response) -> str:
+    """
+    Extracts the structured `detail` message from a backend error response
+    (main.py's ingestion validation returns clean 422/400s naming exactly
+    what's wrong) instead of showing the raw JSON envelope. Falls back to
+    the raw response text for anything that isn't in that shape.
+    """
+    try:
+        detail = response.json().get("detail")
+        if isinstance(detail, str):
+            return detail
+    except (ValueError, AttributeError):
+        pass
+    return response.text
 
 def _is_module_available(module_name: str) -> bool:
     """
@@ -403,7 +419,7 @@ def render_embedding_fit_ui(modality: str, session_token: str, key_prefix: str):
                         st.session_state.selected_model = new_model_id
                         st.rerun()
                     else:
-                        st.error(f"Backend Error: {response.text}")
+                        st.error(f"Backend Error: {_backend_error_detail(response)}")
                 except Exception as e:
                     st.error(f"Error processing files: {str(e)}")
 
@@ -497,7 +513,7 @@ def render_embedding_analyze_ui(modality: str, project_id: str, session_token: s
                         else:
                             st.success(f"✅ No significant drift — AUC {auc:.4f} is close to 0.5 (indistinguishable from baseline).")
                     else:
-                        st.error(f"Backend Error: {resp.text}")
+                        st.error(f"Backend Error: {_backend_error_detail(resp)}")
                 except Exception as e:
                     st.error(f"Error analyzing batch: {str(e)}")
 
@@ -636,6 +652,13 @@ if active_project == "➕ Add New Model":
 
             # Combine all uploaded files into one massive dataframe
             combined_df = pd.concat(train_dfs, ignore_index=True)
+
+            if len(combined_df) < TABULAR_RECOMMENDED_MIN_SAMPLES:
+                st.warning(
+                    f"{len(combined_df)} rows loaded — below the recommended "
+                    f"{TABULAR_RECOMMENDED_MIN_SAMPLES}. The baseline will still be built, but "
+                    "with this few rows it may not be statistically reliable."
+                )
 
             preview_df = combined_df.sample(n=min(10000,len(combined_df)), random_state=42).reset_index(drop=True)
 
@@ -796,7 +819,7 @@ if active_project == "➕ Add New Model":
                             st.session_state.selected_model = new_model_id
                             st.rerun()
                         else:
-                            st.error(f"Backend Error: {response.text}")
+                            st.error(f"Backend Error: {_backend_error_detail(response)}")
 
                     except Exception as e:
                         st.error(f"Error processing files: {str(e)}")
@@ -1160,6 +1183,12 @@ else:
             combined_df = pd.concat(train_dfs, ignore_index=True)
             st.session_state.combined_df = combined_df  # store to avoid recompute on button click
 
+            if len(combined_df) < TABULAR_RECOMMENDED_MIN_SAMPLES:
+                st.warning(
+                    f"{len(combined_df)} rows loaded — below the recommended "
+                    f"{TABULAR_RECOMMENDED_MIN_SAMPLES}. The baseline will still be built, but "
+                    "with this few rows it may not be statistically reliable."
+                )
 
             preview_df = combined_df.sample(
                 n=min(10000,len(combined_df)), random_state=42
@@ -1323,7 +1352,7 @@ else:
 
                             st.rerun()
                         else:
-                            st.error(f"Backend Error: {response.text}")
+                            st.error(f"Backend Error: {_backend_error_detail(response)}")
 
                     except Exception as e:
                         st.error(f"Error processing files: {str(e)}")

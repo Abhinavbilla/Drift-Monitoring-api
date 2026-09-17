@@ -1,11 +1,13 @@
 import sqlite3
 import jwt
+import binascii
 import pandas as pd
 from typing import Dict, List, Any
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
+from PIL import UnidentifiedImageError
 from drift.alerts import send_drift_email
 # Importing custom modules
 from models import (
@@ -20,15 +22,31 @@ from models import (
 )
 from db import crud
 from drift.detector import compute_iqr_anomalies, DistributionDetector
-from drift.embedding_detector import EmbeddingDriftDetector
+from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES
 from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
 from adapters.image import ImageAdapter
 from adapters.joint import JointAdapter, build_joint_classifier
 from utils.profiler import profile_columns
+from utils.validation import (
+    ValidationError,
+    validate_tabular_columns,
+    warn_if_below_recommended_samples,
+    validate_min_samples,
+    validate_joint_records,
+)
 from drift.alerts import check_drift_alert
 import os
 from dotenv import load_dotenv
+
+# Adapter-level exceptions that mean "the input was malformed," not "the
+# server is broken" -- caught around every adapter .transform() call below
+# and converted to a clean 400 instead of a raw 500. Verified, not assumed:
+# PIL.UnidentifiedImageError is an OSError subclass (NOT a ValueError), so a
+# bare `except ValueError` would miss the single most likely real-world
+# failure (a corrupted or non-image file upload) -- see
+# tests/test_ingestion_robustness.py.
+BAD_INPUT_EXCEPTIONS = (ValueError, UnidentifiedImageError, binascii.Error, UnicodeDecodeError)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -86,6 +104,20 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+
+@app.exception_handler(ValidationError)
+async def validation_error_handler(request, exc: ValidationError):
+    """
+    Central conversion of structural ingestion problems (utils/validation.py)
+    into a clean 422 naming exactly what's wrong -- so every endpoint can
+    just call validate_*() and let a ValidationError propagate, instead of
+    repeating try/except boilerplate at each of the eight fit/analyze
+    handlers.
+    """
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
+
 
 @app.get("/baseline/{project_id}", tags=["Management"])
 def get_baseline(project_id: str, client: dict = Depends(verify_access)):
@@ -154,13 +186,27 @@ def profile_dataset(request: ProfileRequest, client: dict = Depends(verify_acces
 @app.post("/fit/{project_id}", response_model=FitBaselineResponse, tags=["Machine Learning"])
 def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dict = Depends(verify_access)):
     """
-    Upload historical training data. The system will profile it, 
+    Upload historical training data. The system will profile it,
     calculate the IQR boundaries, and lock the baseline in the database.
     """
-    
+    # 0. Structural validation, before any DataFrame construction --
+    # validated separately per dict (not combined) because reference_data
+    # and categorical_data are legitimately allowed to differ in length
+    # (the dashboard drops NaN rows independently per split; step 3 below
+    # already handles that intentionally). What's NOT legitimate is
+    # mismatched lengths *within* one dict -- that's what crashes
+    # pd.DataFrame() below with a generic pandas error instead of a
+    # specific one; see tests/test_ingestion_robustness.py.
+    if request.reference_data:
+        validate_tabular_columns(request.reference_data)
+    if request.categorical_data:
+        validate_tabular_columns(request.categorical_data)
+    if not request.reference_data and not request.categorical_data:
+        raise ValidationError("At least one of reference_data or categorical_data must be provided.")
+
     # 1. Create DataFrames from the request data
     continuous_df = pd.DataFrame(request.reference_data) if request.reference_data else pd.DataFrame()
-    
+
     # 2. Get categorical data (may be None)
     categorical_dict = request.categorical_data or {}
     categorical_df = pd.DataFrame(categorical_dict) if categorical_dict else pd.DataFrame()
@@ -198,21 +244,32 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     }
     
     # 8. Persist baselines
-    crud.insert_baseline(
+    cleaning_summary = crud.insert_baseline(
         project_id=project_id,
         feature_types=inferred_feature_types,
         reference_data=continuous_features,
         categorical_data=categorical_features
     )
-    
+
     crud.create_project(project_id, f"Project {project_id}", client["email"])
-    
+
+    message = (
+        f"Baseline locked for project '{project_id}' by {client['name']}. "
+        f"Monitoring {len(continuous_features)} continuous and "
+        f"{len(categorical_features)} categorical features."
+    )
+    sample_warning = warn_if_below_recommended_samples(len(combined_df), label="rows")
+    if sample_warning:
+        message += f" Warning: {sample_warning}"
+    if cleaning_summary:
+        dropped_note = ", ".join(f"{col}: {info['dropped_non_numeric']} dropped" for col, info in cleaning_summary.items())
+        message += f" Note: non-numeric values were dropped during cleaning ({dropped_note})."
+
     return FitBaselineResponse(
         status="success",
-        message=f"Baseline locked for project '{project_id}' by {client['name']}. "
-                f"Monitoring {len(continuous_features)} continuous and "
-                f"{len(categorical_features)} categorical features.",
-        inferred_feature_types=inferred_feature_types
+        message=message,
+        inferred_feature_types=inferred_feature_types,
+        cleaning_summary=cleaning_summary,
     )
 # ---------------------------------------------------------
 # ENDPOINT 2: REAL-TIME ANOMALY TRIPWIRE
@@ -297,7 +354,14 @@ def analyze_production_batch(
 @app.post("/fit/{project_id}/text", response_model=EmbeddingFitResponse, tags=["Machine Learning"])
 def fit_text_baseline(project_id: str, request: FitTextBaselineRequest, client: dict = Depends(verify_access)):
     """Embeds a baseline batch of text and locks it as the reference distribution."""
-    embeddings = TextAdapter().transform(request.reference_texts)
+    sample_warning = validate_min_samples(
+        len(request.reference_texts), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "reference text"
+    )
+
+    try:
+        embeddings = TextAdapter().transform(request.reference_texts)
+    except BAD_INPUT_EXCEPTIONS as e:
+        raise HTTPException(status_code=400, detail=f"Could not embed reference_texts: {e}")
 
     crud.insert_embedding_baseline(
         project_id=project_id,
@@ -307,10 +371,11 @@ def fit_text_baseline(project_id: str, request: FitTextBaselineRequest, client: 
     )
     crud.create_project(project_id, f"Project {project_id}", client["email"])
 
-    return EmbeddingFitResponse(
-        status="success",
-        message=f"Text baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
-    )
+    message = f"Text baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
+    if sample_warning:
+        message += f" Warning: {sample_warning}"
+
+    return EmbeddingFitResponse(status="success", message=message)
 
 
 @app.post("/analyze/{project_id}/text", response_model=AnalyzeBatchResponse, tags=["Analytics"])
@@ -327,10 +392,12 @@ def analyze_text_batch(
     if state["modality"] != "text":
         raise HTTPException(status_code=400, detail=f"Project '{project_id}' has a '{state['modality']}' baseline, not 'text'.")
 
-    cur_embeddings = TextAdapter().transform(request.production_texts)
+    validate_min_samples(len(request.production_texts), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "production text")
+
     try:
+        cur_embeddings = TextAdapter().transform(request.production_texts)
         result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
-    except ValueError as e:
+    except BAD_INPUT_EXCEPTIONS as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     if result["drift_detected"]:
@@ -353,7 +420,14 @@ def analyze_text_batch(
 @app.post("/fit/{project_id}/image", response_model=EmbeddingFitResponse, tags=["Machine Learning"])
 def fit_image_baseline(project_id: str, request: FitImageBaselineRequest, client: dict = Depends(verify_access)):
     """Embeds a baseline batch of images and locks it as the reference distribution."""
-    embeddings = ImageAdapter().transform(request.reference_images)
+    sample_warning = validate_min_samples(
+        len(request.reference_images), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "reference image"
+    )
+
+    try:
+        embeddings = ImageAdapter().transform(request.reference_images)
+    except BAD_INPUT_EXCEPTIONS as e:
+        raise HTTPException(status_code=400, detail=f"Could not decode reference_images: {e}")
 
     crud.insert_embedding_baseline(
         project_id=project_id,
@@ -363,10 +437,11 @@ def fit_image_baseline(project_id: str, request: FitImageBaselineRequest, client
     )
     crud.create_project(project_id, f"Project {project_id}", client["email"])
 
-    return EmbeddingFitResponse(
-        status="success",
-        message=f"Image baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
-    )
+    message = f"Image baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
+    if sample_warning:
+        message += f" Warning: {sample_warning}"
+
+    return EmbeddingFitResponse(status="success", message=message)
 
 
 @app.post("/analyze/{project_id}/image", response_model=AnalyzeBatchResponse, tags=["Analytics"])
@@ -383,10 +458,12 @@ def analyze_image_batch(
     if state["modality"] != "image":
         raise HTTPException(status_code=400, detail=f"Project '{project_id}' has a '{state['modality']}' baseline, not 'image'.")
 
-    cur_embeddings = ImageAdapter().transform(request.production_images)
+    validate_min_samples(len(request.production_images), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "production image")
+
     try:
+        cur_embeddings = ImageAdapter().transform(request.production_images)
         result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
-    except ValueError as e:
+    except BAD_INPUT_EXCEPTIONS as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     if result["drift_detected"]:
@@ -410,12 +487,14 @@ def analyze_image_batch(
 def fit_joint_baseline(project_id: str, request: FitJointBaselineRequest, client: dict = Depends(verify_access)):
     """Embeds a baseline batch of joint records (tabular + text + image) and locks it as the reference distribution."""
     records = [r.model_dump() for r in request.reference_records]
-    adapter = JointAdapter()
+    validate_joint_records(records)
+    sample_warning = validate_min_samples(len(records), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "reference record")
 
+    adapter = JointAdapter()
     try:
         tabular_stats = adapter.fit_tabular_schema(records)
         embeddings = adapter.transform(records, tabular_stats)
-    except ValueError as e:
+    except BAD_INPUT_EXCEPTIONS as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     crud.insert_joint_baseline(
@@ -428,7 +507,10 @@ def fit_joint_baseline(project_id: str, request: FitJointBaselineRequest, client
 
     return EmbeddingFitResponse(
         status="success",
-        message=f"Joint baseline locked for project '{project_id}' with {len(embeddings)} reference records."
+        message=(
+            f"Joint baseline locked for project '{project_id}' with {len(embeddings)} reference records."
+            + (f" Warning: {sample_warning}" if sample_warning else "")
+        )
     )
 
 
@@ -447,12 +529,14 @@ def analyze_joint_batch(
         raise HTTPException(status_code=400, detail=f"Project '{project_id}' has a '{state['modality']}' baseline, not 'joint'.")
 
     records = [r.model_dump() for r in request.production_records]
+    validate_joint_records(records)
+    validate_min_samples(len(records), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "production record")
     tabular_stats = state["feature_types"]
 
     try:
         cur_embeddings = JointAdapter().transform(records, tabular_stats)
         result = EmbeddingDriftDetector(classifier=build_joint_classifier()).analyze(state["embedding_reference"], cur_embeddings)
-    except ValueError as e:
+    except BAD_INPUT_EXCEPTIONS as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     if result["drift_detected"]:

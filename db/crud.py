@@ -1,10 +1,19 @@
 import sqlite3
 import json
 import numpy as np
-from typing import Dict, List, Any
-from typing import Optional   
-import pandas as pd 
+from typing import Dict, List, Any, Tuple
+from typing import Optional
+import pandas as pd
+
+from utils.profiler import coerce_numeric_column
+
 DB_PATH = "drift.db"
+
+# Matches utils/profiler.py's own "Low-cardinality text (Suitable for PSI)"
+# threshold -- a storage-layer safety net, not a duplicate classification
+# decision, for whatever reaches here without having gone through the
+# profiler (e.g. a caller other than /fit/{project_id}).
+MAX_CATEGORICAL_CARDINALITY = 50
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
@@ -72,57 +81,108 @@ def create_project(project_id: str, name: str, owner_email: str):
     conn.commit()
     conn.close()
 
-def _calculate_boundaries(reference_data: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
-    """Calculates Q1/Q3 for numbers, and Allowed Sets for categorical strings."""
+def _calculate_boundaries(reference_data: Dict[str, List[Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, int]]]:
+    """
+    Calculates Q1/Q3 for numbers, and Allowed Sets for categorical strings.
+
+    Classification used to be "check the first non-null value's type" --
+    a single stray non-numeric cell (a real-world "N/A"/typo placeholder)
+    either crashed np.percentile on a mixed-type list (if a number came
+    first) or silently miscategorized an entire numeric column as
+    categorical (if the bad value came first). Both reproduced in
+    tests/test_ingestion_robustness.py. Now uses the same coercion rule
+    utils/profiler.py's own classification already relies on
+    (coerce_numeric_column, shared threshold) so a column's type decision
+    and its actual cleaned values can never disagree, and unconvertible
+    cells are dropped with a reported count instead of crashing.
+
+    Returns (fences, cleaning_summary) -- cleaning_summary reports how many
+    values were dropped per column, so silent data loss stays visible.
+    """
     fences = []
+    cleaning_summary: Dict[str, Dict[str, int]] = {}
+
     for feature, data in reference_data.items():
         clean_data = [x for x in data if x is not None]
         if not clean_data:
             continue
-        
-        # 1. CATEGORICAL DATA (Strings)
-        if isinstance(clean_data[0], str):
-            # Find all unique words in this column
-            unique_values = list(set(clean_data))
-            fences.append({
-                "feature_name": feature,
-                "type": "categorical",
-                "allowed_values": unique_values
-            })
-            
-        # 2. NUMERICAL DATA (Floats/Integers)
-        else:
-            q1 = float(np.percentile(clean_data, 25))
-            q3 = float(np.percentile(clean_data, 75))
+
+        numeric_values, dropped = coerce_numeric_column(clean_data)
+
+        # 1. NUMERICAL DATA (coercion succeeded above threshold)
+        if numeric_values is not None:
+            if not numeric_values:
+                continue
+            q1 = float(np.percentile(numeric_values, 25))
+            q3 = float(np.percentile(numeric_values, 75))
             fences.append({
                 "feature_name": feature,
                 "type": "continuous",
                 "q1": q1,
                 "q3": q3
             })
-            
-    return fences
+            if dropped:
+                cleaning_summary[feature] = {"dropped_non_numeric": dropped}
+
+        # 2. CATEGORICAL DATA (everything else)
+        else:
+            unique_values = list(set(clean_data))
+            if len(unique_values) > MAX_CATEGORICAL_CARDINALITY:
+                raise ValueError(
+                    f"Column '{feature}' has {len(unique_values)} unique values, exceeding the "
+                    f"{MAX_CATEGORICAL_CARDINALITY}-value cap for categorical fields — likely a "
+                    f"high-cardinality/free-text/ID field that shouldn't be monitored as categorical."
+                )
+            fences.append({
+                "feature_name": feature,
+                "type": "categorical",
+                "allowed_values": unique_values
+            })
+
+    return fences, cleaning_summary
 
 def insert_baseline(
-    project_id: str, 
-    feature_types: dict, 
+    project_id: str,
+    feature_types: dict,
     reference_data: dict,
     categorical_data: Optional[dict] = None
-):
+) -> Dict[str, Dict[str, int]]:
     """
     Stores all raw reference data (continuous + categorical) in `reference_data` column.
     This ensures batch drift detection (PSI/KS) can access the full distribution.
     Real‑time fences (IQR + allowed values) are stored separately in `iqr_fences`.
+
+    Returns a cleaning_summary ({field: {"dropped_non_numeric": n}}) for any
+    continuous column that had unconvertible cells dropped, so callers can
+    surface that data loss instead of it being silent.
     """
     # Merge continuous and categorical raw data into a single dictionary
     combined_raw_data = dict(reference_data)
     if categorical_data:
         combined_raw_data.update(categorical_data)
-    
+
+    # Clean continuous columns BEFORE they're stored, not just when computing
+    # fences below -- this same reference_data blob is separately consumed by
+    # DistributionDetector's batch KS-test (drift/detector.py), which doesn't
+    # crash on a mixed numeric/string column, it silently produces WRONG
+    # statistics (numpy upcasts the array to string dtype, so ks_2samp
+    # compares strings lexicographically) -- verified, not assumed; see
+    # tests/test_ingestion_robustness.py.
+    cleaning_summary: Dict[str, Dict[str, int]] = {}
+    for feature, ftype in feature_types.items():
+        if ftype == "continuous" and feature in combined_raw_data:
+            numeric_values, dropped = coerce_numeric_column(combined_raw_data[feature])
+            if numeric_values is not None:
+                combined_raw_data[feature] = numeric_values
+                if dropped:
+                    cleaning_summary[feature] = {"dropped_non_numeric": dropped}
+
     # Calculate IQR fences (for continuous) AND allowed values (for categorical)
-    # This uses the merged data so categorical features get their allowed_values.
-    fences = _calculate_boundaries(combined_raw_data)
-    
+    # This uses the now-cleaned merged data so fences and the stored blob agree.
+    fences, fence_cleaning_summary = _calculate_boundaries(combined_raw_data)
+    for feature, info in fence_cleaning_summary.items():
+        cleaning_summary.setdefault(feature, {}).update(info)
+
     # (Optional) Pre‑compute frequency baselines for categorical features
     # Not strictly needed because we now have raw data, but kept for backward compatibility.
     cat_freq_baselines = {}
@@ -149,9 +209,11 @@ def insert_baseline(
         json.dumps(fences),
         json.dumps(cat_freq_baselines)
     ))
-    
+
     conn.commit()
     conn.close()
+
+    return cleaning_summary
 
 def get_baseline(project_id: str) -> dict:
     """Retrieves the model state and parses the JSON back into Python dictionaries."""
