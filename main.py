@@ -24,7 +24,7 @@ from drift.embedding_detector import EmbeddingDriftDetector
 from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
 from adapters.image import ImageAdapter
-from adapters.joint import JointAdapter
+from adapters.joint import JointAdapter, build_joint_classifier
 from utils.profiler import profile_columns
 from drift.alerts import check_drift_alert
 import os
@@ -451,7 +451,7 @@ def analyze_joint_batch(
 
     try:
         cur_embeddings = JointAdapter().transform(records, tabular_stats)
-        result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+        result = EmbeddingDriftDetector(classifier=build_joint_classifier()).analyze(state["embedding_reference"], cur_embeddings)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

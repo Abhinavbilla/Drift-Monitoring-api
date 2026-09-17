@@ -1,6 +1,7 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
+from sklearn.base import ClassifierMixin
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.metrics import roc_auc_score
@@ -24,9 +25,20 @@ class EmbeddingDriftDetector:
     plain embedding matrices.
     """
 
-    def __init__(self, auc_threshold: float = 0.65, n_splits: int = 5):
+    def __init__(self, auc_threshold: float = 0.65, n_splits: int = 5, classifier: Optional[ClassifierMixin] = None):
+        """
+        classifier: defaults to exactly today's LogisticRegression(max_iter=1000)
+        when omitted, so every existing caller (text/image endpoints) is
+        provably unaffected by this parameter's existence. A caller can
+        opt into a different classifier — e.g. adapters/joint.py's
+        build_joint_classifier() — without changing anyone else's behavior.
+        See build_joint_classifier()'s docstring for why joint embeddings
+        specifically need a different one (L1 sparsity vs. this default's
+        L2), and why that classifier is NOT used here as the new default.
+        """
         self.auc_threshold = auc_threshold
         self.n_splits = n_splits
+        self.classifier = classifier if classifier is not None else LogisticRegression(max_iter=1000)
 
     def analyze(self, ref_embeddings: np.ndarray, cur_embeddings: np.ndarray) -> Dict[str, Any]:
         ref_embeddings = np.asarray(ref_embeddings)
@@ -48,10 +60,9 @@ class EmbeddingDriftDetector:
                 "batches to run the Domain Classifier Test."
             )
 
-        classifier = LogisticRegression(max_iter=1000)
         cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-        probs = cross_val_predict(classifier, X, y, cv=cv, method="predict_proba")[:, 1]
+        probs = cross_val_predict(self.classifier, X, y, cv=cv, method="predict_proba")[:, 1]
         auc = roc_auc_score(y, probs)
 
         return {

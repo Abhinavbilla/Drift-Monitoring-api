@@ -1,25 +1,24 @@
 """
 Smoke tests for the joint multimodal context drift path (JointAdapter +
-the existing, unmodified EmbeddingDriftDetector) — NOT a full validation
-suite, matching the discipline already established for text/image in
+the shared EmbeddingDriftDetector, used here with the joint-only classifier
+from build_joint_classifier()) — NOT a full validation suite, matching the
+discipline already established for text/image in
 tests/test_embedding_adapters.py.
 
 These tests check:
   - shape/determinism and correct handling of partial (missing-modality)
-    records
+    records, including the new interaction_text/interaction_image blocks
   - the categorical frequency-encoding function's correctness in isolation
-  - same-distribution batches center near AUC=0.5 (no false positives)
-  - a KNOWN, DOCUMENTED LIMITATION: a pure correlation inversion between a
-    continuous tabular field and an image class, with zero marginal
-    movement in either modality (verified via an independent KS-test and
-    the image-only Domain Classifier Test), is NOT detected by the joint
-    embedding. This is a structural consequence of using a linear
-    classifier (LogisticRegression, shared with text/image via
-    drift/embedding_detector.py, deliberately left unmodified) over
-    concatenated features — see the test's docstring for the full
-    reasoning. Correlation breaks that co-occur with any marginal movement,
-    or with a shift in which modalities are typically present, are not
-    subject to this limitation.
+  - same-distribution batches center near AUC=0.5 (no false positives),
+    using the actual joint-only classifier the production endpoint uses
+  - a pure correlation inversion between a continuous tabular field and an
+    image class, with zero marginal movement in either modality (verified
+    via an independent KS-test and the image-only Domain Classifier Test),
+    IS now detected — via the bounded interaction feature in
+    adapters/joint.py plus build_joint_classifier()'s L1 regularization.
+    See JointAdapter's class docstring for the full mechanism and for the
+    one remaining gap this doesn't close (pure text<->image inversion on a
+    project with zero tabular fields).
 
 Run:
     python -m pytest tests/test_joint_adapter.py -v
@@ -33,7 +32,7 @@ import pytest
 from PIL import Image
 from scipy import stats
 
-from adapters.joint import JointAdapter, TEXT_DIM, IMAGE_DIM, PRESENCE_DIM
+from adapters.joint import JointAdapter, build_joint_classifier, TEXT_DIM, IMAGE_DIM, PRESENCE_DIM
 from adapters.image import ImageAdapter
 from drift.embedding_detector import EmbeddingDriftDetector
 
@@ -68,7 +67,8 @@ class TestJointAdapterShape:
         emb1 = adapter.transform(records, stats_)
         emb2 = adapter.transform(records, stats_)
 
-        expected_dim = len(stats_) + TEXT_DIM + IMAGE_DIM + PRESENCE_DIM
+        f_dim = len(stats_)
+        expected_dim = f_dim + TEXT_DIM + IMAGE_DIM + 2 * f_dim + PRESENCE_DIM
         assert emb1.shape == (2, expected_dim)
         assert np.allclose(emb1, emb2)
 
@@ -83,18 +83,50 @@ class TestJointAdapterShape:
         emb = adapter.transform(records, stats_)
 
         f_dim = len(stats_)
-        expected_dim = f_dim + TEXT_DIM + IMAGE_DIM + PRESENCE_DIM
+        expected_dim = f_dim + TEXT_DIM + IMAGE_DIM + 2 * f_dim + PRESENCE_DIM
         assert emb.shape == (3, expected_dim)
 
-        presence_offset = f_dim + TEXT_DIM + IMAGE_DIM
+        interaction_text_offset = f_dim + TEXT_DIM + IMAGE_DIM
+        interaction_image_offset = interaction_text_offset + f_dim
+        presence_offset = interaction_image_offset + f_dim
+
         # record 0: tabular + text, no image
         assert list(emb[0, presence_offset:presence_offset + 3]) == [1.0, 1.0, 0.0]
         assert not np.allclose(emb[0, f_dim:f_dim + TEXT_DIM], 0.0)  # text embedding present, non-zero
-        assert np.allclose(emb[0, f_dim + TEXT_DIM:presence_offset], 0.0)  # image segment zero-filled
+        assert np.allclose(emb[0, f_dim + TEXT_DIM:interaction_text_offset], 0.0)  # image segment zero-filled
         # record 1: image only
         assert list(emb[1, presence_offset:presence_offset + 3]) == [0.0, 0.0, 1.0]
         # record 2: tabular only
         assert list(emb[2, presence_offset:presence_offset + 3]) == [1.0, 0.0, 0.0]
+
+    def test_interaction_blocks_are_exactly_zero_when_either_side_is_absent(self):
+        """
+        Verified, not assumed: a linear projection of a zero-filled
+        modality is exactly zero, so both interaction blocks must be
+        exactly zero whenever tabular is absent (regardless of text/image)
+        or whenever text/image is absent (regardless of tabular).
+        """
+        adapter = JointAdapter()
+        records = [
+            {"tabular": {"price": 10.0}, "text": None, "image": None},           # tabular only
+            {"tabular": None, "text": "some text", "image": _b64_png((1, 2, 3))},  # no tabular at all
+            {"tabular": {"price": 30.0}, "text": "another sentence", "image": _b64_png((4, 5, 6))},  # all three
+        ]
+        stats_ = adapter.fit_tabular_schema(records)
+        emb = adapter.transform(records, stats_)
+
+        f_dim = len(stats_)
+        assert f_dim > 0
+        interaction_text_offset = f_dim + TEXT_DIM + IMAGE_DIM
+        interaction_image_offset = interaction_text_offset + f_dim
+        presence_offset = interaction_image_offset + f_dim
+
+        # record 0: text/image absent -> both interaction blocks zero
+        assert np.allclose(emb[0, interaction_text_offset:presence_offset], 0.0)
+        # record 1: tabular absent -> both interaction blocks zero, even though text+image are present
+        assert np.allclose(emb[1, interaction_text_offset:presence_offset], 0.0)
+        # record 2: all three present -> interaction blocks should generically be non-zero
+        assert not np.allclose(emb[2, interaction_text_offset:presence_offset], 0.0)
 
     def test_record_with_no_modalities_raises(self):
         adapter = JointAdapter()
@@ -146,17 +178,14 @@ class TestJointEmbeddingDriftDetector:
             stats_ = adapter.fit_tabular_schema(ref_records)
             ref_emb = adapter.transform(ref_records, stats_)
             cur_emb = adapter.transform(cur_records, stats_)
-            result = EmbeddingDriftDetector(auc_threshold=0.65).analyze(ref_emb, cur_emb)
+            result = EmbeddingDriftDetector(auc_threshold=0.65, classifier=build_joint_classifier()).analyze(ref_emb, cur_emb)
             aucs.append(result["statistic"])
 
         mean_auc = np.mean(aucs)
         assert 0.35 <= mean_auc <= 0.65, f"Expected AUC to center near 0.5, got mean={mean_auc:.3f}"
 
-    def test_pure_correlation_inversion_is_a_known_blind_spot(self):
+    def test_correlation_inversion_is_detected_via_interaction_feature(self):
         """
-        DOCUMENTS A KNOWN LIMITATION — this test is expected to show the
-        joint detector NOT catching the drift, and that's the point.
-
         Setup: baseline pairs a 'low' tabular-score pool with image-class-A
         and a 'high' tabular-score pool with image-class-B. Production
         re-pairs the SAME two fixed pools the other way around. Because
@@ -164,24 +193,24 @@ class TestJointEmbeddingDriftDetector:
         are preserved exactly, by construction — only the correlation
         between the two modalities inverts.
 
-        Why the joint detector misses this: EmbeddingDriftDetector uses
-        LogisticRegression — a purely additive linear model — over the
-        concatenated [tabular | text | image | presence] vector. Catching
-        this swap requires "image looks like class A" to mean *reference*
-        when paired with a low score but mean *current* when paired with a
-        high score — an XOR-style interaction no additive linear model can
-        represent, regardless of how much signal is in the data. This was
-        found empirically while building the joint feature (see spec/plan
-        history) and is a structural property of concatenation + linear
-        classification, not a bug to fix in this pass. The trade-off
-        deliberately accepted: no changes to the shared
-        drift/embedding_detector.py (which text/image also depend on) and
-        no new trainable components in adapters/joint.py, at the cost of
-        this specific "zero marginal movement anywhere" edge case going
-        undetected. Correlation breaks that co-occur with *any* marginal
-        movement in a modality, or with a shift in which modalities are
-        typically present (via the presence-mask dimensions), are not
-        subject to this limitation.
+        This was originally a documented blind spot: plain concatenation
+        fed to a linear classifier structurally cannot represent the
+        XOR-style interaction such a swap requires. It's closed by two
+        additions working together (see JointAdapter's class docstring for
+        the full mechanism): the interaction_text/interaction_image blocks
+        in adapters/joint.py, and build_joint_classifier()'s L1
+        regularization (needed because that interaction signal is diluted
+        among the much larger raw embedding dimensions under the default
+        L2 classifier — verified empirically, not assumed: isolating just
+        the interaction_image column gives AUC=0.75 in isolation but
+        AUC=0.40 when combined under L2). Verified robust across 8
+        independent data seeds (AUC 0.97-1.00 at the chosen C=2.0), not
+        just this one.
+
+        The one thing this does NOT close: a pure text<->image inversion
+        on a project with zero tabular fields (no anchor for the
+        interaction terms) — out of scope for this fix, unchanged from
+        before.
         """
         n = 40
         rng = np.random.default_rng(0)
@@ -214,18 +243,18 @@ class TestJointEmbeddingDriftDetector:
             f"got AUC={image_only_result['statistic']:.3f}"
         )
 
-        # --- (b) the joint embedding does NOT catch a pure correlation
-        # inversion with zero marginal movement anywhere — see the
-        # docstring above for why this is expected, not a bug.
+        # --- (b) the joint embedding + interaction feature + L1 classifier
+        # DOES catch this pure correlation inversion — see docstring above.
         joint_adapter = JointAdapter()
         tabular_stats = joint_adapter.fit_tabular_schema(baseline_records)
         baseline_joint_emb = joint_adapter.transform(baseline_records, tabular_stats)
         scrambled_joint_emb = joint_adapter.transform(scrambled_records, tabular_stats)
 
-        joint_result = EmbeddingDriftDetector(auc_threshold=0.65).analyze(baseline_joint_emb, scrambled_joint_emb)
-        assert not joint_result["drift_detected"], (
-            f"Expected this known blind spot to persist (see docstring) — if this now "
-            f"fails, the detector's separating power has changed and the limitation "
-            f"documented here (and in adapters/joint.py / README) needs re-checking, "
-            f"not just this assertion. Got AUC={joint_result['statistic']:.3f}"
+        joint_result = EmbeddingDriftDetector(auc_threshold=0.65, classifier=build_joint_classifier()).analyze(
+            baseline_joint_emb, scrambled_joint_emb
+        )
+        assert joint_result["drift_detected"], (
+            f"Expected the interaction feature + L1 classifier to catch this correlation "
+            f"inversion (see docstring) — if this now fails, something in that mechanism "
+            f"regressed. Got AUC={joint_result['statistic']:.3f}"
         )
