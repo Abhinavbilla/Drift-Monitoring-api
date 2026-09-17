@@ -14,11 +14,17 @@ These tests check:
   - a pure correlation inversion between a continuous tabular field and an
     image class, with zero marginal movement in either modality (verified
     via an independent KS-test and the image-only Domain Classifier Test),
-    IS now detected — via the bounded interaction feature in
-    adapters/joint.py plus build_joint_classifier()'s L1 regularization.
-    See JointAdapter's class docstring for the full mechanism and for the
-    one remaining gap this doesn't close (pure text<->image inversion on a
-    project with zero tabular fields).
+    IS detected at the originally-tuned effect size — via the bounded
+    interaction feature in adapters/joint.py plus build_joint_classifier()'s
+    L1 regularization (still a LINEAR classifier, just L1-penalized — not
+    a nonlinear model).
+  - that fix's ACTUAL, verified scope — not an idealized one: it
+    generalizes to a noisy/imperfect pairing at the same effect size, but
+    NOT to a smaller correlation-inversion magnitude at a fixed C=2.0 (a
+    real, reproducible gap, encoded as a passing test rather than left as
+    a comment). See JointAdapter's class docstring and
+    build_joint_classifier()'s docstring for the full mechanism, what was
+    tried and rejected (adaptive C), and the remaining gaps.
 
 Run:
     python -m pytest tests/test_joint_adapter.py -v
@@ -203,14 +209,23 @@ class TestJointEmbeddingDriftDetector:
         among the much larger raw embedding dimensions under the default
         L2 classifier — verified empirically, not assumed: isolating just
         the interaction_image column gives AUC=0.75 in isolation but
-        AUC=0.40 when combined under L2). Verified robust across 8
-        independent data seeds (AUC 0.97-1.00 at the chosen C=2.0), not
-        just this one.
+        AUC=0.40 when combined under L2). Verified across 8 independent
+        data seeds at this exact effect size (AUC 0.97-1.00 at C=2.0) —
+        but all 8 seeds share this test's cluster separation and image
+        classes, varying only the random noise. That is NOT the same as
+        general robustness: see
+        test_correlation_inversion_not_detected_at_smaller_separation
+        below for a different, smaller-separation scenario where this
+        same fix does not work, and
+        test_correlation_inversion_generalizes_to_noisy_pairing for a
+        scenario (at this test's separation, but a noisy/imperfect
+        pairing) where it does. Read all three together for the honest
+        picture, not this one in isolation.
 
-        The one thing this does NOT close: a pure text<->image inversion
-        on a project with zero tabular fields (no anchor for the
-        interaction terms) — out of scope for this fix, unchanged from
-        before.
+        Things this does NOT close: a pure text<->image inversion on a
+        project with zero tabular fields (no anchor for the interaction
+        terms), and correlation inversions with a smaller effect size than
+        this test's — see the two tests below.
         """
         n = 40
         rng = np.random.default_rng(0)
@@ -257,4 +272,103 @@ class TestJointEmbeddingDriftDetector:
             f"Expected the interaction feature + L1 classifier to catch this correlation "
             f"inversion (see docstring) — if this now fails, something in that mechanism "
             f"regressed. Got AUC={joint_result['statistic']:.3f}"
+        )
+
+    def test_correlation_inversion_generalizes_to_noisy_pairing(self):
+        """
+        Same correlation-inversion setup and effect size as
+        test_correlation_inversion_is_detected_via_interaction_feature,
+        but the pairing is 80/20 noisy (not a perfectly deterministic
+        swap) in both the baseline and the flipped/scrambled batch. This
+        checks the fix isn't limited to an unrealistically clean toy case
+        — it generalizes along the noise axis (unlike the effect-size
+        axis; see test_correlation_inversion_not_detected_at_smaller_separation).
+        """
+        n = 40
+        rng = np.random.default_rng(1234)
+        low_scores = rng.normal(10, 1, size=n).tolist()
+        high_scores = rng.normal(50, 1, size=n).tolist()
+        class_a_pool = [_noisy_b64_png(0, seed=70000 + i) for i in range(20)]
+        class_b_pool = [_noisy_b64_png(2, seed=80000 + i) for i in range(20)]
+
+        def noisy_pairing(seed, flip, noise=0.2):
+            local_rng = np.random.default_rng(seed)
+            records = []
+            for s in low_scores:
+                use_b = (local_rng.random() < noise) if not flip else (local_rng.random() >= noise)
+                pool = class_b_pool if use_b else class_a_pool
+                records.append({"tabular": {"score": s}, "image": pool[local_rng.integers(len(pool))]})
+            for s in high_scores:
+                use_a = (local_rng.random() < noise) if not flip else (local_rng.random() >= noise)
+                pool = class_a_pool if use_a else class_b_pool
+                records.append({"tabular": {"score": s}, "image": pool[local_rng.integers(len(pool))]})
+            return records
+
+        baseline_records = noisy_pairing(1, flip=False)
+        scrambled_records = noisy_pairing(2, flip=True)
+
+        adapter = JointAdapter()
+        tabular_stats = adapter.fit_tabular_schema(baseline_records)
+        baseline_emb = adapter.transform(baseline_records, tabular_stats)
+        scrambled_emb = adapter.transform(scrambled_records, tabular_stats)
+
+        result = EmbeddingDriftDetector(auc_threshold=0.65, classifier=build_joint_classifier()).analyze(
+            baseline_emb, scrambled_emb
+        )
+        assert result["drift_detected"], (
+            f"Expected the fix to tolerate a noisy (80/20) pairing at the tuned effect size. "
+            f"Got AUC={result['statistic']:.3f}"
+        )
+
+    def test_correlation_inversion_not_detected_at_smaller_separation(self):
+        """
+        DOCUMENTS A REAL, VERIFIED GAP — this test is expected to show the
+        fix NOT catching the drift, and that's the point (same spirit as
+        the original pre-fix blind-spot test this replaced).
+
+        Same permutation-of-fixed-pools construction as
+        test_correlation_inversion_is_detected_via_interaction_feature,
+        but with a smaller tabular cluster separation (values ~30 vs ~45,
+        z-score gap ~1.4, instead of ~10 vs ~50, z-score gap ~2.0) and
+        different image classes (green-biased vs dim-red-biased, instead
+        of red vs blue) — i.e. a scenario NOT used while tuning C=2.0.
+
+        At the current fixed C=2.0, this is NOT detected (AUC well below
+        the 0.65 threshold, and below 0.5). A different C window (~5-20)
+        does rescue this specific case empirically, but it is a different
+        window than the one that works for the larger-separation test
+        above, and no single fixed C was found that covers both. Adaptive
+        C was considered and rejected — see build_joint_classifier()'s
+        docstring for why. This is the accurate, current scope of the fix:
+        validated for correlation inversions of roughly the originally-
+        tuned effect size, not a general solution.
+        """
+        n = 40
+        rng = np.random.default_rng(999)
+        val_lo = rng.normal(30, 2, size=n).tolist()
+        val_hi = rng.normal(45, 2, size=n).tolist()
+        imgs_x = [_noisy_b64_png(1, seed=50000 + i) for i in range(n)]  # green-biased
+        imgs_y = [_noisy_b64_png(0, seed=60000 + i) for i in range(n)]  # dim red-biased
+
+        def build_records(score_pool_a, image_pool_a, score_pool_b, image_pool_b):
+            records = [{"tabular": {"score": s}, "image": img} for s, img in zip(score_pool_a, image_pool_a)]
+            records += [{"tabular": {"score": s}, "image": img} for s, img in zip(score_pool_b, image_pool_b)]
+            return records
+
+        baseline_records = build_records(val_lo, imgs_x, val_hi, imgs_y)
+        scrambled_records = build_records(val_lo, imgs_y, val_hi, imgs_x)
+
+        adapter = JointAdapter()
+        tabular_stats = adapter.fit_tabular_schema(baseline_records)
+        baseline_emb = adapter.transform(baseline_records, tabular_stats)
+        scrambled_emb = adapter.transform(scrambled_records, tabular_stats)
+
+        result = EmbeddingDriftDetector(auc_threshold=0.65, classifier=build_joint_classifier()).analyze(
+            baseline_emb, scrambled_emb
+        )
+        assert not result["drift_detected"], (
+            f"Expected this smaller-separation case to remain undetected at the current "
+            f"fixed C=2.0 (see docstring) — if this now passes, either the fix generalized "
+            f"further than documented (update the docs!) or something else changed. "
+            f"Got AUC={result['statistic']:.3f}"
         )

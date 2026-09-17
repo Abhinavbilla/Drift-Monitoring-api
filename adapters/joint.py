@@ -41,8 +41,9 @@ def _random_projection(source_dim: int, target_dim: int) -> np.ndarray:
 
 def build_joint_classifier() -> LogisticRegression:
     """
-    L1-penalized logistic regression for EmbeddingDriftDetector's optional
-    `classifier` parameter, used only for joint analysis (see main.py's
+    L1-penalized (still LINEAR -- not a nonlinear model) logistic
+    regression for EmbeddingDriftDetector's optional `classifier`
+    parameter, used only for joint analysis (see main.py's
     analyze_joint_batch) -- NOT the shared default.
 
     Why joint needs this: the interaction_text/interaction_image blocks
@@ -57,12 +58,44 @@ def build_joint_classifier() -> LogisticRegression:
     detected) when combined with the full embedding under L2. L1's
     sparsity concentrates weight onto the informative dimensions instead.
 
-    C=2.0 was chosen empirically, not guessed: verified across 8
-    independent synthetic data seeds to give AUC=1.000 every time on the
-    correlation-inversion case this was built for, with real margin from
-    a sharp phase-transition around C=0.9 below which the classifier
-    degenerates entirely (all coefficients zeroed by the L1 penalty,
-    AUC=0.5 -- confirmed C=0.5 already collapses to AUC=0.41).
+    C=2.0 IS A FIXED CONSTANT, NOT ADAPTIVE, AND ITS VALIDATION IS
+    NARROWER THAN IT MIGHT SOUND. Verified across 8 independent synthetic
+    data seeds to give AUC=1.000 every time -- but all 8 seeds varied only
+    the random noise, keeping the SAME tabular cluster separation (values
+    ~10 vs ~50, i.e. z-score gap ~2.0) and the SAME image classes
+    (red-biased vs blue-biased). That is validation of one fixed effect
+    size, not general robustness. Tested separately against a smaller
+    separation (~30 vs ~45, z-score gap ~1.4) with different image
+    classes: AUC=0.39 -- NOT detected, worse than chance-adjacent, at this
+    same C=2.0. A different C window (~5-20) does rescue that specific
+    case, but it is a DIFFERENT window than the one C=2.0 sits in for the
+    originally-tuned separation, and pushing C higher doesn't plateau, it
+    gets WORSE than chance (AUC=0.14 at C=1000, likely severe overfitting
+    to the ~900 uninformative dimensions once regularization is weak
+    enough). There is no single fixed C found that covers both effect
+    sizes. Separately, this DOES generalize along a different axis: tested
+    against a noisy (80/20, not perfectly deterministic) pairing at the
+    ORIGINAL tuned separation, AUC=0.78 -- still detected. So the honest
+    characterization is: robust to noise in the pairing, NOT validated to
+    generalize to weaker/smaller correlation-inversion magnitudes. See
+    tests/test_joint_adapter.py for both the passing generalization case
+    and the failing smaller-separation case, encoded as actual tests
+    rather than left as a comment that could go stale.
+
+    Adaptive C (scaling C by the tabular subvector's observed spread at
+    fit time) was considered and rejected, not just left untried: after
+    z-scoring, the tabular subvector's own variance is always ~1 by
+    construction, regardless of whether real clusters underlying it are
+    close together or far apart -- z-scoring normalizes away exactly the
+    signal a spread-based heuristic would need. The thing that actually
+    determines detectability (the between-cluster gap under a
+    hypothetical FUTURE correlation-inversion) isn't observable from
+    baseline data at fit time at all. Even setting that aside, the
+    empirical C-vs-AUC relationship isn't a safe target for a lightweight
+    heuristic: it's non-monotonic and can overshoot into worse-than-chance
+    territory (see the C=1000 result above), so a simple "turn the dial
+    up for weaker signals" rule would risk making things worse, not
+    better, for cases it wasn't tested against.
 
     Why this is NOT embedding_detector.py's new default: applying this
     same classifier to text/image would regress an already-documented
@@ -107,17 +140,34 @@ class JointAdapter(BaseAdapter):
        among the much larger raw embedding dimensions and gets diluted by
        a standard L2 classifier (verified: isolated AUC=0.75, but AUC=0.40
        when combined under L2).
-    2. build_joint_classifier() below (L1-penalized, joint-only, NOT the
-       shared detector's default) — L1's sparsity concentrates weight on
-       the informative interaction dimensions instead of diluting across
-       all of them. Combined, verified AUC=1.000 across 8 independent
-       trials on the correlation-inversion case this was built for.
+    2. build_joint_classifier() below (L1-penalized — still linear, not a
+       nonlinear model — joint-only, NOT the shared detector's default) —
+       L1's sparsity concentrates weight on the informative interaction
+       dimensions instead of diluting across all of them.
 
-    REMAINING GAP: a pure text<->image correlation inversion on a project
-    with NO tabular fields declared (F=0) is still undetected — both
-    interaction blocks degenerate to zero width with no tabular vector to
-    anchor them against. This fix is specifically tabular-anchored, per
-    how it was scoped.
+    IMPORTANT — THIS FIX IS NARROWER THAN "CLOSES THE GAP" MIGHT SUGGEST.
+    Verified AUC=1.000 across 8 independent trials, but all 8 shared the
+    SAME correlation-inversion magnitude (same tabular cluster separation,
+    same image classes) — only the random noise varied between trials.
+    Separately tested against a genuinely different, smaller-separation
+    scenario (different values, different image classes): AUC=0.39, NOT
+    detected. A noisier-but-same-magnitude scenario (80/20 imperfect
+    pairing) WAS still detected (AUC=0.78), so this generalizes along the
+    noise axis but not the effect-size axis. Adaptive regularization was
+    considered and rejected as a way to close that gap (see
+    build_joint_classifier()'s docstring for why) rather than left
+    untried. Both the passing and failing cases are encoded as actual
+    tests in tests/test_joint_adapter.py, not just described here.
+
+    REMAINING GAPS:
+    - A pure text<->image correlation inversion on a project with NO
+      tabular fields declared (F=0) is still undetected — both
+      interaction blocks degenerate to zero width with no tabular vector
+      to anchor them against. This fix is specifically tabular-anchored,
+      per how it was scoped.
+    - Correlation inversions with a smaller effect size than the tuned
+      case (see above) are not reliably detected at the current fixed
+      C=2.0, and no safe way to adapt C per-project was found.
     """
 
     def fit_tabular_schema(self, records: List[dict]) -> Dict[str, Any]:
