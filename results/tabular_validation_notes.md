@@ -32,18 +32,42 @@
 | 50000 | 15000 | 0.020 | 0.000 | 0.000 | 0.010 | 0.010 | 0.000 | 0.000 | 0.000 |
 | 50000 | 20000 | 0.020 | 0.000 | 0.000 | 0.020 | 0.000 | 0.000 | 0.000 | 0.000 |
 
-**Smallest synthetic severity reliably detected (100% of trials, every continuous feature) at each reference size:**
+**Caveat**: KS is conservative on near-discrete data (pickup/dropoff coordinates have only ~475 unique values out of 1.5M+ rows — see 'Synthetic drift realism' below). False-alarm rates below alpha for those features may partly reflect this discreteness rather than good calibration of the test itself — the asymptotic KS null distribution assumes a continuous reference.
 
-| Reference size | Smallest reliable severity (σ) |
-|---|---|
-| 5000 | 0.05 |
-| 50000 | 0.05 |
+**Smallest synthetic severity reliably detected (100% of trials), PER FEATURE, using the corrected support-preserving injection method (see 'Synthetic drift realism' below) — no single number applies to all features, so none is reported:**
+
+| Reference size | pickup_longitude | pickup_latitude | dropoff_longitude | dropoff_latitude | trip_duration |
+|---|---|---|---|---|---|
+| 5000 | 0.1 | 0.05 | 0.1 | 0.1 | 1.5 |
+| 50000 | 0.05 | 0.05 | 0.1 | 0.05 | 1.5 |
 
 **Original README discrepancies (all about the now-superseded old numbers):**
 
 - *Headline recall 0.939 vs. naive per-feature-table sum 81/90=0.900*: **unreproducible** — the original `/fit` call's exact reference rows and the script that produced that headline run no longer exist (`split_citi_bike.py` was missing, see `docs/recon.md` §4/§9); there is no way to recompute the exact old number.
 - *Sweep row 10,000: recall 0.812 at precision 1.0 implies F1=0.896, but README says 0.886 (implying precision≈0.975)*: **unreproducible**, same reason — the exact old sweep run's data is gone.
 - *Headline batch size (0.939) exceeds every sweep row including 50k (0.917)*: **explained**, not a contradiction — confirmed by reading the code (`docs/recon.md` §4) that the headline used a fixed `PRODUCTION_BATCH_SIZE=25000`, a size the separate 8-trial sweep never tested. Different experiments, not a discrepancy in one experiment — though the specific 0.939 value itself remains unreproducible for the reasons above.
+
+## Synthetic drift realism
+
+The original severity-sweep results (additive mean-shift injection: `x + severity*std`) were checked for a hypothesized artifact: pickup/dropoff coordinates are station locations, not continuous measurements — the baseline holdout pool has only ~475 unique values per coordinate column out of 25,000 rows. Any additive shift moves every value strictly off that discrete lattice, which KS can detect regardless of shift magnitude, since the shifted and reference empirical distributions become locally disjoint independent of the true effect size.
+
+**Confirmed empirically**: adding a shift of `1e-9` (a supposedly negligible perturbation) to `pickup_longitude` in a real holdout batch nearly doubled its KS statistic and flipped the p-value from 0.36 (not significant) to 0.039 (significant):
+
+| Feature | Unique values (of 25,000) | D(shift=0) | p(shift=0) | D(shift=1e-9) | p(shift=1e-9) | Artifact confirmed? |
+|---|---|---|---|---|---|---|
+| pickup_longitude | 473 | 0.0143 | 0.360 | 0.0217 | 3.92e-02 | True |
+| pickup_latitude | 473 | 0.0090 | 0.885 | 0.0192 | 9.03e-02 | True |
+| dropoff_longitude | 475 | 0.0092 | 0.866 | 0.0184 | 1.19e-01 | True |
+| dropoff_latitude | 475 | 0.0086 | 0.918 | 0.0146 | 3.30e-01 | True |
+| trip_duration | 2643 | 0.0085 | 0.920 | 0.0098 | 8.11e-01 | False |
+
+**Fix**: replaced additive shift with exponential tilting — resample WITH replacement from the holdout pool, weights proportional to `exp(lambda*z)` (z = standardized value), lambda solved numerically so the resample's mean standardized value hits the target severity. This only ever produces values that already exist in the pool (support-preserving by construction), so it cannot manufacture the lattice-mismatch artifact. Verified: at severity=0, the tilted method's D matches the natural (shift=0) baseline, unlike the additive method's 1e-9 result above.
+
+**Limitation of the fix, stated plainly**: resampling can only reweight values already in the pool — it cannot manufacture values beyond the observed range. `pickup_latitude` and `dropoff_latitude`'s holdout pool tops out around z≈2.3, so a target severity of 3.0σ is not actually achievable for them; the script detects this and caps the achieved severity (flagged `*capped*` in the run log and `was_capped` in the raw JSON) rather than silently reporting a fabricated 3.0σ result.
+
+**The old additive-shift severity/min-drift-fraction results are kept in `results/tabular_validation_legacy_raw.json` under `severity`/`min_drift_fraction`, but are now labeled a diagnostic of the artifact, not a real detection-sensitivity result** — see `results/tabular_validation_severity_v2.json`'s `additive_shift_DIAGNOSTIC_ONLY` key.
+
+**Minimum-detectable-D formula caveat**: the `c(alpha)*sqrt((n+m)/(nm))` floor used throughout this document is the standard **continuous-case** asymptotic approximation. It does not account for the near-discrete support of the coordinate features documented here — the true finite-sample null distribution of KS on data with substantial point masses differs from the continuous approximation, in a direction this analysis has not quantified. Treat the floor values as order-of-magnitude guidance for these features, not an exact bound.
 
 ---
 
@@ -76,6 +100,24 @@
 | trip_duration | 0.0680 | 0.0952 | 0.1074 |
 | gender_id | 0.0337 | 0.0546 | 0.0416 |
 | month | 17.3550 | 17.3550 | 17.3550 |
+
+**Knife-edge warning**: `D_gt=0.02` sits inside a tight cluster of four features whose pooled population D all fall between 0.0189 and 0.0219 — `pickup_latitude` (0.0189), `dropoff_latitude` (0.0195), `dropoff_longitude` (0.0206), `pickup_longitude` (0.0219). A threshold choice this close to all four values means confusion-matrix rows at `D_gt=0.02` are **highly sensitive to the exact cut** — two of these features land just below it and two just above, so small changes to `D_gt` (or to the population D estimate itself) can flip several features' labels at once. Every recall/precision/FP statement below names its `D_gt` explicitly for this reason — a bare 'recall' or 'false positive' without a stated `D_gt` is not well-defined for these four features.
+
+**Power curve: per-feature detection RATE vs. population D, independent of any D_gt cut** — this table doesn't grade against ground truth at all, so it sidesteps the knife-edge problem entirely. It answers 'how often does the engine flag this feature' as a function of true effect size, reference size, and batch size:
+
+| Feature | Population D/PSI | m=5000, n=5000 | m=5000, n=20000 | m=5000, n=50000 | m=50000, n=5000 | m=50000, n=20000 | m=50000, n=50000 |
+|---|---|---|---|---|---|---|---|
+| pickup_longitude | 0.0219 | 0.750 | 0.917 | 1.000 | 0.917 | 1.000 | 1.000 |
+| pickup_latitude | 0.0189 | 0.667 | 0.833 | 0.792 | 0.833 | 1.000 | 1.000 |
+| dropoff_longitude | 0.0206 | 0.042 | 0.208 | 0.500 | 0.750 | 1.000 | 1.000 |
+| dropoff_latitude | 0.0195 | 0.458 | 0.792 | 0.750 | 0.958 | 1.000 | 1.000 |
+| trip_duration | 0.0924 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| gender_id | 0.0432 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| month | 16.2660 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+
+**Reading this table**: for the four knife-edge features, detection rate climbs steadily with both reference size and batch size rather than jumping at any particular D_gt — exactly what's expected for a continuous power curve. Whether a given cell counts as a 'true positive' or a 'false positive' depends entirely on which D_gt you pick, which is precisely why Step 2's materiality gate (a floor on effect size, not just significance) matters: **a larger reference makes the p-value test detect shifts the effect-size truth calls immaterial, and this table shows that isn't a discontinuity to patch — it's a smooth power curve that a bare significance test has no way to threshold correctly on its own.**
+
+---
 
 
 ## Reference size = 5000

@@ -170,9 +170,42 @@ def smallest_reliable_severity(severity_dict, reliable_threshold=1.0):
     return None
 
 
+def smallest_reliable_severity_per_feature(severity_dict, reliable_threshold=1.0):
+    """Per-feature smallest severity reaching the reliability threshold --
+    unlike smallest_reliable_severity, doesn't require ALL features to agree,
+    since (as this run shows) trip_duration and the coordinate features need
+    very different severities."""
+    out = {}
+    for feat in CONTINUOUS_FEATURES:
+        found = None
+        for sev in sorted((float(s) for s in severity_dict.keys())):
+            entry = severity_dict[str(sev)] if str(sev) in severity_dict else severity_dict[sev]
+            rate = entry[feat]["detections"] / entry[feat]["n_trials"]
+            if rate >= reliable_threshold:
+                found = sev
+                break
+        out[feat] = found
+    return out
+
+
+def per_feature_detection_rate(sweep_size_result):
+    """Raw detection RATE per feature for one sweep size -- independent of
+    any ground truth threshold. This is the power-curve quantity: plotted
+    against a feature's population D (fixed, from the ground-truth fix),
+    it shows detection power as a function of true effect size without
+    committing to any D_gt cut."""
+    responses = sweep_size_result["pooled"]["raw_responses"]
+    out = {}
+    for feat in ALL_FEATURES:
+        detections = sum(1 for r in responses if r[feat]["drift_detected"])
+        out[feat] = {"detection_rate": detections / len(responses), "n": len(responses)}
+    return out
+
+
 def main():
     raw = json.load(open("results/tabular_validation_legacy_raw.json"))
     config = raw["config"]
+    severity_v2 = json.load(open("results/tabular_validation_severity_v2.json"))
 
     pooled_truth_raw, per_month_truth_raw = compute_population_truth()
 
@@ -233,14 +266,23 @@ def main():
             rates = aa_false_alarm_rates(aa_result)
             per_feat_str = " | ".join(f"{rates['per_feature_false_alarm_rate'][f]:.3f}" for f in ALL_FEATURES)
             notes_lines.append(f"| {ref_size_str} | {size_str} | {rates['system_false_alarm_rate']:.3f} | {per_feat_str} |")
-    notes_lines.append("")
+    notes_lines.append(
+        "\n**Caveat**: KS is conservative on near-discrete data (pickup/dropoff coordinates have only "
+        "~475 unique values out of 1.5M+ rows — see 'Synthetic drift realism' below). False-alarm rates "
+        "below alpha for those features may partly reflect this discreteness rather than good calibration "
+        "of the test itself — the asymptotic KS null distribution assumes a continuous reference.\n"
+    )
 
-    notes_lines.append("**Smallest synthetic severity reliably detected (100% of trials, every "
-                        "continuous feature) at each reference size:**\n")
-    notes_lines.append("| Reference size | Smallest reliable severity (σ) |\n|---|---|")
-    for ref_size_str, r in raw["by_reference_size"].items():
-        sev = smallest_reliable_severity(r["severity"])
-        notes_lines.append(f"| {ref_size_str} | {sev if sev is not None else 'none tested reach 100%'} |")
+    notes_lines.append("**Smallest synthetic severity reliably detected (100% of trials), PER FEATURE, "
+                        "using the corrected support-preserving injection method (see 'Synthetic drift "
+                        "realism' below) — no single number applies to all features, so none is reported:**\n")
+    notes_lines.append("| Reference size | " + " | ".join(CONTINUOUS_FEATURES) + " |\n" +
+                        "|---|" + "---|" * len(CONTINUOUS_FEATURES))
+    for ref_size_str in raw["by_reference_size"].keys():
+        sev_dict = severity_v2["by_reference_size"][ref_size_str]["tilted_resample"]["severity"]
+        per_feat = smallest_reliable_severity_per_feature(sev_dict)
+        row = " | ".join(str(per_feat[f]) if per_feat[f] is not None else "none≤3.0σ" for f in CONTINUOUS_FEATURES)
+        notes_lines.append(f"| {ref_size_str} | {row} |")
     notes_lines.append("")
 
     notes_lines.append("**Original README discrepancies (all about the now-superseded old numbers):**\n")
@@ -257,6 +299,60 @@ def main():
         "a fixed `PRODUCTION_BATCH_SIZE=25000`, a size the separate 8-trial sweep never tested. Different "
         "experiments, not a discrepancy in one experiment — though the specific 0.939 value itself remains "
         "unreproducible for the reasons above.\n"
+    )
+
+    # --- Synthetic drift realism (additive-shift artifact + the fix) ---
+    notes_lines.append("## Synthetic drift realism\n")
+    notes_lines.append(
+        "The original severity-sweep results (additive mean-shift injection: `x + severity*std`) were "
+        "checked for a hypothesized artifact: pickup/dropoff coordinates are station locations, not "
+        "continuous measurements — the baseline holdout pool has only ~475 unique values per coordinate "
+        "column out of 25,000 rows. Any additive shift moves every value strictly off that discrete "
+        "lattice, which KS can detect regardless of shift magnitude, since the shifted and reference "
+        "empirical distributions become locally disjoint independent of the true effect size.\n"
+    )
+    notes_lines.append(
+        "**Confirmed empirically**: adding a shift of `1e-9` (a supposedly negligible perturbation) to "
+        "`pickup_longitude` in a real holdout batch nearly doubled its KS statistic and flipped the "
+        "p-value from 0.36 (not significant) to 0.039 (significant):\n"
+    )
+    notes_lines.append("| Feature | Unique values (of 25,000) | D(shift=0) | p(shift=0) | D(shift=1e-9) | "
+                        "p(shift=1e-9) | Artifact confirmed? |\n|---|---|---|---|---|---|---|")
+    for feat, v in severity_v2["realism_check"].items():
+        notes_lines.append(
+            f"| {feat} | {v['n_unique_in_holdout']} | {v['additive_shift_0']['D']:.4f} | "
+            f"{v['additive_shift_0']['p']:.3f} | {v['additive_shift_1e-9']['D']:.4f} | "
+            f"{v['additive_shift_1e-9']['p']:.2e} | {v['additive_artifact_confirmed']} |"
+        )
+    notes_lines.append(
+        "\n**Fix**: replaced additive shift with exponential tilting — resample WITH replacement from the "
+        "holdout pool, weights proportional to `exp(lambda*z)` (z = standardized value), lambda solved "
+        "numerically so the resample's mean standardized value hits the target severity. This only ever "
+        "produces values that already exist in the pool (support-preserving by construction), so it "
+        "cannot manufacture the lattice-mismatch artifact. Verified: at severity=0, the tilted method's D "
+        "matches the natural (shift=0) baseline, unlike the additive method's 1e-9 result above.\n"
+    )
+    notes_lines.append(
+        "**Limitation of the fix, stated plainly**: resampling can only reweight values already in the "
+        "pool — it cannot manufacture values beyond the observed range. `pickup_latitude` and "
+        "`dropoff_latitude`'s holdout pool tops out around z≈2.3, so a target severity of 3.0σ is not "
+        "actually achievable for them; the script detects this and caps the achieved severity (flagged "
+        "`*capped*` in the run log and `was_capped` in the raw JSON) rather than silently reporting a "
+        "fabricated 3.0σ result.\n"
+    )
+    notes_lines.append(
+        "**The old additive-shift severity/min-drift-fraction results are kept in "
+        "`results/tabular_validation_legacy_raw.json` under `severity`/`min_drift_fraction`, but are now "
+        "labeled a diagnostic of the artifact, not a real detection-sensitivity result** — see "
+        "`results/tabular_validation_severity_v2.json`'s `additive_shift_DIAGNOSTIC_ONLY` key.\n"
+    )
+    notes_lines.append(
+        "**Minimum-detectable-D formula caveat**: the `c(alpha)*sqrt((n+m)/(nm))` floor used throughout "
+        "this document is the standard **continuous-case** asymptotic approximation. It does not account "
+        "for the near-discrete support of the coordinate features documented here — the true finite-sample "
+        "null distribution of KS on data with substantial point masses differs from the continuous "
+        "approximation, in a direction this analysis has not quantified. Treat the floor values as "
+        "order-of-magnitude guidance for these features, not an exact bound.\n"
     )
 
     notes_lines.append("---\n")
@@ -290,12 +386,62 @@ def main():
         notes_lines.append(f"| {feat} | {vals[0]} | {vals[1]} | {vals[2]} |")
     notes_lines.append("")
 
+    notes_lines.append(
+        "**Knife-edge warning**: `D_gt=0.02` sits inside a tight cluster of four features whose pooled "
+        "population D all fall between 0.0189 and 0.0219 — `pickup_latitude` (0.0189), `dropoff_latitude` "
+        "(0.0195), `dropoff_longitude` (0.0206), `pickup_longitude` (0.0219). A threshold choice this close "
+        "to all four values means confusion-matrix rows at `D_gt=0.02` are **highly sensitive to the exact "
+        "cut** — two of these features land just below it and two just above, so small changes to `D_gt` "
+        "(or to the population D estimate itself) can flip several features' labels at once. Every "
+        "recall/precision/FP statement below names its `D_gt` explicitly for this reason — a bare 'recall' "
+        "or 'false positive' without a stated `D_gt` is not well-defined for these four features.\n"
+    )
+
+    notes_lines.append(
+        "**Power curve: per-feature detection RATE vs. population D, independent of any D_gt cut** — this "
+        "table doesn't grade against ground truth at all, so it sidesteps the knife-edge problem entirely. "
+        "It answers 'how often does the engine flag this feature' as a function of true effect size, "
+        "reference size, and batch size:\n"
+    )
+    notes_lines.append("| Feature | Population D/PSI | m=5000, n=5000 | m=5000, n=20000 | m=5000, n=50000 | "
+                        "m=50000, n=5000 | m=50000, n=20000 | m=50000, n=50000 |\n"
+                        "|---|---|---|---|---|---|---|---|")
+    for feat in ALL_FEATURES:
+        pop_val = pooled_truth_raw[feat].get("population_D", pooled_truth_raw[feat].get("population_PSI"))
+        cells = []
+        for ref_size_str in ["5000", "50000"]:
+            for size_str in ["5000", "20000", "50000"]:
+                rates = per_feature_detection_rate(raw["by_reference_size"][ref_size_str]["sweep"][size_str])
+                cells.append(f"{rates[feat]['detection_rate']:.3f}")
+        notes_lines.append(f"| {feat} | {pop_val:.4f} | " + " | ".join(cells) + " |")
+    notes_lines.append(
+        "\n**Reading this table**: for the four knife-edge features, detection rate climbs steadily with "
+        "both reference size and batch size rather than jumping at any particular D_gt — exactly what's "
+        "expected for a continuous power curve. Whether a given cell counts as a 'true positive' or a "
+        "'false positive' depends entirely on which D_gt you pick, which is precisely why Step 2's "
+        "materiality gate (a floor on effect size, not just significance) matters: **a larger reference "
+        "makes the p-value test detect shifts the effect-size truth calls immaterial, and this table shows "
+        "that isn't a discontinuity to patch — it's a smooth power curve that a bare significance test has "
+        "no way to threshold correctly on its own.**\n"
+    )
+
+    notes_lines.append("---\n")
+
     for ref_size_str, r in raw["by_reference_size"].items():
         ref_size = int(ref_size_str)
         notes_lines.append(f"\n## Reference size = {ref_size}\n")
-        rs_summary = {"sweep": {}, "aa": {}, "severity": r["severity"],
-                      "min_drift_fraction": r["min_drift_fraction"], "per_feature_batch_d": {},
-                      "reference_detectable_effect_DIAGNOSTIC_ONLY": r["ground_truth_pooled"]}
+        rs_summary = {
+            "sweep": {}, "aa": {}, "per_feature_batch_d": {},
+            "severity": severity_v2["by_reference_size"][ref_size_str]["tilted_resample"]["severity"],
+            "min_drift_fraction": severity_v2["by_reference_size"][ref_size_str]["tilted_resample"]["min_drift_fraction"],
+            "severity_and_min_drift_fraction_ADDITIVE_SHIFT_DIAGNOSTIC_ONLY": {
+                "severity": r["severity"], "min_drift_fraction": r["min_drift_fraction"],
+                "note": "Additive-shift injection -- confirmed to produce a lattice-mismatch artifact on "
+                        "near-discrete features (see 'Synthetic drift realism' in the notes). Not a real "
+                        "detection-sensitivity result.",
+            },
+            "reference_detectable_effect_DIAGNOSTIC_ONLY": r["ground_truth_pooled"],
+        }
 
         notes_lines.append(
             "**Diagnostic only, NOT ground truth** (`reference_detectable_effect`) — the OLD "

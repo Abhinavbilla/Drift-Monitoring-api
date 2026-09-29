@@ -673,424 +673,6 @@
           "system_false_alarm_rate": 0.02
         }
       },
-      "severity": {
-        "0.02": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 3
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 4
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 3
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "0.05": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "0.1": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "0.2": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "0.5": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "1.5": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "3.0": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        }
-      },
-      "min_drift_fraction": {
-        "pickup_longitude": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.2,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": false
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        },
-        "pickup_latitude": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.2,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": false
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        },
-        "dropoff_longitude": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.1,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": true
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        },
-        "dropoff_latitude": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.2,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": false
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        },
-        "trip_duration": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.2,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": false
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        }
-      },
       "per_feature_batch_d": {
         "pickup_longitude": {
           "mean": 0.02958583333333333,
@@ -1127,6 +709,915 @@
           "std": 0.0,
           "n": 24
         }
+      },
+      "severity": {
+        "0.02": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 2,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          }
+        },
+        "0.05": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 1,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 4,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          }
+        },
+        "0.1": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          }
+        },
+        "0.2": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          }
+        },
+        "0.5": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          }
+        },
+        "1.5": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          }
+        },
+        "3.0": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 3.0,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 2.2749980496177975,
+            "was_capped": true
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 3.0,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 2.294516421688565,
+            "was_capped": true
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 3.0,
+            "was_capped": false
+          }
+        }
+      },
+      "min_drift_fraction": {
+        "pickup_longitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.3,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": false
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "pickup_latitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "dropoff_longitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "dropoff_latitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "trip_duration": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.6,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": false
+            },
+            {
+              "n_drifted": 30,
+              "detected": false
+            },
+            {
+              "n_drifted": 40,
+              "detected": false
+            },
+            {
+              "n_drifted": 50,
+              "detected": false
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": false
+            },
+            {
+              "n_drifted": 90,
+              "detected": false
+            },
+            {
+              "n_drifted": 100,
+              "detected": false
+            }
+          ]
+        }
+      },
+      "severity_and_min_drift_fraction_ADDITIVE_SHIFT_DIAGNOSTIC_ONLY": {
+        "severity": {
+          "0.02": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 3
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 4
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 3
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "0.05": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "0.1": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "0.2": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "0.5": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "1.5": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "3.0": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          }
+        },
+        "min_drift_fraction": {
+          "pickup_longitude": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.2,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": false
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          },
+          "pickup_latitude": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.2,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": false
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          },
+          "dropoff_longitude": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.1,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": true
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          },
+          "dropoff_latitude": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.2,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": false
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          },
+          "trip_duration": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.2,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": false
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          }
+        },
+        "note": "Additive-shift injection -- confirmed to produce a lattice-mismatch artifact on near-discrete features (see 'Synthetic drift realism' in the notes). Not a real detection-sensitivity result."
       },
       "reference_detectable_effect_DIAGNOSTIC_ONLY": {
         "ground_truth": {
@@ -1721,424 +2212,6 @@
           "system_false_alarm_rate": 0.02
         }
       },
-      "severity": {
-        "0.02": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 4
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "0.05": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "0.1": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "0.2": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "0.5": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "1.5": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        },
-        "3.0": {
-          "pickup_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "pickup_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_longitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "dropoff_latitude": {
-            "n_trials": 5,
-            "detections": 5
-          },
-          "trip_duration": {
-            "n_trials": 5,
-            "detections": 5
-          }
-        }
-      },
-      "min_drift_fraction": {
-        "pickup_longitude": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.2,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": false
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        },
-        "pickup_latitude": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.2,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": false
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        },
-        "dropoff_longitude": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.1,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": true
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        },
-        "dropoff_latitude": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.2,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": false
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        },
-        "trip_duration": {
-          "batch_size": 100,
-          "drift_source": "holdout pool, mean-shift injection",
-          "severity": "moderate",
-          "min_fraction": 0.2,
-          "curve": [
-            {
-              "n_drifted": 0,
-              "detected": false
-            },
-            {
-              "n_drifted": 10,
-              "detected": false
-            },
-            {
-              "n_drifted": 20,
-              "detected": true
-            },
-            {
-              "n_drifted": 30,
-              "detected": true
-            },
-            {
-              "n_drifted": 40,
-              "detected": true
-            },
-            {
-              "n_drifted": 50,
-              "detected": true
-            },
-            {
-              "n_drifted": 60,
-              "detected": true
-            },
-            {
-              "n_drifted": 70,
-              "detected": true
-            },
-            {
-              "n_drifted": 80,
-              "detected": true
-            },
-            {
-              "n_drifted": 90,
-              "detected": true
-            },
-            {
-              "n_drifted": 100,
-              "detected": true
-            }
-          ]
-        }
-      },
       "per_feature_batch_d": {
         "pickup_longitude": {
           "mean": 0.022885833333333338,
@@ -2175,6 +2248,915 @@
           "std": 0.0,
           "n": 24
         }
+      },
+      "severity": {
+        "0.02": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 2,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 4,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 3,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.02,
+            "was_capped": false
+          }
+        },
+        "0.05": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 4,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.05,
+            "was_capped": false
+          }
+        },
+        "0.1": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.1,
+            "was_capped": false
+          }
+        },
+        "0.2": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 0,
+            "achieved_severity": 0.2,
+            "was_capped": false
+          }
+        },
+        "0.5": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 3,
+            "achieved_severity": 0.5,
+            "was_capped": false
+          }
+        },
+        "1.5": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 1.5,
+            "was_capped": false
+          }
+        },
+        "3.0": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 3.0,
+            "was_capped": false
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 2.2749980496177975,
+            "was_capped": true
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 3.0,
+            "was_capped": false
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 2.294516421688565,
+            "was_capped": true
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5,
+            "achieved_severity": 3.0,
+            "was_capped": false
+          }
+        }
+      },
+      "min_drift_fraction": {
+        "pickup_longitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.3,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": false
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "pickup_latitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "dropoff_longitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "dropoff_latitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "trip_duration": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, exponential-tilting resample (support-preserving)",
+          "severity": 1.5,
+          "min_fraction": 0.6,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": false
+            },
+            {
+              "n_drifted": 30,
+              "detected": false
+            },
+            {
+              "n_drifted": 40,
+              "detected": false
+            },
+            {
+              "n_drifted": 50,
+              "detected": false
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": false
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": false
+            }
+          ]
+        }
+      },
+      "severity_and_min_drift_fraction_ADDITIVE_SHIFT_DIAGNOSTIC_ONLY": {
+        "severity": {
+          "0.02": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 4
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "0.05": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "0.1": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "0.2": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "0.5": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "1.5": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          },
+          "3.0": {
+            "pickup_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "pickup_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_longitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "dropoff_latitude": {
+              "n_trials": 5,
+              "detections": 5
+            },
+            "trip_duration": {
+              "n_trials": 5,
+              "detections": 5
+            }
+          }
+        },
+        "min_drift_fraction": {
+          "pickup_longitude": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.2,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": false
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          },
+          "pickup_latitude": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.2,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": false
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          },
+          "dropoff_longitude": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.1,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": true
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          },
+          "dropoff_latitude": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.2,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": false
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          },
+          "trip_duration": {
+            "batch_size": 100,
+            "drift_source": "holdout pool, mean-shift injection",
+            "severity": "moderate",
+            "min_fraction": 0.2,
+            "curve": [
+              {
+                "n_drifted": 0,
+                "detected": false
+              },
+              {
+                "n_drifted": 10,
+                "detected": false
+              },
+              {
+                "n_drifted": 20,
+                "detected": true
+              },
+              {
+                "n_drifted": 30,
+                "detected": true
+              },
+              {
+                "n_drifted": 40,
+                "detected": true
+              },
+              {
+                "n_drifted": 50,
+                "detected": true
+              },
+              {
+                "n_drifted": 60,
+                "detected": true
+              },
+              {
+                "n_drifted": 70,
+                "detected": true
+              },
+              {
+                "n_drifted": 80,
+                "detected": true
+              },
+              {
+                "n_drifted": 90,
+                "detected": true
+              },
+              {
+                "n_drifted": 100,
+                "detected": true
+              }
+            ]
+          }
+        },
+        "note": "Additive-shift injection -- confirmed to produce a lattice-mismatch artifact on near-discrete features (see 'Synthetic drift realism' in the notes). Not a real detection-sensitivity result."
       },
       "reference_detectable_effect_DIAGNOSTIC_ONLY": {
         "ground_truth": {

@@ -133,7 +133,55 @@ documented process.
   individual `/analyze` response preserved).
 - Test projects (`step1_val_ref5000`, `step1_val_ref50000`) cleaned up from
   `drift.db` after the run.
-- Commits: `4f01412` (initial run), `0a1c604` (ground-truth fix).
+- Commits: `4f01412` (initial run), `0a1c604` (ground-truth fix), and one
+  more (this entry) for the threshold-wording/synthetic-realism fixes below.
+
+**Synthetic drift injection bug found and fixed (2026-09-29, same day, user
+caught it before Step 2).** The additive mean-shift method (`x +
+severity*std`) was checked against a hypothesis: pickup/dropoff coordinates
+are station locations with only ~475 unique values in a 25,000-row pool
+(confirmed), and trip_duration is integer seconds. **Confirmed empirically**
+(`scripts/step1_severity_v2.py`'s realism check, saved in
+`results/tabular_validation_severity_v2.json`): adding a shift of `1e-9` to
+`pickup_longitude` nearly doubled its KS D (0.0143→0.0217) and flipped
+p from 0.36 to 0.039 — a negligible shift "detected" as drift, purely from
+moving every value off its exact discrete lattice position, unrelated to
+true effect size. **Fixed**: replaced additive shift with exponential
+tilting (resample WITH replacement from the holdout pool, weights ∝
+`exp(lambda*z)`, lambda solved so the resample's mean standardized value
+hits the target severity) — support-preserving by construction, verified to
+show no artifact at severity=0. One real limitation surfaced and handled
+honestly, not silently: `pickup_latitude`/`dropoff_latitude`'s holdout pool
+tops out around z≈2.3, so 3.0σ isn't actually achievable for them via
+resampling — the script detects and caps this rather than fabricating a
+result. The old additive results are kept only as a labeled diagnostic of
+the artifact, both in the raw JSON and in the notes, never as a real
+detection-sensitivity claim. New finding from the corrected data: smallest
+reliably-detected severity varies hugely by feature (coordinates: 0.05–0.1σ;
+`trip_duration`: 1.5σ, since its heavy right skew means a small mean-shift
+via resampling barely perturbs the bulk of the distribution) — there is no
+single "smallest reliable severity" number, so none is reported.
+
+**Threshold-dependent wording fixed.** `pickup_latitude` (D=0.0189) and
+`dropoff_latitude` (D=0.0195) are ground-truth positive at `D_gt=0.01` but
+negative at `D_gt=0.02` — every recall/precision/FP statement in the notes
+now names its `D_gt` explicitly; none is stated as a bare, threshold-free
+number anymore. Added: a per-feature detection-RATE table (the power curve)
+that doesn't depend on any `D_gt` cut at all, so the knife-edge problem is
+sidestepped entirely for that view; an explicit note that `D_gt=0.02` falls
+inside a four-feature cluster (population D 0.0189–0.0219), making metrics
+at that exact threshold highly sensitive to the cut; an A/A caveat that KS is
+conservative on near-discrete data, so false-alarm rates below alpha there
+may partly reflect discreteness, not calibration; and a caveat that the
+minimum-detectable-D floor formula is the continuous-case approximation,
+not validated for near-discrete features.
+
+**Takeaway, stated plainly (motivates Step 2's materiality gate)**: a larger
+reference makes the p-value test detect population shifts the effect-size
+ground truth calls immaterial — the power curve shows this is a smooth
+curve, not a discontinuity, so a bare significance test has no way to
+threshold it correctly on its own. Gate 2 (materiality, on top of Gate 1
+significance) is the mechanism designed to fix exactly this.
 
 **Ground truth bug found and fixed (2026-09-29, same day, before user
 review).** The first pass computed "population ground truth" from the
