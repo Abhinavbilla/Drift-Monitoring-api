@@ -1,0 +1,68 @@
+{
+  "config": {
+    "seed": 42,
+    "embedding_dim": 384,
+    "b_draws": 100,
+    "sizes_per_side": [
+      40,
+      200,
+      1000,
+      5000
+    ],
+    "embedding_source": "synthetic Gaussian, runtime-only benchmark"
+  },
+  "results": [
+    {
+      "n_per_side": 40,
+      "b_draws": 100,
+      "precomputed_fit_time_sec": 1.9460773468017578,
+      "precomputed_fit_time_per_draw_ms": 19.460773468017578,
+      "precomputed_null_quantiles": {
+        "p50": 0.5096875000000001,
+        "p95": 0.6625,
+        "p99": 0.7095000000000004
+      },
+      "permutation_analyze_time_sec": 1.7270174026489258,
+      "permutation_time_per_draw_ms": 17.270174026489258
+    },
+    {
+      "n_per_side": 200,
+      "b_draws": 100,
+      "precomputed_fit_time_sec": 6.185449600219727,
+      "precomputed_fit_time_per_draw_ms": 61.854496002197266,
+      "precomputed_null_quantiles": {
+        "p50": 0.50175,
+        "p95": 0.5763275,
+        "p99": 0.60761225
+      },
+      "permutation_analyze_time_sec": 6.6832427978515625,
+      "permutation_time_per_draw_ms": 66.83242797851562
+    },
+    {
+      "n_per_side": 1000,
+      "b_draws": 100,
+      "precomputed_fit_time_sec": 11.495206594467163,
+      "precomputed_fit_time_per_draw_ms": 114.95206594467163,
+      "precomputed_null_quantiles": {
+        "p50": 0.49750099999999997,
+        "p95": 0.52006075,
+        "p99": 0.54241491
+      },
+      "permutation_analyze_time_sec": 10.895139455795288,
+      "permutation_time_per_draw_ms": 108.95139455795288
+    },
+    {
+      "n_per_side": 5000,
+      "b_draws": 100,
+      "precomputed_fit_time_sec": 29.275866985321045,
+      "precomputed_fit_time_per_draw_ms": 292.75866985321045,
+      "precomputed_null_quantiles": {
+        "p50": 0.49889068000000003,
+        "p95": 0.5130541479999999,
+        "p99": 0.5204550863999999
+      },
+      "permutation_analyze_time_sec": 23.162841320037842,
+      "permutation_time_per_draw_ms": 231.62841320037842
+    }
+  ]
+}

@@ -258,7 +258,48 @@ February-vs-March shift), since both come from the same pooled draw.
 
 ## Step 2 — Two-gate calibrated decisions
 
-**Status: NOT STARTED.**
+**Status: PROPOSAL WRITTEN, AWAITING DECISIONS. No code implemented yet.**
+
+- `docs/step2_proposal.md`: full config schema, Gate 1 mechanics per
+  detector (KS p-value + Holm/BH; PSI parametric bootstrap at actual batch
+  size; DCT precomputed vs. permutation), Gate 2 materiality mechanics, and
+  legacy-mode exact-reproduction requirement.
+- `scripts/step2_dct_calibration_benchmark.py` /
+  `results/dct_calibration_benchmark.json`: real timing benchmark (synthetic
+  384-dim embeddings, B=100 draws) at 40/200/1,000/5,000 per side.
+  **Per-draw cost is similar between strategies; the difference is when
+  it's paid** — precomputed pays once at `/fit`, permutation pays on
+  *every* `/analyze` call (23s/call at n=5,000 per side — not viable
+  interactively at that size). Precomputed's tradeoff, stated plainly: it
+  calibrates against a half-size pseudo-reference, a real bias against the
+  latency win.
+- **Four decision points presented, none finalized** (full reasoning in
+  `docs/step2_proposal.md`):
+  1. Alpha — recommend keeping 0.05 (correction handles the system-rate
+     problem, not alpha itself).
+  2. Effect floors — KS D floor is the one Step 1's data most directly
+     bears on: **0.02 is arguably the worst choice**, since it splits the
+     knife-edge cluster (population D 0.0189–0.0219) down the middle;
+     recommend 0.03 (conservative) or 0.015 (liberal) instead. PSI/DCT
+     floors: propose keeping the existing 0.2/0.65.
+  3. Default decision mode for NEW projects (existing projects are already
+     settled as legacy) — leaning legacy-by-default until calibrated mode
+     has its own test suite and a Step 1-equivalent calibrated run, but
+     explicitly the user's call.
+  4. DCT calibration default — recommend precomputed, given the benchmark.
+
+**Scope additions from Step 1's findings (user, 2026-09-29), recorded, not
+implemented yet:**
+- Every KS result should return the minimum detectable D for its actual
+  `(n, m)` at the configured alpha — `c(alpha) * sqrt((n+m)/(n*m))` — so
+  users can see what the test cannot detect, not just what it did detect.
+- `/fit` should warn when the reference is small enough that this detection
+  floor exceeds the project's configured KS effect floor (once effect floors
+  exist as a per-project config, per the original Step 2 spec).
+- Propose (don't set) a recommended minimum reference size, grounded in
+  Step 1's actual results (e.g. the m=5,000 vs m=50,000 comparison in
+  `results/tabular_validation_notes.md`) — a concrete number, not a guess,
+  and explicitly a proposal for the user to approve, not a new default.
 
 **Scope additions from Step 1's findings (user, 2026-09-29), recorded now,
 not implemented yet:**
