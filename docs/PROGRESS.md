@@ -262,7 +262,64 @@ February-vs-March shift), since both come from the same pooled draw.
 floor=0.05 dataset-independent, PSI=0.2/DCT AUC=0.65 provisional, legacy
 default with side-by-side approval gate for switching new-project default,
 DCT calibration=precomputed with clamp-and-warn). Severity scale prerequisite
-fix DONE. Gating engine implementation IN PROGRESS.**
+fix DONE. Core statistical engine DONE and tested. Wiring into
+main.py/db/dashboard, DCT precomputed-grid calibration, and the calibrated
+re-evaluation of the Step 1 suite are NOT yet done — see "Explicitly still
+remaining" below.**
+
+**Core statistical engine — `drift/calibration.py` (new module, purely
+additive, nothing in `drift/detector.py`/`drift/embedding_detector.py`
+touched yet):**
+- `holm_adjust`/`bh_adjust`: multiple-testing correction, verified against
+  hand-computed examples (evenly-spaced p-values `[0.01,0.02,0.03,0.04,0.05]`
+  → Holm `[0.05,0.08,0.09,0.09,0.09]`, BH → all `0.05`, both cross-checked
+  against known standard-software output) plus monotonicity/bounds
+  invariant tests.
+- `minimum_detectable_d`/`ks_c_alpha`: the `c(alpha)*sqrt((n+m)/(nm))` floor,
+  cross-checked against Step 1's own reported values (m=5000→0.0192,
+  m=50000→0.0061, n=20000/m=5000→0.0215).
+- `psi_bootstrap_pvalue`/`compute_psi`: parametric bootstrap replacing the
+  flat `PSI>0.2` cutoff. **Calibration check passed**: under the null
+  (batches genuinely drawn from the reference), false-rejection rate across
+  200 trials stayed well under the alpha=0.05 target (test asserts <0.15
+  for stochastic-test margin — actual measured rate: 9/200 = 0.0450, seed 123).
+  Also verified: same frequency gap is more significant (smaller p) at a
+  larger batch size, which is the whole point of replacing a flat threshold.
+- `apply_two_gate`/`GateResult`: Gate 1 (significance) + Gate 2
+  (materiality) combination. **Legacy-mode identity verified**: in legacy
+  mode, `drift_detected` equals Gate 1 alone regardless of effect size —
+  exactly today's single-threshold behavior. Calibrated mode requires both
+  gates — explicitly tested against the documented Citi Bike case
+  (significant at large n, D~0.02 below the 0.05 default floor → not
+  material → not flagged).
+- `CalibrationConfig`: per-project config dataclass with per-feature floor
+  overrides; `from_dict(None)` (no stored config, e.g. an existing project)
+  resolves to the legacy default with no migration needed.
+- Tests: `tests/test_calibration.py`, 29 tests, all passing. Full existing
+  suite re-run alongside it: 68/68 passing, zero regressions.
+
+**Explicitly still remaining (not started):**
+- DB schema: a `calibration_config` column on `baselines` (self-healing
+  migration, matching the existing `modality`/`embedding_reference` pattern)
+  to actually persist `CalibrationConfig` per project.
+- Wiring `drift/calibration.py` into `drift/detector.py` (KS via
+  `apply_two_gate` + Holm across features; PSI via `psi_bootstrap_pvalue`)
+  and `drift/embedding_detector.py` (DCT via the two-gate framework).
+- DCT precomputed calibration: building the pseudo-reference/pseudo-batch
+  grid at `/fit` time, storing null AUC quantiles, interpolating in
+  `log(n)` at analyze time, clamp-and-warn for out-of-grid sizes.
+- Response field additions (`effect_size`, `effect_floor`, `p_value_adjusted`,
+  `significant`, `material`, `decision_mode`, `threshold_used`) on the
+  actual `/analyze` endpoints.
+- `/fit` response + dashboard: minimum detectable D and the configured
+  floor shown per feature, as part of human-in-the-loop schema confirmation.
+- Calibrated-mode re-run of the Step 1 suite
+  (`results/tabular_validation_calibrated.json`) and the side-by-side
+  comparison (A/A false-alarm rate per batch size; precision/recall at
+  matched thresholds) the user will use to decide on switching the
+  new-project default.
+- Rerun text/image smoke tests, including the ~40-sample borderline case,
+  under calibrated mode.
 
 **Severity scale fix (prerequisite, done before any Step 2 code, so legacy
 and calibrated share identical synthetic data):** user's hypothesis
