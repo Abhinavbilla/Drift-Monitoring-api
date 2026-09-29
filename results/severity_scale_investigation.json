@@ -1,0 +1,121 @@
+{
+  "feature": "trip_duration",
+  "methods": {
+    "raw_z": [
+      {
+        "target_severity": 0.02,
+        "achieved_severity": 0.02,
+        "was_capped": false,
+        "effective_sample_size": 24989.84103579923,
+        "pool_size": 25000,
+        "population_D": 0.0012874004801164407
+      },
+      {
+        "target_severity": 0.05,
+        "achieved_severity": 0.05,
+        "was_capped": false,
+        "effective_sample_size": 24933.783067661898,
+        "pool_size": 25000,
+        "population_D": 0.002642694961354941
+      },
+      {
+        "target_severity": 0.1,
+        "achieved_severity": 0.1,
+        "was_capped": false,
+        "effective_sample_size": 24717.67223266617,
+        "pool_size": 25000,
+        "population_D": 0.004340213097716594
+      },
+      {
+        "target_severity": 0.2,
+        "achieved_severity": 0.2,
+        "was_capped": false,
+        "effective_sample_size": 23784.699123481576,
+        "pool_size": 25000,
+        "population_D": 0.007027344399941904
+      },
+      {
+        "target_severity": 0.5,
+        "achieved_severity": 0.5,
+        "was_capped": false,
+        "effective_sample_size": 18021.8222753786,
+        "pool_size": 25000,
+        "population_D": 0.013718409656630848
+      },
+      {
+        "target_severity": 1.5,
+        "achieved_severity": 1.5,
+        "was_capped": false,
+        "effective_sample_size": 4550.73645429937,
+        "pool_size": 25000,
+        "population_D": 0.033964894756773
+      },
+      {
+        "target_severity": 3.0,
+        "achieved_severity": 3.0,
+        "was_capped": false,
+        "effective_sample_size": 1136.412375486553,
+        "pool_size": 25000,
+        "population_D": 0.06333756659708012
+      }
+    ],
+    "normal_score": [
+      {
+        "target_severity": 0.02,
+        "achieved_severity": 0.02,
+        "was_capped": false,
+        "effective_sample_size": 24989.999633855667,
+        "pool_size": 25000,
+        "population_D": 0.00798120698419763
+      },
+      {
+        "target_severity": 0.05,
+        "achieved_severity": 0.05,
+        "was_capped": false,
+        "effective_sample_size": 24937.54410015717,
+        "pool_size": 25000,
+        "population_D": 0.019954409884823388
+      },
+      {
+        "target_severity": 0.1,
+        "achieved_severity": 0.1,
+        "was_capped": false,
+        "effective_sample_size": 24751.090300922373,
+        "pool_size": 25000,
+        "population_D": 0.039898649939173025
+      },
+      {
+        "target_severity": 0.2,
+        "achieved_severity": 0.2,
+        "was_capped": false,
+        "effective_sample_size": 24019.168653792836,
+        "pool_size": 25000,
+        "population_D": 0.07970243153601259
+      },
+      {
+        "target_severity": 0.5,
+        "achieved_severity": 0.5,
+        "was_capped": false,
+        "effective_sample_size": 19471.825659439422,
+        "pool_size": 25000,
+        "population_D": 0.19758676597934616
+      },
+      {
+        "target_severity": 1.5,
+        "achieved_severity": 1.5,
+        "was_capped": false,
+        "effective_sample_size": 2921.9419859715995,
+        "pool_size": 25000,
+        "population_D": 0.5499725197801112
+      },
+      {
+        "target_severity": 3.0,
+        "achieved_severity": 3.0,
+        "was_capped": false,
+        "effective_sample_size": 40.35919169747476,
+        "pool_size": 25000,
+        "population_D": 0.9009992758622349
+      }
+    ]
+  }
+}

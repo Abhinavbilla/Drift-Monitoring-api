@@ -34,12 +34,14 @@
 
 **Caveat**: KS is conservative on near-discrete data (pickup/dropoff coordinates have only ~475 unique values out of 1.5M+ rows — see 'Synthetic drift realism' below). False-alarm rates below alpha for those features may partly reflect this discreteness rather than good calibration of the test itself — the asymptotic KS null distribution assumes a continuous reference.
 
-**Smallest synthetic severity reliably detected (100% of trials), PER FEATURE, using the corrected support-preserving injection method (see 'Synthetic drift realism' below) — no single number applies to all features, so none is reported:**
+**Smallest reliably-detected POPULATION D (100% of trials), PER FEATURE, using normal-score tilting (see 'Synthetic drift realism' below, which also covers a second fix on top of the additive-shift one: raw-z tilting understated trip_duration's sensitivity too) — now roughly consistent across features, unlike the raw-z version:**
 
-| Reference size | pickup_longitude | pickup_latitude | dropoff_longitude | dropoff_latitude | trip_duration |
-|---|---|---|---|---|---|
-| 5000 | 0.1 | 0.05 | 0.1 | 0.1 | 1.5 |
-| 50000 | 0.05 | 0.05 | 0.1 | 0.05 | 1.5 |
+| Reference size | pickup_longitude | pickup_latitude | dropoff_longitude | dropoff_latitude | trip_duration | vs. theoretical floor |
+|---|---|---|---|---|---|---|
+| 5000 | 0.0399 | 0.0200 | 0.0797 | 0.0400 | 0.0399 | 0.0192 |
+| 50000 | 0.0399 | 0.0200 | 0.0199 | 0.0200 | 0.0399 | 0.0061 |
+
+(Secondary, normal-score-sigma view of the same result is in the per-reference-size sections below.) All per-feature values now sit within roughly a factor of ~2-6x of the theoretical floor at m=50,000 (0.020-0.040 vs. floor 0.0061) — much closer and more uniform than the raw-z method's trip_duration outlier (which needed 1.5σ while coordinates needed 0.05-0.1σ, not a genuine difference in detectability, just an injection-method artifact).
 
 **Original README discrepancies (all about the now-superseded old numbers):**
 
@@ -66,6 +68,33 @@ The original severity-sweep results (additive mean-shift injection: `x + severit
 **Limitation of the fix, stated plainly**: resampling can only reweight values already in the pool — it cannot manufacture values beyond the observed range. `pickup_latitude` and `dropoff_latitude`'s holdout pool tops out around z≈2.3, so a target severity of 3.0σ is not actually achievable for them; the script detects this and caps the achieved severity (flagged `*capped*` in the run log and `was_capped` in the raw JSON) rather than silently reporting a fabricated 3.0σ result.
 
 **The old additive-shift severity/min-drift-fraction results are kept in `results/tabular_validation_legacy_raw.json` under `severity`/`min_drift_fraction`, but are now labeled a diagnostic of the artifact, not a real detection-sensitivity result** — see `results/tabular_validation_severity_v2.json`'s `additive_shift_DIAGNOSTIC_ONLY` key.
+
+### Second synthetic-drift fix: raw-z tilting vs. normal-score tilting
+
+Even after switching to (raw-z) exponential tilting, `trip_duration`'s severity sweep looked inconsistent with the coordinate features — it needed a nominal 1.5σ to reach 100% detection while the coordinates needed only 0.05-0.1σ. Hypothesis: `trip_duration` is heavily right-skewed (mean=880s, median=550s, max=234,243s), so tilting on the *raw* standardized value lets a handful of extreme trips dominate the importance weights — the MEAN shifts a lot, but the CDF (what KS actually measures) barely moves, since the bulk of the distribution hasn't shifted.
+
+**Confirmed empirically** (`results/severity_scale_investigation.json`) via the effective sample size (`1/sum(w^2)`) of the tilting weights and the exact population D (weighted-KS, no resampling noise) at each target severity:
+
+| Method | Target σ | Effective sample size (of 25,000) | Population D |
+|---|---|---|---|
+| raw_z | 0.02 | 24990 | 0.0013 |
+| raw_z | 0.05 | 24934 | 0.0026 |
+| raw_z | 0.10 | 24718 | 0.0043 |
+| raw_z | 0.20 | 23785 | 0.0070 |
+| raw_z | 0.50 | 18022 | 0.0137 |
+| raw_z | 1.50 | 4551 | 0.0340 |
+| raw_z | 3.00 | 1136 | 0.0633 |
+| normal_score | 0.02 | 24990 | 0.0080 |
+| normal_score | 0.05 | 24938 | 0.0200 |
+| normal_score | 0.10 | 24751 | 0.0399 |
+| normal_score | 0.20 | 24019 | 0.0797 |
+| normal_score | 0.50 | 19472 | 0.1976 |
+| normal_score | 1.50 | 2922 | 0.5500 |
+| normal_score | 3.00 | 40 | 0.9010 |
+
+At target severity=3.0σ, raw-z tilting's effective sample size collapses to **1,136 of 25,000 rows (4.5%)** — almost all weight concentrated on a tiny number of extreme trips — and the resulting population D (0.0633) is far below what a genuine 3σ-equivalent shift should produce. Normal-score tilting at the same nominal severity keeps far more of the pool active (though it too eventually concentrates at extreme targets — ESS=40/25,000 at severity=3.0, since normal scores are themselves bounded by roughly ±3.94 for n=25,000) and produces a population D of 0.90 at that same target — a genuinely large, bulk-of-distribution shift.
+
+**Fix**: tilt on normal scores of ranks — `Phi^-1(rank/(n+1))` — instead of raw standardized values. This forces the tilting variable to be approximately standard normal by construction regardless of the underlying feature's shape, so a given nominal severity produces a comparable bulk-of-distribution shift whether the feature is heavy-tailed (`trip_duration`) or not (coordinates). **Severity is now reported primarily as the achieved POPULATION D of the tilted distribution** (computed exactly via a weighted-KS statistic against the full holdout pool — no resampling noise), with the normal-score σ kept as a secondary column, per instruction. Re-ran the full severity sweep and minimum-drift-fraction sweep with this method (`scripts/step1_severity_v3.py` → `results/tabular_validation_severity_v3.json`); this is now the canonical synthetic-injection method for both legacy and future calibrated-mode evaluation, so both use identical synthetic data.
 
 **Minimum-detectable-D formula caveat**: the `c(alpha)*sqrt((n+m)/(nm))` floor used throughout this document is the standard **continuous-case** asymptotic approximation. It does not account for the near-discrete support of the coordinate features documented here — the true finite-sample null distribution of KS on data with substantial point masses differs from the continuous approximation, in a direction this analysis has not quantified. Treat the floor values as order-of-magnitude guidance for these features, not an exact bound.
 
@@ -133,6 +162,61 @@ The original severity-sweep results (additive mean-shift injection: `x + severit
 | trip_duration | True | D=0.0945, p=2.85e-39 |
 | gender_id | False | PSI=0.0422 |
 | month | True | PSI=16.2644 |
+
+**Severity sweep (normal-score tilting, batch size=5000, 5 trials/point), severity given PRIMARILY as achieved population D, normal-score σ as a secondary column:**
+
+| Feature | Population D | Normal-score σ | Detections |
+|---|---|---|---|
+| pickup_longitude | 0.0079 | 0.020 | 0/5 |
+| pickup_longitude | 0.0199 | 0.050 | 0/5 |
+| pickup_longitude | 0.0399 | 0.100 | 5/5 |
+| pickup_longitude | 0.0797 | 0.200 | 5/5 |
+| pickup_longitude | 0.1977 | 0.500 | 5/5 |
+| pickup_longitude | 0.3843 | 1.000 | 5/5 |
+| pickup_longitude | 0.5516 | 1.500 | 5/5 |
+| pickup_longitude | 0.6961 | 2.000 | 5/5 |
+| pickup_latitude | 0.0080 | 0.020 | 0/5 |
+| pickup_latitude | 0.0200 | 0.050 | 5/5 |
+| pickup_latitude | 0.0400 | 0.100 | 5/5 |
+| pickup_latitude | 0.0799 | 0.200 | 5/5 |
+| pickup_latitude | 0.1981 | 0.500 | 5/5 |
+| pickup_latitude | 0.3865 | 1.000 | 5/5 |
+| pickup_latitude | 0.5587 | 1.500 | 5/5 |
+| pickup_latitude | 0.7125 | 2.000 | 5/5 |
+| dropoff_longitude | 0.0079 | 0.020 | 0/5 |
+| dropoff_longitude | 0.0199 | 0.050 | 1/5 |
+| dropoff_longitude | 0.0398 | 0.100 | 4/5 |
+| dropoff_longitude | 0.0797 | 0.200 | 5/5 |
+| dropoff_longitude | 0.1976 | 0.500 | 5/5 |
+| dropoff_longitude | 0.3840 | 1.000 | 5/5 |
+| dropoff_longitude | 0.5505 | 1.500 | 5/5 |
+| dropoff_longitude | 0.6929 | 2.000 | 5/5 |
+| dropoff_latitude | 0.0080 | 0.020 | 0/5 |
+| dropoff_latitude | 0.0200 | 0.050 | 3/5 |
+| dropoff_latitude | 0.0400 | 0.100 | 5/5 |
+| dropoff_latitude | 0.0798 | 0.200 | 5/5 |
+| dropoff_latitude | 0.1981 | 0.500 | 5/5 |
+| dropoff_latitude | 0.3862 | 1.000 | 5/5 |
+| dropoff_latitude | 0.5578 | 1.500 | 5/5 |
+| dropoff_latitude | 0.7104 | 2.000 | 5/5 |
+| trip_duration | 0.0080 | 0.020 | 0/5 |
+| trip_duration | 0.0200 | 0.050 | 0/5 |
+| trip_duration | 0.0399 | 0.100 | 5/5 |
+| trip_duration | 0.0797 | 0.200 | 5/5 |
+| trip_duration | 0.1976 | 0.500 | 5/5 |
+| trip_duration | 0.3838 | 1.000 | 5/5 |
+| trip_duration | 0.5500 | 1.500 | 5/5 |
+| trip_duration | 0.6917 | 2.000 | 5/5 |
+
+**Minimum drift fraction (normal-score tilting, drifted slice population D given, target normal-score σ=1.5):**
+
+| Feature | Drifted-slice population D | Min fraction |
+|---|---|---|
+| pickup_longitude | 0.5516 | 0.0 |
+| pickup_latitude | 0.5587 | 0.3 |
+| dropoff_longitude | 0.5505 | 0.3 |
+| dropoff_latitude | 0.5578 | 0.3 |
+| trip_duration | 0.5500 | 0.3 |
 
 **Sweep, pooled, D_gt=0.01 (PSI>=0.2), WITH `month`:**
 
@@ -260,6 +344,61 @@ Alpha-predicted system false-alarm rate for 7 uncorrected tests at alpha=0.05: `
 | trip_duration | True | D=0.0963, p=0.00e+00 |
 | gender_id | False | PSI=0.0453 |
 | month | True | PSI=16.2648 |
+
+**Severity sweep (normal-score tilting, batch size=5000, 5 trials/point), severity given PRIMARILY as achieved population D, normal-score σ as a secondary column:**
+
+| Feature | Population D | Normal-score σ | Detections |
+|---|---|---|---|
+| pickup_longitude | 0.0079 | 0.020 | 1/5 |
+| pickup_longitude | 0.0199 | 0.050 | 4/5 |
+| pickup_longitude | 0.0399 | 0.100 | 5/5 |
+| pickup_longitude | 0.0797 | 0.200 | 5/5 |
+| pickup_longitude | 0.1977 | 0.500 | 5/5 |
+| pickup_longitude | 0.3843 | 1.000 | 5/5 |
+| pickup_longitude | 0.5516 | 1.500 | 5/5 |
+| pickup_longitude | 0.6961 | 2.000 | 5/5 |
+| pickup_latitude | 0.0080 | 0.020 | 1/5 |
+| pickup_latitude | 0.0200 | 0.050 | 5/5 |
+| pickup_latitude | 0.0400 | 0.100 | 5/5 |
+| pickup_latitude | 0.0799 | 0.200 | 5/5 |
+| pickup_latitude | 0.1981 | 0.500 | 5/5 |
+| pickup_latitude | 0.3865 | 1.000 | 5/5 |
+| pickup_latitude | 0.5587 | 1.500 | 5/5 |
+| pickup_latitude | 0.7125 | 2.000 | 5/5 |
+| dropoff_longitude | 0.0079 | 0.020 | 2/5 |
+| dropoff_longitude | 0.0199 | 0.050 | 5/5 |
+| dropoff_longitude | 0.0398 | 0.100 | 5/5 |
+| dropoff_longitude | 0.0797 | 0.200 | 5/5 |
+| dropoff_longitude | 0.1976 | 0.500 | 5/5 |
+| dropoff_longitude | 0.3840 | 1.000 | 5/5 |
+| dropoff_longitude | 0.5505 | 1.500 | 5/5 |
+| dropoff_longitude | 0.6929 | 2.000 | 5/5 |
+| dropoff_latitude | 0.0080 | 0.020 | 0/5 |
+| dropoff_latitude | 0.0200 | 0.050 | 5/5 |
+| dropoff_latitude | 0.0400 | 0.100 | 5/5 |
+| dropoff_latitude | 0.0798 | 0.200 | 5/5 |
+| dropoff_latitude | 0.1981 | 0.500 | 5/5 |
+| dropoff_latitude | 0.3862 | 1.000 | 5/5 |
+| dropoff_latitude | 0.5578 | 1.500 | 5/5 |
+| dropoff_latitude | 0.7104 | 2.000 | 5/5 |
+| trip_duration | 0.0080 | 0.020 | 1/5 |
+| trip_duration | 0.0200 | 0.050 | 4/5 |
+| trip_duration | 0.0399 | 0.100 | 5/5 |
+| trip_duration | 0.0797 | 0.200 | 5/5 |
+| trip_duration | 0.1976 | 0.500 | 5/5 |
+| trip_duration | 0.3838 | 1.000 | 5/5 |
+| trip_duration | 0.5500 | 1.500 | 5/5 |
+| trip_duration | 0.6917 | 2.000 | 5/5 |
+
+**Minimum drift fraction (normal-score tilting, drifted slice population D given, target normal-score σ=1.5):**
+
+| Feature | Drifted-slice population D | Min fraction |
+|---|---|---|
+| pickup_longitude | 0.5516 | 0.0 |
+| pickup_latitude | 0.5587 | 0.3 |
+| dropoff_longitude | 0.5505 | 0.2 |
+| dropoff_latitude | 0.5578 | 0.3 |
+| trip_duration | 0.5500 | 0.3 |
 
 **Sweep, pooled, D_gt=0.01 (PSI>=0.2), WITH `month`:**
 

@@ -206,6 +206,8 @@ def main():
     raw = json.load(open("results/tabular_validation_legacy_raw.json"))
     config = raw["config"]
     severity_v2 = json.load(open("results/tabular_validation_severity_v2.json"))
+    severity_v3 = json.load(open("results/tabular_validation_severity_v3.json"))
+    scale_investigation = json.load(open("results/severity_scale_investigation.json"))
 
     pooled_truth_raw, per_month_truth_raw = compute_population_truth()
 
@@ -273,17 +275,25 @@ def main():
         "of the test itself — the asymptotic KS null distribution assumes a continuous reference.\n"
     )
 
-    notes_lines.append("**Smallest synthetic severity reliably detected (100% of trials), PER FEATURE, "
-                        "using the corrected support-preserving injection method (see 'Synthetic drift "
-                        "realism' below) — no single number applies to all features, so none is reported:**\n")
-    notes_lines.append("| Reference size | " + " | ".join(CONTINUOUS_FEATURES) + " |\n" +
-                        "|---|" + "---|" * len(CONTINUOUS_FEATURES))
+    notes_lines.append("**Smallest reliably-detected POPULATION D (100% of trials), PER FEATURE, "
+                        "using normal-score tilting (see 'Synthetic drift realism' below, which also "
+                        "covers a second fix on top of the additive-shift one: raw-z tilting understated "
+                        "trip_duration's sensitivity too) — now roughly consistent across features, "
+                        "unlike the raw-z version:**\n")
+    notes_lines.append("| Reference size | " + " | ".join(CONTINUOUS_FEATURES) + " | vs. theoretical floor |\n" +
+                        "|---|" + "---|" * len(CONTINUOUS_FEATURES) + "---|")
     for ref_size_str in raw["by_reference_size"].keys():
-        sev_dict = severity_v2["by_reference_size"][ref_size_str]["tilted_resample"]["severity"]
-        per_feat = smallest_reliable_severity_per_feature(sev_dict)
-        row = " | ".join(str(per_feat[f]) if per_feat[f] is not None else "none≤3.0σ" for f in CONTINUOUS_FEATURES)
-        notes_lines.append(f"| {ref_size_str} | {row} |")
-    notes_lines.append("")
+        cc = severity_v3["consistency_check"][ref_size_str]
+        per_feat = cc["smallest_reliable_D_per_feature"]
+        row = " | ".join(f"{per_feat[f]:.4f}" if per_feat[f] is not None else "none tested" for f in CONTINUOUS_FEATURES)
+        notes_lines.append(f"| {ref_size_str} | {row} | {cc['theoretical_floor']:.4f} |")
+    notes_lines.append(
+        "\n(Secondary, normal-score-sigma view of the same result is in the per-reference-size sections "
+        "below.) All per-feature values now sit within roughly a factor of ~2-6x of the theoretical floor "
+        "at m=50,000 (0.020-0.040 vs. floor 0.0061) — much closer and more uniform than the raw-z method's "
+        "trip_duration outlier (which needed 1.5σ while coordinates needed 0.05-0.1σ, not a genuine "
+        "difference in detectability, just an injection-method artifact).\n"
+    )
 
     notes_lines.append("**Original README discrepancies (all about the now-superseded old numbers):**\n")
     notes_lines.append(
@@ -345,6 +355,49 @@ def main():
         "`results/tabular_validation_legacy_raw.json` under `severity`/`min_drift_fraction`, but are now "
         "labeled a diagnostic of the artifact, not a real detection-sensitivity result** — see "
         "`results/tabular_validation_severity_v2.json`'s `additive_shift_DIAGNOSTIC_ONLY` key.\n"
+    )
+
+    # --- Second fix: raw-z tilting understated trip_duration's sensitivity too ---
+    notes_lines.append("### Second synthetic-drift fix: raw-z tilting vs. normal-score tilting\n")
+    notes_lines.append(
+        "Even after switching to (raw-z) exponential tilting, `trip_duration`'s severity sweep looked "
+        "inconsistent with the coordinate features — it needed a nominal 1.5σ to reach 100% detection "
+        "while the coordinates needed only 0.05-0.1σ. Hypothesis: `trip_duration` is heavily right-skewed "
+        "(mean=880s, median=550s, max=234,243s), so tilting on the *raw* standardized value lets a handful "
+        "of extreme trips dominate the importance weights — the MEAN shifts a lot, but the CDF (what KS "
+        "actually measures) barely moves, since the bulk of the distribution hasn't shifted.\n"
+    )
+    notes_lines.append(
+        "**Confirmed empirically** (`results/severity_scale_investigation.json`) via the effective sample "
+        "size (`1/sum(w^2)`) of the tilting weights and the exact population D (weighted-KS, no resampling "
+        "noise) at each target severity:\n"
+    )
+    notes_lines.append("| Method | Target σ | Effective sample size (of 25,000) | Population D |\n|---|---|---|---|")
+    for method_name, rows in scale_investigation["methods"].items():
+        for row in rows:
+            notes_lines.append(f"| {method_name} | {row['target_severity']:.2f} | "
+                                f"{row['effective_sample_size']:.0f} | {row['population_D']:.4f} |")
+    notes_lines.append(
+        "\nAt target severity=3.0σ, raw-z tilting's effective sample size collapses to **1,136 of 25,000 "
+        "rows (4.5%)** — almost all weight concentrated on a tiny number of extreme trips — and the "
+        "resulting population D (0.0633) is far below what a genuine 3σ-equivalent shift should produce. "
+        "Normal-score tilting at the same nominal severity keeps far more of the pool active (though it "
+        "too eventually concentrates at extreme targets — ESS=40/25,000 at severity=3.0, since normal "
+        "scores are themselves bounded by roughly ±3.94 for n=25,000) and produces a population D of 0.90 "
+        "at that same target — a genuinely large, bulk-of-distribution shift.\n"
+    )
+    notes_lines.append(
+        "**Fix**: tilt on normal scores of ranks — `Phi^-1(rank/(n+1))` — instead of raw standardized "
+        "values. This forces the tilting variable to be approximately standard normal by construction "
+        "regardless of the underlying feature's shape, so a given nominal severity produces a comparable "
+        "bulk-of-distribution shift whether the feature is heavy-tailed (`trip_duration`) or not "
+        "(coordinates). **Severity is now reported primarily as the achieved POPULATION D of the tilted "
+        "distribution** (computed exactly via a weighted-KS statistic against the full holdout pool — no "
+        "resampling noise), with the normal-score σ kept as a secondary column, per instruction. Re-ran "
+        "the full severity sweep and minimum-drift-fraction sweep with this method "
+        "(`scripts/step1_severity_v3.py` → `results/tabular_validation_severity_v3.json`); this is now the "
+        "canonical synthetic-injection method for both legacy and future calibrated-mode evaluation, so "
+        "both use identical synthetic data.\n"
     )
     notes_lines.append(
         "**Minimum-detectable-D formula caveat**: the `c(alpha)*sqrt((n+m)/(nm))` floor used throughout "
@@ -432,13 +485,25 @@ def main():
         notes_lines.append(f"\n## Reference size = {ref_size}\n")
         rs_summary = {
             "sweep": {}, "aa": {}, "per_feature_batch_d": {},
-            "severity": severity_v2["by_reference_size"][ref_size_str]["tilted_resample"]["severity"],
-            "min_drift_fraction": severity_v2["by_reference_size"][ref_size_str]["tilted_resample"]["min_drift_fraction"],
-            "severity_and_min_drift_fraction_ADDITIVE_SHIFT_DIAGNOSTIC_ONLY": {
+            "severity": severity_v3["by_reference_size"][ref_size_str]["severity"],
+            "min_drift_fraction": severity_v3["by_reference_size"][ref_size_str]["min_drift_fraction"],
+            "severity_method_note": "Normal-score tilting -- see 'Synthetic drift realism' in the notes. "
+                                     "Severity keyed by achieved population D (primary), normal-score sigma "
+                                     "given per-entry as a secondary field. This is the canonical synthetic "
+                                     "injection used for both legacy and future calibrated-mode evaluation.",
+            "severity_DIAGNOSTIC_additive_shift": {
                 "severity": r["severity"], "min_drift_fraction": r["min_drift_fraction"],
                 "note": "Additive-shift injection -- confirmed to produce a lattice-mismatch artifact on "
                         "near-discrete features (see 'Synthetic drift realism' in the notes). Not a real "
                         "detection-sensitivity result.",
+            },
+            "severity_DIAGNOSTIC_raw_z_tilting": {
+                "severity": severity_v2["by_reference_size"][ref_size_str]["tilted_resample"]["severity"],
+                "min_drift_fraction": severity_v2["by_reference_size"][ref_size_str]["tilted_resample"]["min_drift_fraction"],
+                "note": "Support-preserving (fixes the additive artifact) but tilts on raw z -- confirmed "
+                        "to understate trip_duration's true sensitivity due to its heavy right skew (see "
+                        "'Second synthetic-drift fix' in the notes). Superseded by normal-score tilting "
+                        "above for trip_duration-like heavy-tailed features.",
             },
             "reference_detectable_effect_DIAGNOSTIC_ONLY": r["ground_truth_pooled"],
         }
@@ -456,6 +521,27 @@ def main():
             detail_str = (f"D={detail.get('population_D'):.4f}, p={detail.get('ks_pvalue'):.2e}"
                            if "population_D" in detail else f"PSI={detail.get('population_PSI'):.4f}")
             notes_lines.append(f"| {feat} | {old_gt[feat]} | {detail_str} |")
+        notes_lines.append("")
+
+        notes_lines.append(
+            "**Severity sweep (normal-score tilting, batch size=5000, 5 trials/point), severity given "
+            "PRIMARILY as achieved population D, normal-score σ as a secondary column:**\n"
+        )
+        notes_lines.append("| Feature | Population D | Normal-score σ | Detections |\n|---|---|---|---|")
+        for feat in CONTINUOUS_FEATURES:
+            for row in rs_summary["severity"][feat]:
+                notes_lines.append(
+                    f"| {feat} | {row['population_D']:.4f} | {row['achieved_normal_score_severity']:.3f}"
+                    f"{' *capped*' if row['was_capped'] else ''} | {row['detections']}/{row['n_trials']} |"
+                )
+        notes_lines.append("")
+
+        notes_lines.append("**Minimum drift fraction (normal-score tilting, drifted slice population "
+                            "D given, target normal-score σ=1.5):**\n")
+        notes_lines.append("| Feature | Drifted-slice population D | Min fraction |\n|---|---|---|")
+        for feat in CONTINUOUS_FEATURES:
+            mdf = rs_summary["min_drift_fraction"][feat]
+            notes_lines.append(f"| {feat} | {mdf['population_D_of_drifted_slice']:.4f} | {mdf['min_fraction']} |")
         notes_lines.append("")
 
         # --- Sweep tables at each D_gt (categorical fixed at PSI>=0.2), WITH and WITHOUT month ---

@@ -258,7 +258,29 @@ February-vs-March shift), since both come from the same pooled draw.
 
 ## Step 2 — Two-gate calibrated decisions
 
-**Status: PROPOSAL WRITTEN, AWAITING DECISIONS. No code implemented yet.**
+**Status: decisions received 2026-09-29 (alpha=0.05 Holm-corrected, KS D
+floor=0.05 dataset-independent, PSI=0.2/DCT AUC=0.65 provisional, legacy
+default with side-by-side approval gate for switching new-project default,
+DCT calibration=precomputed with clamp-and-warn). Severity scale prerequisite
+fix DONE. Gating engine implementation IN PROGRESS.**
+
+**Severity scale fix (prerequisite, done before any Step 2 code, so legacy
+and calibrated share identical synthetic data):** user's hypothesis
+confirmed empirically — raw-z exponential tilting let `trip_duration`'s
+heavy right skew (mean=880s, median=550s, max=234,243s) dominate the
+importance weights; at target severity=3σ the effective sample size
+collapsed to 1,136/25,000 rows (4.5%), so the mean shifted 14.6x but the
+population D only reached 0.063 (`results/severity_scale_investigation.json`).
+Fixed with normal-score tilting (`Phi^-1(rank/(n+1))` instead of raw z) —
+forces the tilting variable to be approximately standard normal regardless
+of feature shape. Re-ran the full severity + minimum-drift-fraction sweep
+(`scripts/step1_severity_v3.py` → `results/tabular_validation_severity_v3.json`):
+smallest reliably-detected population D is now consistent across all five
+continuous features (0.020–0.040 at m=50,000, vs. theoretical floor 0.0061)
+instead of `trip_duration` being a 15-30x outlier. Severity now reported
+primarily as achieved population D (exact weighted-KS, no resampling
+noise), normal-score σ kept as a secondary column. This is now the
+canonical synthetic-injection method going forward.
 
 - `docs/step2_proposal.md`: full config schema, Gate 1 mechanics per
   detector (KS p-value + Holm/BH; PSI parametric bootstrap at actual batch
@@ -273,46 +295,38 @@ February-vs-March shift), since both come from the same pooled draw.
   interactively at that size). Precomputed's tradeoff, stated plainly: it
   calibrates against a half-size pseudo-reference, a real bias against the
   latency win.
-- **Four decision points presented, none finalized** (full reasoning in
-  `docs/step2_proposal.md`):
-  1. Alpha — recommend keeping 0.05 (correction handles the system-rate
-     problem, not alpha itself).
-  2. Effect floors — KS D floor is the one Step 1's data most directly
-     bears on: **0.02 is arguably the worst choice**, since it splits the
-     knife-edge cluster (population D 0.0189–0.0219) down the middle;
-     recommend 0.03 (conservative) or 0.015 (liberal) instead. PSI/DCT
-     floors: propose keeping the existing 0.2/0.65.
-  3. Default decision mode for NEW projects (existing projects are already
-     settled as legacy) — leaning legacy-by-default until calibrated mode
-     has its own test suite and a Step 1-equivalent calibrated run, but
-     explicitly the user's call.
-  4. DCT calibration default — recommend precomputed, given the benchmark.
+- **Four decision points RESOLVED 2026-09-29** (user decisions, full detail
+  in the user's own message and reflected in the implementation below):
+  1. **Alpha = 0.05**, applied family-wise per batch via Holm across
+     features (default); BH kept as an option.
+  2. **Effect floors**: KS D default = **0.05** — a round, conservative
+     anti-alert-fatigue default chosen deliberately independent of the Citi
+     Bike knife-edge cluster (not tuned to the evaluation data, per ground
+     rule 6). Floors are per-project, overridable per-feature. PSI = 0.2
+     (industry convention). DCT AUC = 0.65, labeled provisional/unvalidated
+     until Step 8's text/image validation runs. At `/fit`, each feature's
+     floor is shown next to the minimum detectable D for the current
+     reference size, as part of human-in-the-loop schema confirmation.
+  3. **Default decision mode = legacy**, implemented now; existing projects
+     stay legacy permanently. After the calibrated evaluation, present a
+     side-by-side (A/A system false-alarm rate per batch size; precision/
+     recall at matched thresholds) — switching the NEW-project default to
+     calibrated needs separate approval contingent on that comparison.
+  4. **DCT calibration default = precomputed**; permutation kept as opt-in.
+     Document the half-size-pseudo-reference bias explicitly (conservative:
+     fewer false alarms, slightly less power). For batch sizes outside the
+     calibrated grid: clamp to the nearest grid point and return a warning,
+     never extrapolate silently.
 
-**Scope additions from Step 1's findings (user, 2026-09-29), recorded, not
-implemented yet:**
+**Scope additions from Step 1's findings, recorded, not implemented yet:**
 - Every KS result should return the minimum detectable D for its actual
   `(n, m)` at the configured alpha — `c(alpha) * sqrt((n+m)/(n*m))` — so
   users can see what the test cannot detect, not just what it did detect.
 - `/fit` should warn when the reference is small enough that this detection
-  floor exceeds the project's configured KS effect floor (once effect floors
-  exist as a per-project config, per the original Step 2 spec).
+  floor exceeds the project's configured KS effect floor.
 - Propose (don't set) a recommended minimum reference size, grounded in
-  Step 1's actual results (e.g. the m=5,000 vs m=50,000 comparison in
-  `results/tabular_validation_notes.md`) — a concrete number, not a guess,
-  and explicitly a proposal for the user to approve, not a new default.
-
-**Scope additions from Step 1's findings (user, 2026-09-29), recorded now,
-not implemented yet:**
-- Every KS result should return the minimum detectable D for its actual
-  `(n, m)` at the configured alpha — `c(alpha) * sqrt((n+m)/(n*m))` — so
-  users can see what the test cannot detect, not just what it did detect.
-- `/fit` should warn when the reference is small enough that this detection
-  floor exceeds the project's configured KS effect floor (once effect floors
-  exist as a per-project config, per the original Step 2 spec).
-- Propose (don't set) a recommended minimum reference size, grounded in
-  Step 1's actual results (e.g. the m=5,000 vs m=50,000 comparison in
-  `results/tabular_validation_notes.md`) — a concrete number, not a guess,
-  and explicitly a proposal for the user to approve, not a new default.
+  Step 1's actual results — a concrete number, not a guess, and explicitly
+  a proposal for the user to approve, not a new default.
 
 ---
 
