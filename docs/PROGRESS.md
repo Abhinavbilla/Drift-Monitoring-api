@@ -30,34 +30,74 @@ boundaries.
    `PRODUCTION_BATCH_SIZE=25000`, a size the sample-size sweep never tests —
    the sweep is a separate experiment, not a source for the headline number.
 5. Auth is `streamlit_google_auth.Authenticate` (pinned `1.1.8`, matches
-   installed version exactly), not `st.login()`. `patched_init.py` is a
-   functional no-op diff against the exact pinned version (whitespace only)
-   — treated as load-bearing per instruction, excluded from cleanup.
-6. Three contradictory deployment topologies exist (combined-container
-   `Dockerfile`, `docker-compose.yml` building that same Dockerfile twice,
-   and an unreferenced `Dockerfile.dashboard`) vs. the README's two-clean-
-   services description. **Waiting on user to confirm which is live on
-   Render.**
+   installed version exactly), not `st.login()`. **Corrected 2026-09-29**:
+   `patched_init.py`'s diff against the exact pinned version is whitespace-
+   only — it's a no-op today, not load-bearing. Scheduled for removal in
+   Step 7 (together with the overwrite step) with a local Google-login smoke
+   test as the acceptance check.
+6. **Resolved 2026-09-29**: nothing is deployed anywhere. Target going
+   forward is the single-container main `Dockerfile` topology (nginx +
+   supervisord + backend + dashboard). Step 7 backlog (not started):
+   compose runs that one image once with named volumes for DB + model cache;
+   delete `Dockerfile.dashboard` + `runtime.txt` (approved in principle, diff
+   first); multi-arch build (amd64 + arm64, target platform TBD); bump base
+   image to `python:3.12-slim` (3.10 EOLs Oct 2026), full test suite as the
+   verification gate; CI targets whatever the image actually uses.
 7. `runtime.txt` (3.12.4) doesn't match either Dockerfile (3.10-slim) —
-   Docker-based deploy means runtime.txt is very likely inert. CI must target
-   3.10.
-8. **`split_citi_bike.py` does not exist anywhere in the repo**, despite the
-   README instructing users to run it first. The live `citi_bike_v1`
-   baseline's exact provenance (which rows were fit) is therefore
-   unverifiable from the repo alone — this blocks a clean A/A test design
-   until Step 1 either reconstructs the split or re-fits from a fresh,
-   documented one.
+   confirmed stale, approved for deletion in Step 7.
+8. **`split_citi_bike.py` did not exist anywhere in the repo** — resolved
+   2026-09-29 (see items below): replaced with a new, documented
+   `scripts/split_citi_bike.py` rather than reconstructing the original.
+9. **New finding (found while building the replacement script)**: the local
+   `tests/citi_bike_production.csv` only contains **Apr/May/Jun** data
+   (verified: `month` ∈ {4,5,6} only, 2,922,389 rows total) — **not**
+   Apr–Dec as the README's Validation Results section claims. Any Step 1
+   numbers will be scoped to Apr–Jun unless more months are sourced (which
+   needs sign-off first, per the >~50MB download gate). See
+   `results/citi_bike_provenance_forensics.md`.
 
-**Open questions requiring user input before proceeding into Step 1/7:**
-- Which deployment topology is actually live on Render (§7 of recon.md)?
-- Step 1: reconstruct the original Citi Bike split, or re-fit `citi_bike_v1`
-  from a fresh, documented, reproducible split?
+**Citi Bike provenance work (done 2026-09-29, per user decision):**
+- Time-boxed forensic check written to
+  `results/citi_bike_provenance_forensics.md`: the old `citi_bike_v1`
+  reference sample (5,000 continuous / 2,000 categorical rows) was drawn
+  non-uniformly from roughly the first ~17,000 rows (~1%) of
+  `tests/citi_bike_baseline.csv` — not a contiguous prefix, not a uniform
+  sample across the full Jan–Mar file. Exact original method unrecoverable;
+  not blocking, per instruction.
+- New `scripts/split_citi_bike.py` written: fixed seed (42), disjoint
+  Jan–Mar holdout pool (25,000 rows, byte-identical across reference-size
+  runs — verified), reference size as a CLI parameter, per-month production
+  splits, full JSON manifest with source/output SHA256 hashes written to
+  `results/`.
+- Run twice: `--reference-size 5000` (legacy-equivalent) and
+  `--reference-size 50000`. Manifests: `results/split_citi_bike_manifest_ref5000.json`,
+  `results/split_citi_bike_manifest_ref50000.json`. Holdout pool confirmed
+  byte-identical across both runs (hash-verified); only the reference differs.
+- **Old README validation numbers are superseded** — decision recorded: must
+  not be quoted anywhere until regenerated against this new split.
+
+**Both prior open questions resolved 2026-09-29** (deployment topology,
+Citi Bike split strategy) — see items 5-9 above and PROGRESS's decision log.
+
+**New open question surfaced 2026-09-29, needs a decision before Step 1's
+production-batch analysis can claim full README parity:** the local
+production data only covers Apr–Jun, not Apr–Dec. Options: (a) proceed with
+Step 1 scoped to Apr–Jun and say so explicitly everywhere, or (b) source
+Jul–Dec 2016 Citi Bike trip data (would need sign-off — likely >50MB).
 
 ---
 
 ## Step 1 — Tabular validation reconciliation
 
-**Status: NOT STARTED.**
+**Status: IN PROGRESS.**
+
+Prerequisites done: forensic check (`results/citi_bike_provenance_forensics.md`)
+and new `scripts/split_citi_bike.py`, run at both reference sizes (5000,
+50000) with manifests in `results/`. Blocked on the Apr–Jun vs Apr–Dec
+decision above before running the full batch-size sweep / classification
+evaluation — proceeding with Apr-Jun-scoped analysis in the meantime is
+reasonable per the user's "proceed into Step 1" instruction, but headline
+claims must say "Apr-Jun" not "Apr-Dec" until/unless more months are sourced.
 
 ---
 

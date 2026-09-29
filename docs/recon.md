@@ -289,6 +289,15 @@ different version of the upstream package, or whether it was introduced as a
 defensive "always ship exactly this known-good file" measure regardless of
 what pip resolves. **I'm not speculating further than what the diff shows.**
 
+**Corrected assessment (user decision, 2026-09-29): `patched_init.py` is a
+no-op today, not load-bearing.** Since the diff against the exact pinned
+version (1.1.8) is whitespace-only, the overwrite step currently changes
+nothing behaviorally — removing both the file and the copy step would not
+break auth *as things stand right now*. My earlier framing of it as "load-
+bearing infrastructure" (based on it existing and being unconditionally
+copied) overstated what the diff itself actually shows. The real, still-valid
+concern is forward-looking, not present-tense:
+
 **What breaks if the upstream version changes:** the Dockerfiles
 unconditionally overwrite `site-packages/streamlit_google_auth/__init__.py`
 with this repo's frozen copy at build time (`Dockerfile:22`,
@@ -300,8 +309,17 @@ path, different method names), this blind overwrite would replace that
 version's real implementation with this frozen 1.1.8-era copy — silently,
 with `|| true` swallowing any copy failure and no verification that the
 result is even compatible with the installed `cookie` submodule it imports
-from (`from .cookie import CookieHandler`). This is precisely the risk your
-Step 7 build-time-guard proposal is meant to close; I have not implemented
+from (`from .cookie import CookieHandler`). But today, pinned at exactly
+1.1.8, this risk is latent, not active — there is currently nothing this file
+does that the real package doesn't already do on its own.
+
+**Step 7 decision (user, 2026-09-29): propose removing `patched_init.py`
+together with the overwrite step entirely** (including the `|| true`), with a
+local Google-login smoke test as the acceptance check before removal is
+finalized. Not implemented yet — this is Step 7's job, recorded here for
+continuity. This is precisely the risk your original build-time-guard idea
+was meant to close; given the file turns out to be a no-op, removal is the
+simpler fix and a guard is no longer needed. I have not implemented
 that guard, only documented the risk it addresses, per your instructions
 ("propose, don't implement").
 
@@ -382,12 +400,24 @@ Render's own port detection — dashboard and supervisord would still be
 running inside that container, redundantly with the actual dedicated
 dashboard service.
 
-**I have not determined which of these is what's actually live on Render.**
-Per your instruction, no changes to any Dockerfile, `docker-compose.yml`,
-`supervisord.conf`, or `runtime.txt` are made or proposed until you confirm
-which topology is real. `supervisord.conf` is **not** classified as stale —
-it's actively referenced by the main `Dockerfile` regardless of which
-topology is live in production.
+**Resolved (user decision, 2026-09-29): nothing is currently deployed
+anywhere.** The app is not live on Render or any other platform — all four
+topologies above describe repo state, not a production reality to reconcile
+against. **Decision: consolidate on Topology A (the single-container main
+`Dockerfile`: nginx + supervisord + backend + dashboard together) as the
+target going forward.** Concretely, for Step 7 (not implemented yet):
+- Make `docker-compose.yml` run that one image once (not twice), with a named
+  volume for the SQLite DB and model cache, DB path via env var.
+- Delete `Dockerfile.dashboard` and `runtime.txt` — approved in principle,
+  diff to be shown before deletion.
+- Build for both `linux/amd64` and `linux/arm64` (target platform not chosen
+  yet — likely an Oracle ARM VM or an Azure VM).
+- Python 3.10 reaches end-of-life in October 2026 — propose bumping the base
+  image to `python:3.12-slim` in both `Dockerfile`s, verified by the full test
+  suite, with CI targeting whatever the image actually uses.
+
+`supervisord.conf` is **not** classified as stale — it's the mechanism behind
+the chosen target topology, not dead config.
 
 ---
 
@@ -453,13 +483,14 @@ one ID space today, so that change is a rename/alias, not a data-model change.
   category arrays to stdout on every PSI check. Not README-related, but a
   real production-logging issue found during this pass. Replaced with
   `logging.debug(...)` — nothing above DEBUG level logs category values.
-- **`patched_init.py` is functionally a no-op patch for the current pin**
-  (see §6) — the README/architecture never mentions this file's existence or
-  purpose at all; worth a "How It Works" or "Project Structure" mention in
-  Step 9 given how much deployment behavior depends on it working correctly.
-- **The three deployment topologies (§7)** are the single biggest
-  README-contradicting finding from this pass — the README describes a clean
-  two-service split that the actual Dockerfiles don't implement as described.
+- **`patched_init.py` is functionally a no-op patch for the current pin, and
+  is not load-bearing** (see §6, corrected) — slated for removal in Step 7
+  together with the overwrite step, pending a local Google-login smoke test.
+- **The deployment topologies (§7) don't matter in the way originally framed**
+  — nothing is deployed anywhere right now, so there was no live contradiction
+  to resolve. The target going forward is the single-container main
+  `Dockerfile` topology (nginx + supervisord + backend + dashboard), decided
+  2026-09-29.
 - **`split_citi_bike.py` doesn't exist.** The README tells users to run it as
   the first step of reproducing the tabular validation suite (`README.md:549`),
   but it is not present anywhere in the repo (confirmed by a full-repo
@@ -474,14 +505,20 @@ one ID space today, so that change is a rename/alias, not a data-model change.
 
 ## Summary of what's still open (not resolved in Step 0, by design)
 
-1. Which deployment topology (§7) is actually live on Render — **waiting on
-   you**, per your instruction.
+1. ~~Which deployment topology is live on Render~~ — **resolved 2026-09-29**:
+   nothing is deployed anywhere; target is the single-container main
+   `Dockerfile` topology, work deferred to Step 7 (see §7).
 2. The exact cause of the recall/F1 discrepancies in the validation suite's
    headline numbers (§4) — requires a fresh run with raw counts saved, which
-   is Step 1's job, not Step 0's.
-3. Whether Case A's clean-batch samples in `run_classification_evaluation`
-   overlap with the rows used to `/fit` the baseline — **cannot be determined
-   from the repo** since `split_citi_bike.py` (the script that would show
-   this) doesn't exist (§4). Step 1 needs a decision from you: reconstruct
-   a plausible split, or re-fit `citi_bike_v1` from a fresh, documented,
-   reproducible split before running the A/A test.
+   is Step 1's job, not Step 0's. Now additionally moot for the *old* numbers
+   specifically: **the old README validation numbers are superseded and must
+   not be quoted anywhere until regenerated** against the new split (decision
+   2026-09-29, since `citi_bike_v1`'s exact provenance is unreproducible —
+   see §4/§9 and the forensic note below).
+3. ~~Whether Case A's clean-batch samples overlap with the `/fit` rows~~ —
+   **resolved 2026-09-29**: don't try to reconstruct the exact original split.
+   A time-boxed forensic check on the stored reference (see
+   `results/citi_bike_provenance_forensics.md`) documents what can be
+   determined about the old baseline without blocking on it, and a new,
+   documented `scripts/split_citi_bike.py` (fixed seed, disjoint Jan–Mar
+   holdout pool, parameterized reference size) replaces it going forward.

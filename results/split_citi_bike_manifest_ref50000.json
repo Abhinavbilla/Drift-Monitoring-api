@@ -1,0 +1,66 @@
+{
+  "created_at_utc": "2026-09-29T12:44:32Z",
+  "seed": 42,
+  "parameters": {
+    "reference_size": 50000,
+    "holdout_size": 25000
+  },
+  "source_files": {
+    "baseline_csv": {
+      "path": "tests/citi_bike_baseline.csv",
+      "rows": 1577611,
+      "sha256": "32ac649afa1f60b41feb1cfa9d1f9b4319c259619fdc68a15d10b39065965fd1"
+    },
+    "production_csv": {
+      "path": "tests/citi_bike_production.csv",
+      "rows": 2922389,
+      "sha256": "75707752ab34ed9fec80b50be049200a27147ba4213e25eb1788e1d4606095fc"
+    }
+  },
+  "outputs": {
+    "reference": {
+      "path": "tests/splits\\reference_n50000.csv",
+      "rows": 50000,
+      "sha256": "743e64ae899cc5ee0eb77857d9f84e108949bda7bc91050939bb867c3b004a3a",
+      "content_hash": "a5e6ace53b25633e597850aa66152023d90abd9adb694feaa06f61cbbf73582e"
+    },
+    "holdout": {
+      "path": "tests/splits\\holdout_n25000.csv",
+      "rows": 25000,
+      "sha256": "50521499278bb954116fea9a547bbfbf7ff422d7c5e0de5e08101951d605197c",
+      "content_hash": "d6d81752c0521220e49fa408b2feab093638cb11621a482e777082b228d38962"
+    },
+    "production_by_month": {
+      "4": {
+        "path": "tests/splits\\production_month_04.csv",
+        "rows": 802939,
+        "sha256": "a8f91b61e708b475ea774b32770f79b407f70488f661126addccac44aa2f2b70"
+      },
+      "5": {
+        "path": "tests/splits\\production_month_05.csv",
+        "rows": 961369,
+        "sha256": "aa153b0b5bf20728f5297469a7f5db7d318fb82e6bdd68872d86e6ea49e343ef"
+      },
+      "6": {
+        "path": "tests/splits\\production_month_06.csv",
+        "rows": 1158081,
+        "sha256": "9db276c279d8059ce6fa69020137da7b69bcd3c21d64d2b34b086723d2f65300"
+      }
+    }
+  },
+  "production_months_present": [
+    4,
+    5,
+    6
+  ],
+  "production_months_missing": [
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "production_apr_dec_claim_reproducible": false,
+  "disjointness_check": "reference and holdout row indices verified non-overlapping by assertion"
+}
