@@ -82,10 +82,19 @@ Citi Bike split strategy) — see items 5-9 above and PROGRESS's decision log.
 **Resolved 2026-09-29: proceed with Step 1 scoped to Apr–Jun 2016, don't
 source Jul–Dec now.** Every result/table/note states "Apr–Jun 2016"
 explicitly. Added to the Step 9 README-correction list: *"README claims
-Apr–Dec; data is Apr–Jun."* A full Jan–Dec rebuild from raw source data with
-one documented preprocessing script is explicitly **deferred, not part of
-this pass** — extending with Jul–Dec data prepared differently from the
-existing CSVs would inject artificial drift.
+Apr–Dec; data is Apr–Jun."*
+
+**A full Jan–Dec rebuild is explicitly deferred, not part of this pass** —
+extending with Jul–Dec data prepared differently from the existing CSVs
+would inject artificial drift. **Since no original preprocessing script
+exists anywhere in the repo or its git history (confirmed below), that
+deferred rebuild is not "add the missing months to what's here" — it means
+writing preprocessing from scratch against the raw Citi Bike 2016 trip files
+and regenerating ALL twelve months, including Jan–Jun, from that one new
+script, not just the missing Jul–Dec.** The current baseline/production CSVs
+cannot be partially extended; whenever this rebuild happens, everything gets
+regenerated together so the whole year is produced by one consistent,
+documented process.
 
 **Pre-Step-1 verification, done 2026-09-29** (full detail in
 `results/citi_bike_provenance_forensics.md`):
@@ -126,41 +135,66 @@ existing CSVs would inject artificial drift.
   `drift.db` after the run.
 - Commits: (pending — see below).
 
+**Ground truth bug found and fixed (2026-09-29, same day, before user
+review).** The first pass computed "population ground truth" from the
+SAMPLED reference (5,000 or 50,000 rows) vs. production — which meant the
+label itself changed depending on which reference was drawn
+(`dropoff_longitude` flipped between stable and drifted across the two
+reference sizes on identical production data). **That is not a ground
+truth — it's a reference-dependent diagnostic**, per the user's own framing:
+"If a label changes when only the reference size changes, it is being
+computed partly from the reference sample." Fixed in `scripts/step1_analyze.py`:
+population truth is now computed **once**, from the **full baseline CSV**
+(1,577,611 rows — never any sampled reference) vs. full production data,
+using effect-size criteria only (D≥0.01/0.02/0.05 continuous, PSI≥0.1/0.2
+categorical — no p-values at this population scale). This label is now
+identical across every reference size and batch size by construction.
+**Verified**: `dropoff_longitude` now has a single population D (0.0206)
+used for both reference sizes. The old reference-vs-production computation
+is kept only as a renamed diagnostic (`reference_detectable_effect`),
+reported but never used to compute TP/FP/FN/TN. Relabeling was done
+**offline against the already-collected detections — no new HTTP calls**,
+since the engine's outputs don't change, only which label they're graded
+against. Bonus consistency check: the new fixed population D values
+(0.0219, 0.0189, 0.0206, 0.0195, 0.0924, 0.0432, 16.2660) exactly match
+`tests/test_drift_engine.py`'s own original ground-truth-verification
+numbers from a much earlier session run — strong evidence the fix is
+correct, since both now compute the same thing (full baseline vs. full
+available production) the same way.
+
 **Headline findings (full detail and every table in
-`results/tabular_validation_notes.md`):**
+`results/tabular_validation_notes.md`, now on the corrected ground truth):**
 
 1. **Reference size, not batch size, explains the recall plateau —
-   confirmed empirically, exactly as hypothesized.** The theoretical KS
+   confirmed empirically, exactly as hypothesized, and now on a ground
+   truth that doesn't move when the reference does.** The theoretical KS
    critical-value floor `c(0.05)/sqrt(m)` is ≈0.0192 at m=5,000 and ≈0.0061
-   at m=50,000. `pickup_latitude`'s population D (≈0.021–0.025) sits right
-   at the m=5,000 floor. At m=5,000, its recall plateaus around 0.79–0.83
-   even at the largest batch sizes tested (20k, 50k) — it never reaches 1.0.
-   At m=50,000, recall reaches 1.000 by batch size 10,000 and stays there.
-   No amount of extra production data fixes a reference that's too small to
-   resolve an effect that close to its own noise floor.
-2. **New caveat this run surfaced (not asked for, found while computing the
-   above): the "population ground truth" itself is not reference-size-
-   invariant.** `dropoff_longitude` is labeled stable under the m=5,000
-   reference (p=0.079) but drifted under the m=50,000 reference
-   (p=1.5×10⁻²⁶) — same Apr-Jun production data, different reference
-   samples. A small reference's own sampling noise leaks into what looks
-   like an "independent" ground truth. Practical takeaway: for borderline-
-   effect features, a ground truth computed from a small reference isn't a
-   stable target to grade the engine against — the m=50,000 ground truth
-   should be trusted over the m=5,000 one, not just the engine's detections.
-3. A/A system false-alarm rates ranged 0.02–0.27 across sweep sizes and
+   at m=50,000. `pickup_latitude`'s FIXED population D is 0.0189 — right at
+   the m=5,000 floor. At m=5,000 (D_gt=0.01, since 0.0189<0.02), recall
+   plateaus around 0.79–0.83 even at the largest batch sizes tested (20k,
+   50k) — it never reaches 1.0. At m=50,000, recall reaches 1.000 by batch
+   size 10,000 and stays there. No amount of extra production data fixes a
+   reference that's too small to resolve an effect that close to its own
+   noise floor.
+2. A/A system false-alarm rates ranged 0.02–0.27 across sweep sizes and
    reference sizes, generally at or below the alpha-predicted ≈0.30 for 7
    uncorrected tests (`1-(1-0.05)^7`) — roughly consistent with prediction,
    somewhat lower, plausibly because the 7 features aren't fully independent
    (correlated coordinates). No correction is applied yet (that's Step 2).
-4. Effect-size ground truth variants (D≥0.01/0.02/0.05) move the confusion
-   matrix substantially — e.g. at m=50,000, D≥0.05 drops recall from 1.000
-   to 1.000 but explodes false positives (precision 1.000→0.333), since most
-   of Apr-Jun's real population differences are small-effect, not large.
-5. `month`'s per-batch PSI has std=0.0000 at every batch — expected, not a
+3. Effect-size ground truth variants (D≥0.01/0.02/0.05) move the confusion
+   matrix substantially now that they're computed on a stable population
+   truth — e.g. at m=50,000, D_gt=0.05 keeps recall at 1.000 but collapses
+   precision to 0.333, since most of Apr-Jun's real population differences
+   are small-effect, not large. The engine's p<0.05 default flags effects
+   the size-based ground truth would call practically negligible — the same
+   oversensitivity-at-scale phenomenon PSI's ground truth was built to avoid
+   for categoricals, now shown to apply to the continuous KS path too.
+4. `month`'s per-batch PSI has std=0.0000 at every batch — expected, not a
    bug: every row in a given month's production file has that exact month
    value, so every batch's PSI for `month` compares against an identical
    100%-one-category distribution.
+5. Smallest synthetic severity reliably detected (100% of trials, every
+   continuous feature): **0.05σ at both reference sizes.**
 
 **A/A test framing (per instruction):** labeled throughout as an **iid
 test-calibration check** — both the holdout and reference samples are drawn
@@ -177,6 +211,19 @@ February-vs-March shift), since both come from the same pooled draw.
 ## Step 2 — Two-gate calibrated decisions
 
 **Status: NOT STARTED.**
+
+**Scope additions from Step 1's findings (user, 2026-09-29), recorded now,
+not implemented yet:**
+- Every KS result should return the minimum detectable D for its actual
+  `(n, m)` at the configured alpha — `c(alpha) * sqrt((n+m)/(n*m))` — so
+  users can see what the test cannot detect, not just what it did detect.
+- `/fit` should warn when the reference is small enough that this detection
+  floor exceeds the project's configured KS effect floor (once effect floors
+  exist as a per-project config, per the original Step 2 spec).
+- Propose (don't set) a recommended minimum reference size, grounded in
+  Step 1's actual results (e.g. the m=5,000 vs m=50,000 comparison in
+  `results/tabular_validation_notes.md`) — a concrete number, not a guess,
+  and explicitly a proposal for the user to approve, not a new default.
 
 ---
 
