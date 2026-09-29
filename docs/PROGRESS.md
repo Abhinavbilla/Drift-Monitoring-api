@@ -109,18 +109,58 @@ existing CSVs would inject artificial drift.
 
 ## Step 1 — Tabular validation reconciliation
 
-**Status: IN PROGRESS.**
+**Status: DONE.**
 
-Prerequisites done: forensic check, pre-flight verification (above), and
-`scripts/split_citi_bike.py` run at both reference sizes (5000, 50000).
-Proceeding now with the main Step 1 analysis: disjoint per-month batch
-draws, raw TP/FP/FN/TN with an explicit decision unit, per-batch-type
-breakdown, sweep with precision/raw-counts/15k point at both reference
-sizes, A/A test (labeled as an iid test-calibration check, not a test of
-month-to-month baseline variation — see below), extended severity levels,
-effect-size ground truth variants, per-feature D mean/std, and the
-"minimum drift fraction" rename. All Apr-Jun-scoped, all per-month AND
-pooled.
+- `scripts/step1_validation.py`: ran against the live backend, both
+  reference sizes (5000, 50000), disjoint per-month batches (Apr/May/Jun,
+  8 trials/month/size), A/A test (100 trials/size from the holdout pool,
+  6 sizes ≤ holdout capacity — 50000 excluded, disclosed), extended severity
+  sweep (0.02σ–3.0σ, 5 trials each), minimum-drift-fraction sweep. ~2,000
+  HTTP calls total, ~4.5 minutes wall time, zero errors.
+- `scripts/step1_analyze.py`: consumes the raw output, produces
+  `results/tabular_validation_legacy.json` (structured summary) and
+  `results/tabular_validation_notes.md` (full write-up with every table).
+- Raw output: `results/tabular_validation_legacy_raw.json` (2.6MB, every
+  individual `/analyze` response preserved).
+- Test projects (`step1_val_ref5000`, `step1_val_ref50000`) cleaned up from
+  `drift.db` after the run.
+- Commits: (pending — see below).
+
+**Headline findings (full detail and every table in
+`results/tabular_validation_notes.md`):**
+
+1. **Reference size, not batch size, explains the recall plateau —
+   confirmed empirically, exactly as hypothesized.** The theoretical KS
+   critical-value floor `c(0.05)/sqrt(m)` is ≈0.0192 at m=5,000 and ≈0.0061
+   at m=50,000. `pickup_latitude`'s population D (≈0.021–0.025) sits right
+   at the m=5,000 floor. At m=5,000, its recall plateaus around 0.79–0.83
+   even at the largest batch sizes tested (20k, 50k) — it never reaches 1.0.
+   At m=50,000, recall reaches 1.000 by batch size 10,000 and stays there.
+   No amount of extra production data fixes a reference that's too small to
+   resolve an effect that close to its own noise floor.
+2. **New caveat this run surfaced (not asked for, found while computing the
+   above): the "population ground truth" itself is not reference-size-
+   invariant.** `dropoff_longitude` is labeled stable under the m=5,000
+   reference (p=0.079) but drifted under the m=50,000 reference
+   (p=1.5×10⁻²⁶) — same Apr-Jun production data, different reference
+   samples. A small reference's own sampling noise leaks into what looks
+   like an "independent" ground truth. Practical takeaway: for borderline-
+   effect features, a ground truth computed from a small reference isn't a
+   stable target to grade the engine against — the m=50,000 ground truth
+   should be trusted over the m=5,000 one, not just the engine's detections.
+3. A/A system false-alarm rates ranged 0.02–0.27 across sweep sizes and
+   reference sizes, generally at or below the alpha-predicted ≈0.30 for 7
+   uncorrected tests (`1-(1-0.05)^7`) — roughly consistent with prediction,
+   somewhat lower, plausibly because the 7 features aren't fully independent
+   (correlated coordinates). No correction is applied yet (that's Step 2).
+4. Effect-size ground truth variants (D≥0.01/0.02/0.05) move the confusion
+   matrix substantially — e.g. at m=50,000, D≥0.05 drops recall from 1.000
+   to 1.000 but explodes false positives (precision 1.000→0.333), since most
+   of Apr-Jun's real population differences are small-effect, not large.
+5. `month`'s per-batch PSI has std=0.0000 at every batch — expected, not a
+   bug: every row in a given month's production file has that exact month
+   value, so every batch's PSI for `month` compares against an identical
+   100%-one-category distribution.
 
 **A/A test framing (per instruction):** labeled throughout as an **iid
 test-calibration check** — both the holdout and reference samples are drawn
@@ -128,6 +168,9 @@ at random from the same Jan–Mar pool, so this measures whether the false-
 alarm rate matches what alpha predicts under iid sampling. It does **not**
 capture month-to-month variation within the baseline period (e.g. a
 February-vs-March shift), since both come from the same pooled draw.
+
+**Everything here is scoped to Apr-Jun 2016** — no number above or in
+`results/tabular_validation_notes.md` should be read as "Apr-Dec."
 
 ---
 

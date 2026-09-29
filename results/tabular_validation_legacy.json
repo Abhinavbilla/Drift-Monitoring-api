@@ -1,0 +1,2035 @@
+{
+  "config": {
+    "backend": "http://127.0.0.1:8000",
+    "seed": 42,
+    "alpha": 0.05,
+    "psi_threshold": 0.2,
+    "reference_sizes": [
+      5000,
+      50000
+    ],
+    "holdout_size": 25000,
+    "months": [
+      4,
+      5,
+      6
+    ],
+    "sweep_sizes": [
+      1000,
+      3000,
+      5000,
+      10000,
+      15000,
+      20000,
+      50000
+    ],
+    "trials_target_per_month": 8,
+    "aa_trials_per_size": 100,
+    "aa_sizes": [
+      1000,
+      3000,
+      5000,
+      10000,
+      15000,
+      20000
+    ],
+    "severities": [
+      0.02,
+      0.05,
+      0.1,
+      0.2,
+      0.5,
+      1.5,
+      3.0
+    ],
+    "severity_batch_size": 5000,
+    "severity_trials": 5,
+    "effect_size_gt_thresholds": [
+      0.01,
+      0.02,
+      0.05
+    ],
+    "min_drift_fraction_batch_size": 100,
+    "min_drift_fraction_step": 10,
+    "min_drift_fraction_severity": "moderate",
+    "data_scope": "Apr-Jun 2016 (production); Jan-Mar 2016 (reference/holdout)"
+  },
+  "by_reference_size": {
+    "5000": {
+      "ground_truth_pooled": {
+        "ground_truth": {
+          "pickup_longitude": true,
+          "pickup_latitude": true,
+          "dropoff_longitude": false,
+          "dropoff_latitude": true,
+          "trip_duration": true,
+          "gender_id": false,
+          "month": true
+        },
+        "details": {
+          "pickup_longitude": {
+            "population_D": 0.029445353715744194,
+            "ks_pvalue": 0.00034140099154789463
+          },
+          "pickup_latitude": {
+            "population_D": 0.02543220009382735,
+            "ks_pvalue": 0.0030863159931052817
+          },
+          "dropoff_longitude": {
+            "population_D": 0.017955056359711175,
+            "ks_pvalue": 0.07910253406843581
+          },
+          "dropoff_latitude": {
+            "population_D": 0.022749866427775323,
+            "ks_pvalue": 0.011235981603852382
+          },
+          "trip_duration": {
+            "population_D": 0.09453600865593181,
+            "ks_pvalue": 2.849183331338987e-39
+          },
+          "gender_id": {
+            "population_PSI": 0.04220460278087791
+          },
+          "month": {
+            "population_PSI": 16.26439468842817
+          }
+        }
+      },
+      "sweep": {
+        "1000": {
+          "pooled_with_month": {
+            "TP": 65,
+            "FP": 1,
+            "FN": 55,
+            "TN": 47,
+            "precision": 0.9848484848484849,
+            "recall": 0.5416666666666666,
+            "f1": 0.6989247311827957,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 41,
+            "FP": 1,
+            "FN": 55,
+            "TN": 47,
+            "precision": 0.9761904761904762,
+            "recall": 0.4270833333333333,
+            "f1": 0.5942028985507246,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 17,
+              "FP": 1,
+              "FN": 15,
+              "TN": 23,
+              "precision": 0.9444444444444444,
+              "recall": 0.53125,
+              "f1": 0.6799999999999999,
+              "n": 56
+            },
+            "5": {
+              "TP": 21,
+              "FP": 1,
+              "FN": 19,
+              "TN": 15,
+              "precision": 0.9545454545454546,
+              "recall": 0.525,
+              "f1": 0.6774193548387099,
+              "n": 56
+            },
+            "6": {
+              "TP": 26,
+              "FP": 0,
+              "FN": 22,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.5416666666666666,
+              "f1": 0.7027027027027027,
+              "n": 56
+            }
+          }
+        },
+        "3000": {
+          "pooled_with_month": {
+            "TP": 83,
+            "FP": 2,
+            "FN": 37,
+            "TN": 46,
+            "precision": 0.9764705882352941,
+            "recall": 0.6916666666666667,
+            "f1": 0.8097560975609757,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 59,
+            "FP": 2,
+            "FN": 37,
+            "TN": 46,
+            "precision": 0.9672131147540983,
+            "recall": 0.6145833333333334,
+            "f1": 0.751592356687898,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 20,
+              "FP": 4,
+              "FN": 12,
+              "TN": 20,
+              "precision": 0.8333333333333334,
+              "recall": 0.625,
+              "f1": 0.7142857142857143,
+              "n": 56
+            },
+            "5": {
+              "TP": 29,
+              "FP": 0,
+              "FN": 11,
+              "TN": 16,
+              "precision": 1.0,
+              "recall": 0.725,
+              "f1": 0.8405797101449275,
+              "n": 56
+            },
+            "6": {
+              "TP": 32,
+              "FP": 0,
+              "FN": 16,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.6666666666666666,
+              "f1": 0.8,
+              "n": 56
+            }
+          }
+        },
+        "5000": {
+          "pooled_with_month": {
+            "TP": 93,
+            "FP": 1,
+            "FN": 27,
+            "TN": 47,
+            "precision": 0.9893617021276596,
+            "recall": 0.775,
+            "f1": 0.869158878504673,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 69,
+            "FP": 1,
+            "FN": 27,
+            "TN": 47,
+            "precision": 0.9857142857142858,
+            "recall": 0.71875,
+            "f1": 0.8313253012048192,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 24,
+              "FP": 0,
+              "FN": 8,
+              "TN": 24,
+              "precision": 1.0,
+              "recall": 0.75,
+              "f1": 0.8571428571428571,
+              "n": 56
+            },
+            "5": {
+              "TP": 32,
+              "FP": 0,
+              "FN": 8,
+              "TN": 16,
+              "precision": 1.0,
+              "recall": 0.8,
+              "f1": 0.888888888888889,
+              "n": 56
+            },
+            "6": {
+              "TP": 38,
+              "FP": 0,
+              "FN": 10,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.7916666666666666,
+              "f1": 0.8837209302325582,
+              "n": 56
+            }
+          }
+        },
+        "10000": {
+          "pooled_with_month": {
+            "TP": 105,
+            "FP": 8,
+            "FN": 15,
+            "TN": 40,
+            "precision": 0.9292035398230089,
+            "recall": 0.875,
+            "f1": 0.9012875536480688,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 81,
+            "FP": 8,
+            "FN": 15,
+            "TN": 40,
+            "precision": 0.9101123595505618,
+            "recall": 0.84375,
+            "f1": 0.8756756756756756,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 27,
+              "FP": 1,
+              "FN": 5,
+              "TN": 23,
+              "precision": 0.9642857142857143,
+              "recall": 0.84375,
+              "f1": 0.8999999999999999,
+              "n": 56
+            },
+            "5": {
+              "TP": 38,
+              "FP": 3,
+              "FN": 2,
+              "TN": 13,
+              "precision": 0.926829268292683,
+              "recall": 0.95,
+              "f1": 0.9382716049382716,
+              "n": 56
+            },
+            "6": {
+              "TP": 44,
+              "FP": 0,
+              "FN": 4,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.9166666666666666,
+              "f1": 0.9565217391304348,
+              "n": 56
+            }
+          }
+        },
+        "15000": {
+          "pooled_with_month": {
+            "TP": 107,
+            "FP": 3,
+            "FN": 13,
+            "TN": 45,
+            "precision": 0.9727272727272728,
+            "recall": 0.8916666666666667,
+            "f1": 0.9304347826086957,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 83,
+            "FP": 3,
+            "FN": 13,
+            "TN": 45,
+            "precision": 0.9651162790697675,
+            "recall": 0.8645833333333334,
+            "f1": 0.9120879120879122,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 26,
+              "FP": 1,
+              "FN": 6,
+              "TN": 23,
+              "precision": 0.9629629629629629,
+              "recall": 0.8125,
+              "f1": 0.8813559322033898,
+              "n": 56
+            },
+            "5": {
+              "TP": 40,
+              "FP": 1,
+              "FN": 0,
+              "TN": 15,
+              "precision": 0.975609756097561,
+              "recall": 1.0,
+              "f1": 0.9876543209876543,
+              "n": 56
+            },
+            "6": {
+              "TP": 42,
+              "FP": 0,
+              "FN": 6,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.875,
+              "f1": 0.9333333333333333,
+              "n": 56
+            }
+          }
+        },
+        "20000": {
+          "pooled_with_month": {
+            "TP": 109,
+            "FP": 5,
+            "FN": 11,
+            "TN": 43,
+            "precision": 0.956140350877193,
+            "recall": 0.9083333333333333,
+            "f1": 0.9316239316239316,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 85,
+            "FP": 5,
+            "FN": 11,
+            "TN": 43,
+            "precision": 0.9444444444444444,
+            "recall": 0.8854166666666666,
+            "f1": 0.9139784946236558,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 26,
+              "FP": 3,
+              "FN": 6,
+              "TN": 21,
+              "precision": 0.896551724137931,
+              "recall": 0.8125,
+              "f1": 0.8524590163934426,
+              "n": 56
+            },
+            "5": {
+              "TP": 40,
+              "FP": 0,
+              "FN": 0,
+              "TN": 16,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            },
+            "6": {
+              "TP": 45,
+              "FP": 0,
+              "FN": 3,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.9375,
+              "f1": 0.967741935483871,
+              "n": 56
+            }
+          }
+        },
+        "50000": {
+          "pooled_with_month": {
+            "TP": 109,
+            "FP": 12,
+            "FN": 11,
+            "TN": 36,
+            "precision": 0.9008264462809917,
+            "recall": 0.9083333333333333,
+            "f1": 0.904564315352697,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 85,
+            "FP": 12,
+            "FN": 11,
+            "TN": 36,
+            "precision": 0.8762886597938144,
+            "recall": 0.8854166666666666,
+            "f1": 0.8808290155440415,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 27,
+              "FP": 2,
+              "FN": 5,
+              "TN": 22,
+              "precision": 0.9310344827586207,
+              "recall": 0.84375,
+              "f1": 0.8852459016393444,
+              "n": 56
+            },
+            "5": {
+              "TP": 40,
+              "FP": 4,
+              "FN": 0,
+              "TN": 12,
+              "precision": 0.9090909090909091,
+              "recall": 1.0,
+              "f1": 0.9523809523809523,
+              "n": 56
+            },
+            "6": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            }
+          }
+        }
+      },
+      "aa": {
+        "1000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.1,
+            "pickup_latitude": 0.01,
+            "dropoff_longitude": 0.04,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.01,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.12
+        },
+        "3000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.16,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.05,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.18
+        },
+        "5000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.24,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.03,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.02,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.27
+        },
+        "10000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.13,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.09,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.01,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.21
+        },
+        "15000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.1,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.05,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.14
+        },
+        "20000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.02,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.02
+        }
+      },
+      "severity": {
+        "0.02": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 3
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 4
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 3
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "0.05": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "0.1": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "0.2": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "0.5": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "1.5": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "3.0": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        }
+      },
+      "min_drift_fraction": {
+        "pickup_longitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "pickup_latitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "dropoff_longitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.1,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": true
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "dropoff_latitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "trip_duration": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        }
+      },
+      "per_feature_batch_d": {
+        "pickup_longitude": {
+          "mean": 0.02958583333333333,
+          "std": 0.00484284516638262,
+          "n": 24
+        },
+        "pickup_latitude": {
+          "mean": 0.025327500000000017,
+          "std": 0.0044909531746241465,
+          "n": 24
+        },
+        "dropoff_longitude": {
+          "mean": 0.018065833333333343,
+          "std": 0.004892938718761513,
+          "n": 24
+        },
+        "dropoff_latitude": {
+          "mean": 0.023568333333333306,
+          "std": 0.004165304777430925,
+          "n": 24
+        },
+        "trip_duration": {
+          "mean": 0.09161499999999999,
+          "std": 0.01660218083064191,
+          "n": 24
+        },
+        "gender_id": {
+          "mean": 0.04233068801812026,
+          "std": 0.008625145749767454,
+          "n": 24
+        },
+        "month": {
+          "mean": 17.353408078024245,
+          "std": 0.0,
+          "n": 24
+        }
+      },
+      "ground_truth_effect_size_confusion": {
+        "0.01": {
+          "TP": 121,
+          "FP": 0,
+          "FN": 23,
+          "TN": 24,
+          "precision": 1.0,
+          "recall": 0.8402777777777778,
+          "f1": 0.9132075471698113,
+          "n": 168
+        },
+        "0.02": {
+          "TP": 109,
+          "FP": 12,
+          "FN": 11,
+          "TN": 36,
+          "precision": 0.9008264462809917,
+          "recall": 0.9083333333333333,
+          "f1": 0.904564315352697,
+          "n": 168
+        },
+        "0.05": {
+          "TP": 48,
+          "FP": 73,
+          "FN": 0,
+          "TN": 47,
+          "precision": 0.39669421487603307,
+          "recall": 1.0,
+          "f1": 0.5680473372781065,
+          "n": 168
+        }
+      }
+    },
+    "50000": {
+      "ground_truth_pooled": {
+        "ground_truth": {
+          "pickup_longitude": true,
+          "pickup_latitude": true,
+          "dropoff_longitude": true,
+          "dropoff_latitude": true,
+          "trip_duration": true,
+          "gender_id": false,
+          "month": true
+        },
+        "details": {
+          "pickup_longitude": {
+            "population_D": 0.02232706623929942,
+            "ks_pvalue": 1.0161517018276488e-21
+          },
+          "pickup_latitude": {
+            "population_D": 0.021121272185188222,
+            "ks_pvalue": 1.756934082558468e-19
+          },
+          "dropoff_longitude": {
+            "population_D": 0.02473655836372235,
+            "ks_pvalue": 1.455622407056447e-26
+          },
+          "dropoff_latitude": {
+            "population_D": 0.020637014791665353,
+            "ks_pvalue": 1.2838296130219952e-18
+          },
+          "trip_duration": {
+            "population_D": 0.09625442436992482,
+            "ks_pvalue": 0.0
+          },
+          "gender_id": {
+            "population_PSI": 0.045336552141080434
+          },
+          "month": {
+            "population_PSI": 16.26483912695384
+          }
+        }
+      },
+      "sweep": {
+        "1000": {
+          "pooled_with_month": {
+            "TP": 70,
+            "FP": 0,
+            "FN": 74,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 0.4861111111111111,
+            "f1": 0.6542056074766355,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 46,
+            "FP": 0,
+            "FN": 74,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 0.38333333333333336,
+            "f1": 0.5542168674698795,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 20,
+              "FP": 0,
+              "FN": 28,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.4166666666666667,
+              "f1": 0.5882352941176471,
+              "n": 56
+            },
+            "5": {
+              "TP": 22,
+              "FP": 0,
+              "FN": 26,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.4583333333333333,
+              "f1": 0.6285714285714286,
+              "n": 56
+            },
+            "6": {
+              "TP": 28,
+              "FP": 0,
+              "FN": 20,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.5833333333333334,
+              "f1": 0.7368421052631579,
+              "n": 56
+            }
+          }
+        },
+        "3000": {
+          "pooled_with_month": {
+            "TP": 123,
+            "FP": 0,
+            "FN": 21,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 0.8541666666666666,
+            "f1": 0.9213483146067416,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 99,
+            "FP": 0,
+            "FN": 21,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 0.825,
+            "f1": 0.9041095890410958,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 34,
+              "FP": 0,
+              "FN": 14,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.7083333333333334,
+              "f1": 0.8292682926829268,
+              "n": 56
+            },
+            "5": {
+              "TP": 45,
+              "FP": 0,
+              "FN": 3,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.9375,
+              "f1": 0.967741935483871,
+              "n": 56
+            },
+            "6": {
+              "TP": 44,
+              "FP": 0,
+              "FN": 4,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.9166666666666666,
+              "f1": 0.9565217391304348,
+              "n": 56
+            }
+          }
+        },
+        "5000": {
+          "pooled_with_month": {
+            "TP": 131,
+            "FP": 0,
+            "FN": 13,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 0.9097222222222222,
+            "f1": 0.9527272727272726,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 107,
+            "FP": 0,
+            "FN": 13,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 0.8916666666666667,
+            "f1": 0.9427312775330398,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 38,
+              "FP": 0,
+              "FN": 10,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.7916666666666666,
+              "f1": 0.8837209302325582,
+              "n": 56
+            },
+            "5": {
+              "TP": 46,
+              "FP": 0,
+              "FN": 2,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.9583333333333334,
+              "f1": 0.9787234042553191,
+              "n": 56
+            },
+            "6": {
+              "TP": 47,
+              "FP": 0,
+              "FN": 1,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.9791666666666666,
+              "f1": 0.9894736842105264,
+              "n": 56
+            }
+          }
+        },
+        "10000": {
+          "pooled_with_month": {
+            "TP": 140,
+            "FP": 0,
+            "FN": 4,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 0.9722222222222222,
+            "f1": 0.9859154929577464,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 116,
+            "FP": 0,
+            "FN": 4,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 0.9666666666666667,
+            "f1": 0.983050847457627,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 44,
+              "FP": 0,
+              "FN": 4,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 0.9166666666666666,
+              "f1": 0.9565217391304348,
+              "n": 56
+            },
+            "5": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            },
+            "6": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            }
+          }
+        },
+        "15000": {
+          "pooled_with_month": {
+            "TP": 144,
+            "FP": 0,
+            "FN": 0,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 120,
+            "FP": 0,
+            "FN": 0,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            },
+            "5": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            },
+            "6": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            }
+          }
+        },
+        "20000": {
+          "pooled_with_month": {
+            "TP": 144,
+            "FP": 0,
+            "FN": 0,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 120,
+            "FP": 0,
+            "FN": 0,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            },
+            "5": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            },
+            "6": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            }
+          }
+        },
+        "50000": {
+          "pooled_with_month": {
+            "TP": 144,
+            "FP": 0,
+            "FN": 0,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "n": 168
+          },
+          "pooled_without_month": {
+            "TP": 120,
+            "FP": 0,
+            "FN": 0,
+            "TN": 24,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "n": 144
+          },
+          "per_month": {
+            "4": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            },
+            "5": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            },
+            "6": {
+              "TP": 48,
+              "FP": 0,
+              "FN": 0,
+              "TN": 8,
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "n": 56
+            }
+          }
+        }
+      },
+      "aa": {
+        "1000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.05,
+            "pickup_latitude": 0.05,
+            "dropoff_longitude": 0.05,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.03,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.17
+        },
+        "3000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.04,
+            "pickup_latitude": 0.04,
+            "dropoff_longitude": 0.04,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.03,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.16
+        },
+        "5000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.02,
+            "pickup_latitude": 0.06,
+            "dropoff_longitude": 0.12,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.03,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.2
+        },
+        "10000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.01,
+            "pickup_latitude": 0.02,
+            "dropoff_longitude": 0.04,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.01,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.09
+        },
+        "15000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.01,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.02
+        },
+        "20000": {
+          "n_trials": 100,
+          "per_feature_false_alarm_rate": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.02,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "system_false_alarm_rate": 0.02
+        }
+      },
+      "severity": {
+        "0.02": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 4
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "0.05": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "0.1": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "0.2": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "0.5": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "1.5": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        },
+        "3.0": {
+          "pickup_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "pickup_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_longitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "dropoff_latitude": {
+            "n_trials": 5,
+            "detections": 5
+          },
+          "trip_duration": {
+            "n_trials": 5,
+            "detections": 5
+          }
+        }
+      },
+      "min_drift_fraction": {
+        "pickup_longitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "pickup_latitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "dropoff_longitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.1,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": true
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "dropoff_latitude": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        },
+        "trip_duration": {
+          "batch_size": 100,
+          "drift_source": "holdout pool, mean-shift injection",
+          "severity": "moderate",
+          "min_fraction": 0.2,
+          "curve": [
+            {
+              "n_drifted": 0,
+              "detected": false
+            },
+            {
+              "n_drifted": 10,
+              "detected": false
+            },
+            {
+              "n_drifted": 20,
+              "detected": true
+            },
+            {
+              "n_drifted": 30,
+              "detected": true
+            },
+            {
+              "n_drifted": 40,
+              "detected": true
+            },
+            {
+              "n_drifted": 50,
+              "detected": true
+            },
+            {
+              "n_drifted": 60,
+              "detected": true
+            },
+            {
+              "n_drifted": 70,
+              "detected": true
+            },
+            {
+              "n_drifted": 80,
+              "detected": true
+            },
+            {
+              "n_drifted": 90,
+              "detected": true
+            },
+            {
+              "n_drifted": 100,
+              "detected": true
+            }
+          ]
+        }
+      },
+      "per_feature_batch_d": {
+        "pickup_longitude": {
+          "mean": 0.022885833333333338,
+          "std": 0.005037825189393623,
+          "n": 24
+        },
+        "pickup_latitude": {
+          "mean": 0.02182249999999998,
+          "std": 0.003453000205135629,
+          "n": 24
+        },
+        "dropoff_longitude": {
+          "mean": 0.024925833333333324,
+          "std": 0.0052396357353244214,
+          "n": 24
+        },
+        "dropoff_latitude": {
+          "mean": 0.02209666666666667,
+          "std": 0.004237741799066527,
+          "n": 24
+        },
+        "trip_duration": {
+          "mean": 0.09368083333333334,
+          "std": 0.016532896982649127,
+          "n": 24
+        },
+        "gender_id": {
+          "mean": 0.04556967501709694,
+          "std": 0.009059715733336297,
+          "n": 24
+        },
+        "month": {
+          "mean": 17.353852516549917,
+          "std": 0.0,
+          "n": 24
+        }
+      },
+      "ground_truth_effect_size_confusion": {
+        "0.01": {
+          "TP": 144,
+          "FP": 0,
+          "FN": 0,
+          "TN": 24,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "n": 168
+        },
+        "0.02": {
+          "TP": 144,
+          "FP": 0,
+          "FN": 0,
+          "TN": 24,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "n": 168
+        },
+        "0.05": {
+          "TP": 48,
+          "FP": 96,
+          "FN": 0,
+          "TN": 24,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "f1": 0.5,
+          "n": 168
+        }
+      }
+    }
+  }
+}

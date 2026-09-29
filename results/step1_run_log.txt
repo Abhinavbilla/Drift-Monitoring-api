@@ -1,0 +1,69 @@
+[19:13:38] Loading splits...
+[19:13:44] Reference sizes available: [5000, 50000], holdout=25000, months={4: 802939, 5: 961369, 6: 1158081}
+[19:13:44] ===== REFERENCE SIZE 5000 =====
+[19:13:44] Fitting baseline (project=step1_val_ref5000, n=5000)...
+[19:13:45] Computing population ground truth (pooled Apr-Jun)...
+[19:13:52] Computing per-month population ground truth...
+[19:13:58] Running batch-size sweep (disjoint per-month batches)...
+[19:14:01]   size=1000: m4=8t, m5=8t, m6=8t
+[19:14:04]   size=3000: m4=8t, m5=8t, m6=8t
+[19:14:09]   size=5000: m4=8t, m5=8t, m6=8t
+[19:14:16]   size=10000: m4=8t, m5=8t, m6=8t
+[19:14:21]   size=15000: m4=8t, m5=8t, m6=8t
+[19:14:26]   size=20000: m4=8t, m5=8t, m6=8t
+[19:14:37]   size=50000: m4=8t, m5=8t, m6=8t
+[19:14:37] Running A/A test (iid test-calibration check, holdout pool)...
+[19:14:43]   A/A size=1000: 100 trials done
+[19:14:52]   A/A size=3000: 100 trials done
+[19:15:00]   A/A size=5000: 100 trials done
+[19:15:16]   A/A size=10000: 100 trials done
+[19:15:28]   A/A size=15000: 100 trials done
+[19:15:37]   A/A size=20000: 100 trials done
+[19:15:37] Running extended severity sweep...
+[19:15:38]   severity=0.02: pickup_longitude=3/5, pickup_latitude=4/5, dropoff_longitude=3/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:15:39]   severity=0.05: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:15:40]   severity=0.1: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:15:42]   severity=0.2: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:15:45]   severity=0.5: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:15:47]   severity=1.5: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:15:49]   severity=3.0: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:15:49] Running minimum-drift-fraction sweep...
+[19:15:50]   pickup_longitude: min_drift_fraction=0.2
+[19:15:50]   pickup_latitude: min_drift_fraction=0.2
+[19:15:51]   dropoff_longitude: min_drift_fraction=0.1
+[19:15:52]   dropoff_latitude: min_drift_fraction=0.2
+[19:15:52]   trip_duration: min_drift_fraction=0.2
+[19:15:52] ===== REFERENCE SIZE 50000 =====
+[19:15:52] Fitting baseline (project=step1_val_ref50000, n=50000)...
+[19:15:53] Computing population ground truth (pooled Apr-Jun)...
+[19:16:00] Computing per-month population ground truth...
+[19:16:09] Running batch-size sweep (disjoint per-month batches)...
+[19:16:14]   size=1000: m4=8t, m5=8t, m6=8t
+[19:16:19]   size=3000: m4=8t, m5=8t, m6=8t
+[19:16:22]   size=5000: m4=8t, m5=8t, m6=8t
+[19:16:25]   size=10000: m4=8t, m5=8t, m6=8t
+[19:16:30]   size=15000: m4=8t, m5=8t, m6=8t
+[19:16:35]   size=20000: m4=8t, m5=8t, m6=8t
+[19:16:44]   size=50000: m4=8t, m5=8t, m6=8t
+[19:16:44] Running A/A test (iid test-calibration check, holdout pool)...
+[19:16:51]   A/A size=1000: 100 trials done
+[19:16:59]   A/A size=3000: 100 trials done
+[19:17:08]   A/A size=5000: 100 trials done
+[19:17:18]   A/A size=10000: 100 trials done
+[19:17:29]   A/A size=15000: 100 trials done
+[19:17:42]   A/A size=20000: 100 trials done
+[19:17:42] Running extended severity sweep...
+[19:17:44]   severity=0.02: pickup_longitude=4/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:17:46]   severity=0.05: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:17:49]   severity=0.1: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:17:51]   severity=0.2: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:17:53]   severity=0.5: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:17:56]   severity=1.5: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:17:58]   severity=3.0: pickup_longitude=5/5, pickup_latitude=5/5, dropoff_longitude=5/5, dropoff_latitude=5/5, trip_duration=5/5
+[19:17:58] Running minimum-drift-fraction sweep...
+[19:17:59]   pickup_longitude: min_drift_fraction=0.2
+[19:18:00]   pickup_latitude: min_drift_fraction=0.2
+[19:18:01]   dropoff_longitude: min_drift_fraction=0.1
+[19:18:01]   dropoff_latitude: min_drift_fraction=0.2
+[19:18:02]   trip_duration: min_drift_fraction=0.2
+[19:18:02] Wrote raw results -> results\tabular_validation_legacy_raw.json
