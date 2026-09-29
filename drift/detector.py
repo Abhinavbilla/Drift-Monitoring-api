@@ -1,6 +1,9 @@
+import logging
 import numpy as np
 from scipy import stats
 from typing import Dict, Any, List
+
+logger = logging.getLogger(__name__)
 
 def compute_iqr_anomalies(input_data: dict, baselines: list) -> tuple:
     """
@@ -87,12 +90,11 @@ class DistributionDetector:
         # Also normalize floats like 3.0 -> "3" instead of "3.0" so integer-valued
         # categories stored as strings always match regardless of dtype drift
         # between how reference_data and live production payloads arrive.
-         # ========== DEBUG: Add this ==========
-        print(f"[DEBUG] ref_elements: {ref_elements}")
-        print(f"[DEBUG] prod_elements: {prod_elements}")
-        print(f"[DEBUG] ref_counts: {ref_counts}")
-        print(f"[DEBUG] prod_counts: {prod_counts}")
-    # ======================================
+        logger.debug("ref_elements: %s", ref_elements)
+        logger.debug("prod_elements: %s", prod_elements)
+        logger.debug("ref_counts: %s", ref_counts)
+        logger.debug("prod_counts: %s", prod_counts)
+
         def _normalize_key(k):
             if isinstance(k, float) and k.is_integer():
                 return str(int(k))
