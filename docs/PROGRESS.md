@@ -133,7 +133,7 @@ documented process.
   individual `/analyze` response preserved).
 - Test projects (`step1_val_ref5000`, `step1_val_ref50000`) cleaned up from
   `drift.db` after the run.
-- Commits: (pending — see below).
+- Commits: `4f01412` (initial run), `0a1c604` (ground-truth fix).
 
 **Ground truth bug found and fixed (2026-09-29, same day, before user
 review).** The first pass computed "population ground truth" from the
