@@ -79,11 +79,31 @@ boundaries.
 **Both prior open questions resolved 2026-09-29** (deployment topology,
 Citi Bike split strategy) — see items 5-9 above and PROGRESS's decision log.
 
-**New open question surfaced 2026-09-29, needs a decision before Step 1's
-production-batch analysis can claim full README parity:** the local
-production data only covers Apr–Jun, not Apr–Dec. Options: (a) proceed with
-Step 1 scoped to Apr–Jun and say so explicitly everywhere, or (b) source
-Jul–Dec 2016 Citi Bike trip data (would need sign-off — likely >50MB).
+**Resolved 2026-09-29: proceed with Step 1 scoped to Apr–Jun 2016, don't
+source Jul–Dec now.** Every result/table/note states "Apr–Jun 2016"
+explicitly. Added to the Step 9 README-correction list: *"README claims
+Apr–Dec; data is Apr–Jun."* A full Jan–Dec rebuild from raw source data with
+one documented preprocessing script is explicitly **deferred, not part of
+this pass** — extending with Jul–Dec data prepared differently from the
+existing CSVs would inject artificial drift.
+
+**Pre-Step-1 verification, done 2026-09-29** (full detail in
+`results/citi_bike_provenance_forensics.md`):
+- Row counts: baseline 1,577,611 + production 2,922,389 = **4,500,000 —
+  matches the README's "4.5 million rows" claim exactly.** Only the Apr–Dec
+  month-range breakdown attached to that number is wrong.
+- **The "early January only" hypothesis is WRONG — checked and rejected.**
+  Both CSVs are row-shuffled, not time-ordered. The old reference's row-
+  position range (0–16,774) maps to date range **2016-01-01 to 2016-03-31**
+  — the full Jan–Mar period, not early January. The old results did NOT
+  compare early-January behavior against spring.
+- **"15 trials" is not "3 months × 5 batches"** — checked in the actual code
+  (`run_classification_evaluation`, `tests/test_drift_engine.py:276-403`):
+  no month-based stratification exists; Case B samples from the whole pooled
+  `prod_df` regardless of month. `15 = 3×5` is numerically coincidental.
+- **Original raw-data preprocessing script does not exist anywhere in the
+  repo or its git history** (searched both). Confirms the Jan–Dec rebuild
+  above has to start from scratch, not from a recoverable script.
 
 ---
 
@@ -91,13 +111,23 @@ Jul–Dec 2016 Citi Bike trip data (would need sign-off — likely >50MB).
 
 **Status: IN PROGRESS.**
 
-Prerequisites done: forensic check (`results/citi_bike_provenance_forensics.md`)
-and new `scripts/split_citi_bike.py`, run at both reference sizes (5000,
-50000) with manifests in `results/`. Blocked on the Apr–Jun vs Apr–Dec
-decision above before running the full batch-size sweep / classification
-evaluation — proceeding with Apr-Jun-scoped analysis in the meantime is
-reasonable per the user's "proceed into Step 1" instruction, but headline
-claims must say "Apr-Jun" not "Apr-Dec" until/unless more months are sourced.
+Prerequisites done: forensic check, pre-flight verification (above), and
+`scripts/split_citi_bike.py` run at both reference sizes (5000, 50000).
+Proceeding now with the main Step 1 analysis: disjoint per-month batch
+draws, raw TP/FP/FN/TN with an explicit decision unit, per-batch-type
+breakdown, sweep with precision/raw-counts/15k point at both reference
+sizes, A/A test (labeled as an iid test-calibration check, not a test of
+month-to-month baseline variation — see below), extended severity levels,
+effect-size ground truth variants, per-feature D mean/std, and the
+"minimum drift fraction" rename. All Apr-Jun-scoped, all per-month AND
+pooled.
+
+**A/A test framing (per instruction):** labeled throughout as an **iid
+test-calibration check** — both the holdout and reference samples are drawn
+at random from the same Jan–Mar pool, so this measures whether the false-
+alarm rate matches what alpha predicts under iid sampling. It does **not**
+capture month-to-month variation within the baseline period (e.g. a
+February-vs-March shift), since both come from the same pooled draw.
 
 ---
 

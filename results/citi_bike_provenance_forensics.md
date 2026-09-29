@@ -84,3 +84,56 @@ per standing instructions, requires asking first if it means downloading
 >~50MB of new data). `scripts/split_citi_bike.py` does not silently claim
 Jul–Dec coverage it doesn't have — it detects and logs the missing months and
 records `production_apr_dec_claim_reproducible: false` in its manifest.
+
+**Decision (user, 2026-09-29): proceed with Step 1 scoped to Apr–Jun 2016.**
+Every result, table, and note from Step 1 onward states "Apr–Jun 2016"
+explicitly, never "Apr–Dec." Added to the Step 9 README-correction list:
+*"README claims Apr–Dec; data is Apr–Jun."*
+
+## Pre-Step-1 verification (user-requested checks, done before running anything)
+
+**Row counts vs. the README's "4.5 million rows" claim:**
+`tests/citi_bike_baseline.csv` = 1,577,611 rows, `tests/citi_bike_production.csv`
+= 2,922,389 rows, **total = 4,500,000 — matches the README's "4.5 million
+rows" claim exactly.** So that specific number is accurate; only the
+month-range breakdown ("Apr–Dec") tied to it is wrong.
+
+**Time-ordering, and the actual date range of the old reference — the
+"early January only" hypothesis is WRONG, checked and rejected:**
+Both CSVs are **not** time-ordered (`pickup_datetime.is_monotonic_increasing
+== False` for both, verified) — each file is already row-shuffled across its
+full stated period. Consequently, checking the date range of rows 0–16,774
+(the row-position range the old reference was drawn from, per the forensic
+match above) gives **2016-01-01 00:19:32 to 2016-03-31 23:50:20** — i.e. the
+**full Jan–Mar range**, not early January. Being confined to the first ~1%
+of *row positions* in an already-shuffled file does not mean being confined
+to an early *date range*. **Plainly stated, correcting the hypothesis: the
+old results did NOT compare early-January behavior against spring — the old
+reference sample, despite its odd row-position concentration, was drawn from
+across the full three-month baseline period.** (`tests/citi_bike_production.csv`
+is likewise shuffled, full range 2016-04-01 to 2016-06-30, confirming the
+Apr–Jun scope above.)
+
+**Whether "15 trials" corresponds to "3 months × 5 batches" — checked, and
+it does not; recorded as a check, not a claim:** `run_classification_evaluation()`
+(`tests/test_drift_engine.py:276-403`) has **no month-based stratification at
+all**. Case B (`send_batch_to_analyze(prod_df, ...)`) samples from the whole
+pooled `prod_df` (all months mixed) via `df.sample(n=PRODUCTION_BATCH_SIZE,
+random_state=trial)` for `trial in range(n_trials)`, `n_trials=15` — a plain
+loop over an arbitrary trial count, with no grouping by month whatsoever.
+Given the production data is actually 3 months (Apr/May/Jun), `15 = 3 × 5` is
+**numerically coincidental, not a designed structure** — confirmed by reading
+the code, not inferred from the number alone.
+
+**Original raw-data preprocessing script: does not exist anywhere in the
+repo.** Searched the full working tree and the entire git history
+(`git log --all --diff-filter=A`) for any script that would have converted
+raw NYC Citi Bike 2016 trip data into this repo's simplified schema
+(`id, gender_id, pickup_datetime, dropoff_datetime, pickup_longitude,
+pickup_latitude, dropoff_longitude, dropoff_latitude, trip_duration, month`)
+— found nothing. The repo has exactly two commits touching anything
+Citi-Bike-related: the initial commit (which already includes the two large
+CSVs as pre-existing local files, not generated in-repo) and this session's
+own `split_citi_bike.py` addition. **Per instruction, not reconstructing this
+now** — a full Jan–Dec rebuild from raw source data with one documented
+preprocessing script is explicitly deferred, not part of this pass.
