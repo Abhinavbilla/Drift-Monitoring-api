@@ -8,12 +8,12 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
-**Hardening pass (user, 2026-09-30) — required before Step 5, IN
-PROGRESS.** The 2026-09-30 precondition check for Step 5 found this pass
+**Hardening pass (user, 2026-09-30) — required before Step 5, DONE (all
+5 items).** The 2026-09-30 precondition check for Step 5 found this pass
 had NOT actually been done (no matching commits, no cross-user isolation
 tests, no clean-venv run, no client contract changes) despite being
 described as a precondition -- confirmed by grepping the repo and git log
-before starting anything. Scope, in priority order:
+before starting anything. Completed in priority order:
 1. **DONE.** Security — cross-user isolation. Every project-scoped
    endpoint had NO ownership check at all -- any authenticated user
    (session JWT or unrestricted PAT) could read/overwrite/analyze/delete
@@ -27,14 +27,25 @@ before starting anything. Scope, in priority order:
    expiry is never (unless set), revoked tokens rejected, last_used_at
    tracked, zero leaked `dm_` tokens anywhere in the repo. Commit
    `0cc4967`.
-2. **PENDING APPROVAL — not started.** Reproducible environment.
-   Installed versions (pandas 3.0.3, scikit-learn 1.9.0) don't match
-   `requirements.txt` (2.2.2 / 1.5.2) -- environment drift already
-   implicated in two client bugs (Step 3d/3e). Proposed: clean venv from
-   `requirements.txt` on Python 3.12 (confirmed installed on this
-   machine, alongside 3.10/3.14), full suite run, fix failures, OR
-   propose new pins if moving to the newer already-installed versions is
-   preferable. Waiting on user go-ahead before creating the venv.
+2. **DONE.** Reproducible environment. User approved a clean venv on
+   Python 3.12 pinned exactly to `requirements.txt` (pandas 2.2.2,
+   scikit-learn 1.5.2, etc. -- NOT what's installed in this dev
+   environment, pandas 3.0.3/scikit-learn 1.9.0, already implicated in
+   two client bugs). Found a REAL version-sensitive regression this way:
+   2 failures in `test_joint_adapter.py`'s correlation-inversion tests.
+   Root cause (`adapters/joint.py`'s `build_joint_classifier`): the
+   constructor never actually passed `penalty="l1"` despite an extensive
+   docstring describing and justifying L1 regularization -- it silently
+   defaulted to L2 the whole time (the `l1_ratio=1.0` it DID pass is a
+   no-op for anything but `penalty="elasticnet"`, which liblinear doesn't
+   even support). Only happened to still clear the 0.65 AUC threshold
+   under this dev box's newer scikit-learn; failed outright (AUC=0.43,
+   0.49) on the pinned 1.5.2. Fixed (`penalty="l1"` now actually set) +
+   a new regression test pinning the constructor's actual parameter, not
+   just a downstream AUC outcome that can pass by accident. Verified
+   188/188 (main) + 11/11 (client) on the clean venv's pinned versions,
+   and 200/200 back in this dev environment with the same fix. Clean venv
+   removed after verification, not committed. Commit `bac6f1d`.
 3. **DONE.** Client/server contract. `FitBaselineRequest` gained an
    optional `feature_types={col: "continuous"|"categorical"}` override,
    server-honored (422 for an unknown column or invalid value). More
