@@ -54,6 +54,29 @@ def init_db():
         )
     ''')
 
+    # Personal access tokens (Step 3a). user_email, not user_id -- this
+    # codebase has no separate users table; email is the identity used
+    # throughout (projects.owner_email, session-JWT's "email" claim).
+    # project_scope is a JSON list of project_ids the token may access,
+    # or the single-element list ["*"] for unrestricted (still bound to
+    # this user_email, never a cross-user escalation). Only token_hash is
+    # ever persisted -- the plaintext token exists only in the response
+    # to the create call.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS api_tokens (
+            id TEXT PRIMARY KEY,
+            user_email TEXT NOT NULL,
+            name TEXT,
+            prefix TEXT UNIQUE NOT NULL,
+            token_hash TEXT NOT NULL,
+            project_scope TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT,
+            last_used_at TEXT,
+            revoked INTEGER NOT NULL DEFAULT 0
+        )
+    ''')
+
     # Self-healing migration for DBs created before the multimodal (v2.0)
     # columns existed — avoids requiring a separate manual migration step.
     for _column, ddl in [
@@ -386,3 +409,84 @@ def get_logs(project_id: str):
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+# ---------------------------------------------------------
+# PERSONAL ACCESS TOKENS (Step 3a)
+# ---------------------------------------------------------
+
+def _row_to_token_dict(row) -> Dict[str, Any]:
+    (token_id, user_email, name, prefix, token_hash, project_scope,
+     created_at, expires_at, last_used_at, revoked) = row
+    return {
+        "id": token_id, "user_email": user_email, "name": name, "prefix": prefix,
+        "token_hash": token_hash,
+        "project_scope": json.loads(project_scope) if project_scope else None,
+        "created_at": created_at, "expires_at": expires_at, "last_used_at": last_used_at,
+        "revoked": bool(revoked),
+    }
+
+
+def create_api_token(
+    token_id: str, user_email: str, name: str, prefix: str, token_hash: str,
+    project_scope: Optional[List[str]], created_at: str, expires_at: Optional[str],
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO api_tokens (id, user_email, name, prefix, token_hash, project_scope, "
+        "created_at, expires_at, last_used_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)",
+        (token_id, user_email, name, prefix, token_hash,
+         json.dumps(project_scope) if project_scope is not None else None,
+         created_at, expires_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_api_token_by_prefix(prefix: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, user_email, name, prefix, token_hash, project_scope, created_at, "
+        "expires_at, last_used_at, revoked FROM api_tokens WHERE prefix = ?", (prefix,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _row_to_token_dict(row) if row else None
+
+
+def list_api_tokens(user_email: str) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, user_email, name, prefix, token_hash, project_scope, created_at, "
+        "expires_at, last_used_at, revoked FROM api_tokens WHERE user_email = ? "
+        "ORDER BY created_at DESC", (user_email,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_row_to_token_dict(r) for r in rows]
+
+
+def revoke_api_token(token_id: str, user_email: str) -> bool:
+    """Revokes a token, scoped to the requesting user (cannot revoke
+    another user's token). Returns True iff a row was actually changed."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE api_tokens SET revoked = 1 WHERE id = ? AND user_email = ? AND revoked = 0",
+        (token_id, user_email),
+    )
+    changed = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+
+def touch_api_token_last_used(token_id: str, when_iso: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE api_tokens SET last_used_at = ? WHERE id = ?", (when_iso, token_id))
+    conn.commit()
+    conn.close()

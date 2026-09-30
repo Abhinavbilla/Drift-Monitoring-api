@@ -2,6 +2,7 @@ import sqlite3
 import jwt
 import binascii
 import pandas as pd
+from datetime import datetime, timezone
 from typing import Dict, List, Any
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -9,6 +10,7 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from PIL import UnidentifiedImageError
 from drift.alerts import send_drift_email
+from auth.tokens import parse_prefix, verify_token_hash
 # Importing custom modules
 from models import (
     FitBaselineRequest, FitBaselineResponse, FeatureCalibrationInfo,
@@ -72,10 +74,51 @@ if not COOKIE_KEY:
 # only verify the signature/expiry of a token our own frontend minted.
 bearer_scheme = HTTPBearer(auto_error=True)
 
+# ---------------------------------------------------------
+# SECURITY: PERSONAL ACCESS TOKENS (Step 3a, 2026-09-30)
+# ---------------------------------------------------------
+# Lets a script call this API without a browser/Google login. Presented
+# tokens are matched by their (non-secret) prefix, then verified with a
+# constant-time hash comparison -- see auth/tokens.py. The plaintext
+# token is never logged; only its SHA-256 hash is ever persisted (see
+# db/crud.py's api_tokens table). Minted via scripts/create_token.py --
+# no UI exists or is planned until the React frontend (see HANDOFF).
+def _verify_pat(token: str) -> dict:
+    prefix = parse_prefix(token)
+    row = crud.get_api_token_by_prefix(prefix)
+    if row is None or not verify_token_hash(token, row["token_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Access Denied: Invalid access token."
+        )
+    if row["revoked"]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Access Denied: This access token has been revoked."
+        )
+    if row["expires_at"]:
+        expires_at = datetime.fromisoformat(row["expires_at"])
+        if datetime.now(timezone.utc) >= expires_at:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Access Denied: This access token has expired."
+            )
+    crud.touch_api_token_last_used(row["id"], datetime.now(timezone.utc).isoformat())
+    return {
+        "name": f"PAT:{row['name']}", "email": row["user_email"],
+        "auth_type": "pat", "pat_scope": row["project_scope"],
+    }
+
+
 def verify_access(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)) -> dict:
-    """Validates the session token minted by the dashboard after Google login."""
+    """Validates either the session token minted by the dashboard after
+    Google login, or a personal access token (dm_<prefix>_<secret>)."""
+    token = credentials.credentials
+    if parse_prefix(token) is not None:
+        return _verify_pat(token)
+
     try:
-        payload = jwt.decode(credentials.credentials, COOKIE_KEY, algorithms=["HS256"])
+        payload = jwt.decode(token, COOKIE_KEY, algorithms=["HS256"])
     except jwt.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -89,7 +132,36 @@ def verify_access(credentials: HTTPAuthorizationCredentials = Security(bearer_sc
             detail="Access Denied: Malformed session token."
         )
 
-    return {"name": payload.get("name", "User"), "email": email}
+    return {"name": payload.get("name", "User"), "email": email, "auth_type": "session", "pat_scope": None}
+
+
+def verify_project_access(project_id: str, client: dict = Depends(verify_access)) -> dict:
+    """Wraps verify_access with PAT project-scope enforcement. Session-JWT
+    auth is unchanged (its existing, pre-existing lack of a cross-user
+    ownership check is a separate, known gap -- not touched here; see
+    HANDOFF). A PAT's project_scope is a JSON list of project_ids it may
+    access, or ["*"] for unrestricted-but-still-this-user's-tokens."""
+    if client.get("auth_type") == "pat":
+        scope = client.get("pat_scope")
+        if scope is not None and "*" not in scope and project_id not in scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This access token is not scoped to project '{project_id}'."
+            )
+    return client
+
+
+def verify_model_access(model_id: str, client: dict = Depends(verify_access)) -> dict:
+    """Same as verify_project_access, for the legacy model_id path param
+    name (DELETE /models/{model_id})."""
+    if client.get("auth_type") == "pat":
+        scope = client.get("pat_scope")
+        if scope is not None and "*" not in scope and model_id not in scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This access token is not scoped to project '{model_id}'."
+            )
+    return client
 
 
 # ---------------------------------------------------------
@@ -123,7 +195,7 @@ async def validation_error_handler(request, exc: ValidationError):
 
 
 @app.get("/baseline/{project_id}", tags=["Management"])
-def get_baseline(project_id: str, client: dict = Depends(verify_access)):
+def get_baseline(project_id: str, client: dict = Depends(verify_project_access)):
     """Returns the IQR fences, feature types, and modality for a project."""
     import sqlite3
     import json
@@ -140,7 +212,7 @@ def get_baseline(project_id: str, client: dict = Depends(verify_access)):
     return {"fences": fences, "feature_types": feature_types, "modality": modality}
 
 @app.get("/logs/{project_id}", tags=["Management"])
-def get_logs(project_id: str, client: dict = Depends(verify_access)):
+def get_logs(project_id: str, client: dict = Depends(verify_project_access)):
     """Returns the recent logs for a project (last 1000)."""
     import sqlite3
     import json
@@ -187,7 +259,7 @@ def profile_dataset(request: ProfileRequest, client: dict = Depends(verify_acces
     #endpoint 1 fit:
     
 @app.post("/fit/{project_id}", response_model=FitBaselineResponse, tags=["Machine Learning"])
-def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dict = Depends(verify_access)):
+def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dict = Depends(verify_project_access)):
     """
     Upload historical training data. The system will profile it,
     calculate the IQR boundaries, and lock the baseline in the database.
@@ -336,7 +408,7 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
 # ENDPOINT 2: REAL-TIME ANOMALY TRIPWIRE
 # ---------------------------------------------------------
 @app.post("/predict/{project_id}", response_model=PredictResponse, tags=["Machine Learning"])
-def predict_realtime_anomaly(project_id: str, request: PredictRequest, background_tasks: BackgroundTasks, client: dict = Depends(verify_access)):
+def predict_realtime_anomaly(project_id: str, request: PredictRequest, background_tasks: BackgroundTasks, client: dict = Depends(verify_project_access)):
     """
     Check a single incoming data point against the locked IQR boundaries.
     """
@@ -369,7 +441,7 @@ def analyze_production_batch(
     project_id: str, 
     request: AnalyzeBatchRequest, 
     background_tasks: BackgroundTasks, # <-- 1. Inject BackgroundTasks
-    client: dict = Depends(verify_access) # <-- 2. Fixed dependency
+    client: dict = Depends(verify_project_access) # <-- 2. Fixed dependency
 ):
     """
     Analyze a large batch of recent production data using KS Tests and TVD 
@@ -417,7 +489,7 @@ def analyze_production_batch(
 # ENDPOINTS: TEXT DRIFT MONITORING (v2.0 — Domain Classifier Test)
 # ---------------------------------------------------------
 @app.post("/fit/{project_id}/text", response_model=EmbeddingFitResponse, tags=["Machine Learning"])
-def fit_text_baseline(project_id: str, request: FitTextBaselineRequest, client: dict = Depends(verify_access)):
+def fit_text_baseline(project_id: str, request: FitTextBaselineRequest, client: dict = Depends(verify_project_access)):
     """Embeds a baseline batch of text and locks it as the reference distribution."""
     sample_warning = validate_min_samples(
         len(request.reference_texts), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "reference text"
@@ -448,7 +520,7 @@ def analyze_text_batch(
     project_id: str,
     request: AnalyzeTextBatchRequest,
     background_tasks: BackgroundTasks,
-    client: dict = Depends(verify_access)
+    client: dict = Depends(verify_project_access)
 ):
     """Compares a production text batch against the locked text baseline via the Domain Classifier Test."""
     state = crud.get_baseline(project_id)
@@ -483,7 +555,7 @@ def analyze_text_batch(
 # ENDPOINTS: IMAGE DRIFT MONITORING (v2.0 — Domain Classifier Test)
 # ---------------------------------------------------------
 @app.post("/fit/{project_id}/image", response_model=EmbeddingFitResponse, tags=["Machine Learning"])
-def fit_image_baseline(project_id: str, request: FitImageBaselineRequest, client: dict = Depends(verify_access)):
+def fit_image_baseline(project_id: str, request: FitImageBaselineRequest, client: dict = Depends(verify_project_access)):
     """Embeds a baseline batch of images and locks it as the reference distribution."""
     sample_warning = validate_min_samples(
         len(request.reference_images), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "reference image"
@@ -514,7 +586,7 @@ def analyze_image_batch(
     project_id: str,
     request: AnalyzeImageBatchRequest,
     background_tasks: BackgroundTasks,
-    client: dict = Depends(verify_access)
+    client: dict = Depends(verify_project_access)
 ):
     """Compares a production image batch against the locked image baseline via the Domain Classifier Test."""
     state = crud.get_baseline(project_id)
@@ -549,7 +621,7 @@ def analyze_image_batch(
 # ENDPOINTS: JOINT MULTIMODAL CONTEXT DRIFT MONITORING
 # ---------------------------------------------------------
 @app.post("/fit/{project_id}/joint", response_model=EmbeddingFitResponse, tags=["Machine Learning"])
-def fit_joint_baseline(project_id: str, request: FitJointBaselineRequest, client: dict = Depends(verify_access)):
+def fit_joint_baseline(project_id: str, request: FitJointBaselineRequest, client: dict = Depends(verify_project_access)):
     """Embeds a baseline batch of joint records (tabular + text + image) and locks it as the reference distribution."""
     records = [r.model_dump() for r in request.reference_records]
     validate_joint_records(records)
@@ -584,7 +656,7 @@ def analyze_joint_batch(
     project_id: str,
     request: AnalyzeJointBatchRequest,
     background_tasks: BackgroundTasks,
-    client: dict = Depends(verify_access)
+    client: dict = Depends(verify_project_access)
 ):
     """Compares a production batch of joint records against the locked joint baseline via the Domain Classifier Test."""
     state = crud.get_baseline(project_id)
@@ -621,7 +693,7 @@ def analyze_joint_batch(
 # ENDPOINT 4: SYSTEM HEALTH CHECK (BURST ALERTS)
 # ---------------------------------------------------------
 @app.get("/health/{project_id}", response_model=HealthCheckResponse, tags=["Analytics"])
-def check_system_health(project_id: str, client_name: str = Depends(verify_access)):
+def check_system_health(project_id: str, client_name: str = Depends(verify_project_access)):
     """
     Ping this endpoint (e.g., every 60 seconds via a cron job or dashboard) 
     to see if the system is currently experiencing a wave of real-time anomalies.
@@ -656,33 +728,39 @@ def list_projects(client: dict = Depends(verify_access)):
 
 
 # ---------------------------------------------------------
-# ENDPOINT 5: HARD DELETE MODEL
+# ENDPOINT 5: HARD DELETE PROJECT
 # ---------------------------------------------------------
-@app.delete("/models/{model_id}", tags=["Management"])
-def delete_model(model_id: str, client: dict = Depends(verify_access)):
-    """Permanently deletes a model and all its associated baseline/log data."""
+def _delete_project_data(project_id: str) -> str:
     import urllib.parse
     import sqlite3
-    
-    clean_model_id = urllib.parse.unquote(model_id)
-    
-    # Connect to the database and wipe the ghost data
+
+    clean_project_id = urllib.parse.unquote(project_id)
+
     conn = sqlite3.connect("drift.db")
     cursor = conn.cursor()
-    
     try:
-        
-        cursor.execute("DELETE FROM projects WHERE id = ?", (clean_model_id,))
-        
-        # These tables correctly use 'project_id'
-        cursor.execute("DELETE FROM baselines WHERE project_id = ?", (clean_model_id,))
-        cursor.execute("DELETE FROM logs WHERE project_id = ?", (clean_model_id,))
-        
+        cursor.execute("DELETE FROM projects WHERE id = ?", (clean_project_id,))
+        cursor.execute("DELETE FROM baselines WHERE project_id = ?", (clean_project_id,))
+        cursor.execute("DELETE FROM logs WHERE project_id = ?", (clean_project_id,))
         conn.commit()
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     finally:
         conn.close()
-        
+    return clean_project_id
+
+
+@app.delete("/projects/{project_id}", tags=["Management"])
+def delete_project(project_id: str, client: dict = Depends(verify_project_access)):
+    """Permanently deletes a project and all its associated baseline/log data."""
+    clean_project_id = _delete_project_data(project_id)
+    return {"status": "success", "message": f"Project '{clean_project_id}' completely wiped."}
+
+
+@app.delete("/models/{model_id}", tags=["Management"], deprecated=True)
+def delete_model(model_id: str, client: dict = Depends(verify_model_access)):
+    """Deprecated alias for DELETE /projects/{project_id} -- kept for
+    backward compatibility, same behavior, not removed."""
+    clean_model_id = _delete_project_data(model_id)
     return {"status": "success", "message": f"Model '{clean_model_id}' completely wiped."}
