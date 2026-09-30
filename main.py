@@ -318,20 +318,29 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     categorical_dict = request.categorical_data or {}
     categorical_df = pd.DataFrame(categorical_dict) if categorical_dict else pd.DataFrame()
     
-    # 3. FIX: Align lengths for profiling
-    # Get the minimum length between continuous and categorical data
-    min_len = min(len(continuous_df), len(categorical_df)) if len(categorical_df) > 0 else len(continuous_df)
-    
-    # Trim both DataFrames to the same length
-    continuous_df = continuous_df.iloc[:min_len]
-    categorical_df = categorical_df.iloc[:min_len] if len(categorical_df) > 0 else categorical_df
+    # 3. Align lengths for profiling -- ONLY when BOTH sides actually have
+    # data. Trimming to min(len(a), len(b)) is for the case where a
+    # caller submits a genuinely shorter categorical split (the dashboard
+    # does this when it drops NaN rows independently per split); it must
+    # NOT apply when one side is simply absent (a fit with only
+    # categorical_data and no reference_data, or vice versa) -- min(0, 60)
+    # = 0 would silently truncate the present side to zero rows too, an
+    # even more severe silent-drop than the column-level one (2026-09-30
+    # hardening pass item 3 caught this while testing that fix: a
+    # request.reference_data == {} fit with all-categorical data lost
+    # every row, not just a column, and reported "0 continuous and 0
+    # categorical features" with no error).
+    if len(continuous_df) > 0 and len(categorical_df) > 0:
+        min_len = min(len(continuous_df), len(categorical_df))
+        continuous_df = continuous_df.iloc[:min_len]
+        categorical_df = categorical_df.iloc[:min_len]
     
     # 4. Combine for profiling
     combined_df = pd.concat([continuous_df, categorical_df], axis=1) if len(categorical_df) > 0 else continuous_df
     
     # 5. Get detailed profiles from the generalised engine
     detailed_profiles = profile_columns(combined_df)
-    
+
     # 6. ADAPTER: Route each column to the correct monitoring engine
     inferred_feature_types = {}
     for p in detailed_profiles:
@@ -339,17 +348,54 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
             inferred_feature_types[p["name"]] = "continuous"
         elif p["monitor"] == "Categorical":
             inferred_feature_types[p["name"]] = "categorical"
-    
-    # 7. Split reference data by type
+
+    # 6b. Explicit caller overrides (2026-09-30 hardening pass, item 3):
+    # feature_types={col: "continuous"|"categorical"} lets a caller pin a
+    # column's classification instead of relying on the profiler -- e.g.
+    # a low-cardinality integer column the caller specifically wants
+    # monitored as continuous. Columns not named here are unaffected.
+    if request.feature_types:
+        for col, ftype in request.feature_types.items():
+            if ftype not in ("continuous", "categorical"):
+                raise ValidationError(
+                    f"feature_types['{col}'] must be 'continuous' or 'categorical', got '{ftype}'."
+                )
+            if col not in combined_df.columns:
+                raise ValidationError(
+                    f"feature_types names column '{col}', which is not present in reference_data "
+                    f"or categorical_data."
+                )
+            inferred_feature_types[col] = ftype
+
+    # 7. Split reference data by type. Looked up from a dict merging BOTH
+    # reference_data and categorical_data (2026-09-30 hardening pass,
+    # item 3) -- previously this only checked reference_data for a
+    # "continuous"-classified column and categorical_data for a
+    # "categorical"-classified one, so a column submitted under the
+    # "wrong" dict for what the profiler (or an explicit feature_types
+    # override) decided was silently dropped from the stored baseline
+    # entirely, with no error. Merging first means a column is found
+    # regardless of which dict the caller put it in.
+    raw_values_by_col = {**dict(request.reference_data), **categorical_dict}
     continuous_features = {
-        k: v for k, v in request.reference_data.items()
-        if inferred_feature_types.get(k) == "continuous"
+        k: raw_values_by_col[k] for k in inferred_feature_types
+        if inferred_feature_types[k] == "continuous" and k in raw_values_by_col
     }
     categorical_features = {
-        k: v for k, v in categorical_dict.items()
-        if inferred_feature_types.get(k) == "categorical"
+        k: raw_values_by_col[k] for k in inferred_feature_types
+        if inferred_feature_types[k] == "categorical" and k in raw_values_by_col
     }
-    
+
+    # Safety net, not expected to ever trigger given the merge above: a
+    # column the profiler/override classified but that isn't present in
+    # EITHER submitted dict at all is a clear 422, never a silent drop.
+    lost_cols = sorted(set(inferred_feature_types) - set(continuous_features) - set(categorical_features))
+    if lost_cols:
+        raise ValidationError(
+            f"Column(s) {lost_cols} were classified but have no submitted values in either "
+            f"reference_data or categorical_data -- this should not happen; please report it."
+        )
+
     # 8. Resolve the calibration config.
     # - Caller provided one explicitly (even {}): resolve and store it,
     #   whether this is a new or existing project.
@@ -474,6 +520,9 @@ async def fit_model_baseline_upload(
     project_id: str,
     file: UploadFile = File(..., description="CSV or Parquet file of reference data."),
     calibration_config: Optional[str] = Form(None, description="Optional calibration_config, JSON-encoded."),
+    feature_types: Optional[str] = Form(
+        None, description="Optional {column: 'continuous'|'categorical'} override, JSON-encoded."
+    ),
     client: dict = Depends(verify_project_access),
 ):
     """
@@ -509,9 +558,24 @@ async def fit_model_baseline_upload(
         elif p["monitor"] == "Categorical":
             inferred_feature_types[p["name"]] = "categorical"
 
-    # Split from the PROFILED classification of the combined frame itself
-    # (not from a caller-provided dict, since there isn't one here) -- so
-    # every classified column lands somewhere, continuous or categorical.
+    if feature_types:
+        try:
+            parsed_feature_types = json.loads(feature_types)
+        except json.JSONDecodeError as e:
+            raise ValidationError(f"feature_types is not valid JSON: {e}")
+        for col, ftype in parsed_feature_types.items():
+            if ftype not in ("continuous", "categorical"):
+                raise ValidationError(
+                    f"feature_types['{col}'] must be 'continuous' or 'categorical', got '{ftype}'."
+                )
+            if col not in combined_df.columns:
+                raise ValidationError(f"feature_types names column '{col}', which is not present in the uploaded file.")
+            inferred_feature_types[col] = ftype
+
+    # Split from the (possibly overridden) classification of the combined
+    # frame itself -- so every classified column lands somewhere,
+    # continuous or categorical; there is no caller-provided pre-split to
+    # reconcile against here, unlike the JSON endpoint.
     continuous_features = {
         col: combined_df[col].tolist() for col, ftype in inferred_feature_types.items() if ftype == "continuous"
     }

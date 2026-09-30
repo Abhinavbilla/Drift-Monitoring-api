@@ -11,6 +11,16 @@ class FitBaselineRequest(BaseModel):
                     "project's existing config untouched (or default to legacy for a brand-new "
                     "project) -- this is never required. See drift.calibration.CalibrationConfig."
     )
+    feature_types: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Optional explicit classification ({column: 'continuous'|'categorical'}), "
+                    "overriding the server-side profiler for the columns named -- e.g. a "
+                    "low-cardinality integer column you specifically want monitored as continuous. "
+                    "Columns not named here are still profiled normally. Every named column must "
+                    "appear in reference_data or categorical_data (either works, regardless of "
+                    "which one matches the type given here); an unrecognized value or an unknown "
+                    "column name is a 422."
+    )
 
 class FeatureCalibrationInfo(BaseModel):
     minimum_detectable_d: Optional[float] = Field(

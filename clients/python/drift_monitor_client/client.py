@@ -88,39 +88,6 @@ class DriftClient:
     def _to_column_dict(self, df: pd.DataFrame) -> Dict[str, list]:
         return {col: df[col].tolist() for col in df.columns}
 
-    def _guess_categorical_columns(self, df: pd.DataFrame) -> set:
-        """Best-effort replica of utils/profiler.py's own continuous-vs-
-        categorical threshold (text with <=50 uniques, or integer with
-        <=20 uniques -> categorical), so the JSON fit path can pre-split
-        columns into the dicts the server actually retains them from (see
-        _fit_via_json). Sending everything under both dicts is NOT safe --
-        the server pd.concat()s reference_data and categorical_data into
-        one frame, and a column present in both produces a duplicate
-        column name, which crashes profiling with a 500 (found while
-        building examples/model_serving/). This heuristic won't always
-        agree with the server's own profiler on edge cases (monotonic-
-        sequence exclusion, structured-text detection); for large frames,
-        fit() uses the upload path instead (see _fit_via_upload), which
-        has no such edge case since the server classifies directly from
-        one combined frame there, with no pre-split to reconcile."""
-        categorical = set()
-        for col in df.columns:
-            series = df[col]
-            n_unique = series.nunique()
-            # is_string_dtype, not `dtype == object`: pandas >= 2.x can
-            # give a string column its own "str"/StringDtype instead of
-            # legacy "object" (confirmed on pandas 3.0.3, where `dtype ==
-            # object` silently missed every string column and defeated
-            # this whole heuristic -- caught by test_client.py's
-            # test_categorical_column_survives_json_fit_path).
-            if pd.api.types.is_string_dtype(series) or pd.api.types.is_bool_dtype(series):
-                if n_unique <= 50:
-                    categorical.add(col)
-            elif pd.api.types.is_integer_dtype(series):
-                if n_unique <= 20:
-                    categorical.add(col)
-        return categorical
-
     def _to_parquet_bytes(self, df: pd.DataFrame) -> bytes:
         buf = io.BytesIO()
         df.to_parquet(buf)
@@ -132,42 +99,43 @@ class DriftClient:
     def fit(
         self, project_id: str, df: pd.DataFrame,
         calibration_config: Optional[Dict[str, Any]] = None,
+        feature_types: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Fits (or re-fits) a project's baseline from a DataFrame. Every
-        column is sent and classified server-side (continuous vs.
-        categorical) -- the caller doesn't need to pre-split them."""
+        column is sent under reference_data and classified server-side
+        (continuous vs. categorical) by the profiler. Pass feature_types
+        ({column: "continuous"|"categorical"}) to override the profiler's
+        classification for specific columns -- e.g. a low-cardinality
+        integer column you specifically want monitored as continuous;
+        columns not named there are unaffected. Previously this client
+        replicated the server's own classification heuristic client-side
+        to route each column into the dict the server would actually
+        retain it from -- replaced (2026-09-30) by the server itself no
+        longer needing that dance (main.py's /fit now looks a column's
+        values up regardless of which dict it arrived in), plus this
+        explicit override for the cases where you want a specific type
+        rather than whatever the profiler infers."""
         if len(df) > self.large_frame_row_threshold:
-            return self._fit_via_upload(project_id, df, calibration_config)
-        return self._fit_via_json(project_id, df, calibration_config)
+            return self._fit_via_upload(project_id, df, calibration_config, feature_types)
+        return self._fit_via_json(project_id, df, calibration_config, feature_types)
 
-    def _fit_via_json(self, project_id, df, calibration_config):
-        # The server classifies each column as continuous or categorical
-        # from the combined frame, but only RETAINS a column under the
-        # dict the caller submitted it in (main.py/fit_model_baseline: a
-        # column submitted under reference_data that profiles as
-        # categorical is silently dropped, and vice versa -- a pre-
-        # existing server-side quirk, not something this client changes).
-        # Pre-splitting with the same heuristic the server's profiler uses
-        # (see _guess_categorical_columns) avoids that, without the
-        # duplicate-column crash that submitting every column under BOTH
-        # dicts causes (the server pd.concat()s them into one frame).
-        categorical_cols = self._guess_categorical_columns(df)
-        continuous_cols = [c for c in df.columns if c not in categorical_cols]
-        payload: Dict[str, Any] = {
-            "reference_data": {c: df[c].tolist() for c in continuous_cols},
-            "categorical_data": {c: df[c].tolist() for c in categorical_cols},
-        }
+    def _fit_via_json(self, project_id, df, calibration_config, feature_types):
+        payload: Dict[str, Any] = {"reference_data": self._to_column_dict(df)}
         if calibration_config is not None:
             payload["calibration_config"] = calibration_config
+        if feature_types is not None:
+            payload["feature_types"] = feature_types
         resp = self.session.post(f"{self.base_url}/fit/{project_id}", json=payload, timeout=self.timeout)
         self._raise_for_status(resp)
         return resp.json()
 
-    def _fit_via_upload(self, project_id, df, calibration_config):
+    def _fit_via_upload(self, project_id, df, calibration_config, feature_types):
         files = {"file": (f"{project_id}.parquet", self._to_parquet_bytes(df), "application/octet-stream")}
         data = {}
         if calibration_config is not None:
             data["calibration_config"] = json.dumps(calibration_config)
+        if feature_types is not None:
+            data["feature_types"] = json.dumps(feature_types)
         resp = self.session.post(f"{self.base_url}/fit/{project_id}/upload", files=files, data=data,
                                   timeout=self.timeout)
         self._raise_for_status(resp)

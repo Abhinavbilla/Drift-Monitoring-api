@@ -105,10 +105,13 @@ class TestFitAndAnalyze:
         assert state["calibration_config"]["decision_mode"] == "legacy"
 
     def test_categorical_column_survives_json_fit_path(self, token):
-        """Regression test: a column the server profiles as categorical
-        (like 'cat' here, 3 low-cardinality values) must not be silently
-        dropped by the JSON fit path -- see client.py's _fit_via_json
-        docstring for the server-side quirk this works around."""
+        """Regression test (root cause now fixed server-side, 2026-09-30
+        hardening pass item 3): a column the server profiles as
+        categorical (like 'cat' here, 3 low-cardinality values) must not
+        be silently dropped by the JSON fit path, even with every column
+        sent under reference_data only and no feature_types override --
+        main.py's /fit now looks a column's values up regardless of which
+        dict it arrived in."""
         client = DriftClient(BASE_URL, token)
         result = client.fit("test_client_catcol", _reference_df(80))
         assert result["inferred_feature_types"].get("cat") == "categorical"
@@ -119,6 +122,28 @@ class TestFitAndAnalyze:
         state = crud.get_baseline("test_client_catcol")
         assert "cat" in state["reference_data"]
         assert len(state["reference_data"]["cat"]) == 80
+
+    def test_feature_types_override_forces_classification(self, token):
+        """A column the profiler would classify one way can be pinned to
+        the other via feature_types -- 'x' here is a high-cardinality
+        float the profiler would call continuous; force it categorical
+        and confirm the server honors the override."""
+        client = DriftClient(BASE_URL, token)
+        result = client.fit("test_client_override", _reference_df(80), feature_types={"x": "categorical"})
+        assert result["inferred_feature_types"]["x"] == "categorical"
+        assert result["inferred_feature_types"]["cat"] == "categorical"  # untouched, still profiler-classified
+
+    def test_feature_types_unknown_column_rejected(self, token):
+        client = DriftClient(BASE_URL, token)
+        with pytest.raises(DriftClientError) as exc_info:
+            client.fit("test_client_badcol", _reference_df(80), feature_types={"nonexistent": "continuous"})
+        assert exc_info.value.status_code == 422
+
+    def test_feature_types_invalid_value_rejected(self, token):
+        client = DriftClient(BASE_URL, token)
+        with pytest.raises(DriftClientError) as exc_info:
+            client.fit("test_client_badtype", _reference_df(80), feature_types={"x": "ordinal"})
+        assert exc_info.value.status_code == 422
 
 
 class TestErrors:
