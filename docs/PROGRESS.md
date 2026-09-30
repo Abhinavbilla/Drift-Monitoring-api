@@ -8,27 +8,43 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
-**Short cleanup pass (user, 2026-10-01) — IN PROGRESS, four items:**
-1. `build_joint_classifier` ran as L2 while docs described L1 (found and
-   fixed in the hardening pass, commit `bac6f1d`). Add a test asserting
-   the FITTED model's penalty AND solver (not just the constructor's
-   params). Mark every joint-detection number in README/docs as
-   "unverified: measured on a mis-specified classifier" until Step 4
-   re-evaluates -- do NOT rerun evaluations now.
-2. The model-serving example's window 4 (`dropoff_longitude`, D=0.0550)
-   was called "consistent with noise," but the hardening simulation says
-   0% of null trials exceed the floor at n=3,146/m=50,000 -- a real
-   contradiction. Compute: that window's actual calendar month(s) and its
-   population D vs. baseline for `dropoff_longitude`; P(D_obs>=0.0550 |
-   true D=0, n=3146, m=50000) from the existing null simulation; whether
-   windows are iid draws or ordered chronological slices. Rewrite the
-   README section to "flagged; cause not established."
-3. PAT default expiry: propose 90 days (override allowed, "never" still
-   optional) -- ASK before changing the current default (never).
-4. New isolation test: user B calling `/fit` on A's existing project_id
-   must not distinguish "exists, not yours" from "doesn't exist yet" --
-   404 or identical-to-new-project-creation behavior, never a
-   distinguishing 409 or other tell.
+**Short cleanup pass (user, 2026-10-01) — DONE, four items:**
+1. **DONE.** `build_joint_classifier` ran as L2 while docs described L1
+   (found and fixed in the hardening pass, commit `bac6f1d`). Added
+   `test_fitted_model_penalty_and_solver` asserting the FITTED model's
+   `.penalty`/`.solver` attributes, not just the constructor's params.
+   Marked every joint-detection AUC number in README.md as "unverified:
+   measured on a mis-specified classifier" pending Step 4 re-evaluation
+   -- not rerun.
+2. **DONE.** The model-serving example's flagged window (`dropoff_longitude`,
+   D=0.0550) was wrongly called "consistent with noise" -- contradicted
+   the hardening simulation (0% of null trials exceed the floor at
+   n=3,146/m=50,000; D=0.0550 is ~8sigma above that null). Investigated:
+   windows are ORDERED CHRONOLOGICAL SLICES (window 3 spans 2016-05-28 to
+   06-17, straddling May/June), not iid; that window's actual local
+   population D for `dropoff_longitude` is 0.0309 (vs. the pooled
+   Apr-Jun figure 0.0206 the original claim relied on); pure null is
+   ruled out, the window's own elevated local D is a plausible but
+   unconfirmed partial explanation. README rewritten to "flagged; cause
+   not established."
+3. **DONE (user-approved).** PAT default expiry changed from "never" to
+   90 days; `--no-expiry` is now the explicit opt-in for a non-expiring
+   token.
+4. **DONE.** New isolation tests for `/fit` on an existing foreign
+   project: 404 not 409 (confirmed), 404 body never contains the owner's
+   email (confirmed), and -- a REAL bug the test itself caught --
+   the 404 message ("Project 'X' not found.") differed in wording from
+   the same endpoint's genuinely-never-created message ("Baseline not
+   found"), a distinguishing tell despite matching status codes. Fixed:
+   `_enforce_ownership` now raises the bare generic message, byte-
+   identical to the "never existed" case. `POST /fit`'s 200-vs-404
+   status-code asymmetry for free-vs-taken project_ids remains (inherent
+   to create-or-overwrite semantics, not a wording leak) -- documented,
+   not silently left unexplained.
+
+All four committed separately (not pushed): test_joint_adapter.py/README
+caveat, model-serving README rewrite, create_token.py default, main.py
+ownership-message fix + new tests. Full suite: 204/204 passing.
 
 **Hardening pass (user, 2026-09-30) — required before Step 5, DONE (all
 5 items).** The 2026-09-30 precondition check for Step 5 found this pass
