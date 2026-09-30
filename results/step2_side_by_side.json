@@ -1,0 +1,3095 @@
+{
+  "config": {
+    "locked_ks_floor": 0.05,
+    "alpha": 0.05,
+    "floor_sensitivity_grid": [
+      0.015,
+      0.02,
+      0.03,
+      0.05
+    ]
+  },
+  "by_reference_size": {},
+  "precision_recall_matched_threshold": "see markdown table",
+  "aa_false_alarm": {
+    "5000": {
+      "1000": {
+        "legacy": {
+          "system_rate": 0.12,
+          "per_feature": {
+            "pickup_longitude": 0.1,
+            "pickup_latitude": 0.01,
+            "dropoff_longitude": 0.04,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.01,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.01,
+          "per_feature": {
+            "pickup_longitude": 0.01,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "3000": {
+        "legacy": {
+          "system_rate": 0.18,
+          "per_feature": {
+            "pickup_longitude": 0.16,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.05,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "5000": {
+        "legacy": {
+          "system_rate": 0.27,
+          "per_feature": {
+            "pickup_longitude": 0.24,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.03,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.02,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "10000": {
+        "legacy": {
+          "system_rate": 0.21,
+          "per_feature": {
+            "pickup_longitude": 0.13,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.09,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.01,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "15000": {
+        "legacy": {
+          "system_rate": 0.14,
+          "per_feature": {
+            "pickup_longitude": 0.1,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.05,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "20000": {
+        "legacy": {
+          "system_rate": 0.02,
+          "per_feature": {
+            "pickup_longitude": 0.02,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      }
+    },
+    "50000": {
+      "1000": {
+        "legacy": {
+          "system_rate": 0.17,
+          "per_feature": {
+            "pickup_longitude": 0.05,
+            "pickup_latitude": 0.05,
+            "dropoff_longitude": 0.05,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.03,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.01,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.01,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "3000": {
+        "legacy": {
+          "system_rate": 0.16,
+          "per_feature": {
+            "pickup_longitude": 0.04,
+            "pickup_latitude": 0.04,
+            "dropoff_longitude": 0.04,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.03,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "5000": {
+        "legacy": {
+          "system_rate": 0.2,
+          "per_feature": {
+            "pickup_longitude": 0.02,
+            "pickup_latitude": 0.06,
+            "dropoff_longitude": 0.12,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.03,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "10000": {
+        "legacy": {
+          "system_rate": 0.09,
+          "per_feature": {
+            "pickup_longitude": 0.01,
+            "pickup_latitude": 0.02,
+            "dropoff_longitude": 0.04,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.01,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "15000": {
+        "legacy": {
+          "system_rate": 0.02,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.01,
+            "dropoff_latitude": 0.01,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      },
+      "20000": {
+        "legacy": {
+          "system_rate": 0.02,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.02,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        },
+        "calibrated": {
+          "system_rate": 0.0,
+          "per_feature": {
+            "pickup_longitude": 0.0,
+            "pickup_latitude": 0.0,
+            "dropoff_longitude": 0.0,
+            "dropoff_latitude": 0.0,
+            "trip_duration": 0.0,
+            "gender_id": 0.0,
+            "month": 0.0
+          },
+          "n": 100
+        }
+      }
+    }
+  },
+  "floor_sensitivity": {
+    "5000": {
+      "0.015": {
+        "TP": 112,
+        "FP": 24,
+        "FN": 32,
+        "TN": 0,
+        "precision": 0.8235294117647058,
+        "recall": 0.7777777777777778,
+        "f1": 0.7999999999999999,
+        "n": 168
+      },
+      "0.02": {
+        "TP": 80,
+        "FP": 56,
+        "FN": 16,
+        "TN": 16,
+        "precision": 0.5882352941176471,
+        "recall": 0.8333333333333334,
+        "f1": 0.6896551724137931,
+        "n": 168
+      },
+      "0.03": {
+        "TP": 48,
+        "FP": 39,
+        "FN": 0,
+        "TN": 81,
+        "precision": 0.5517241379310345,
+        "recall": 1.0,
+        "f1": 0.7111111111111111,
+        "n": 168
+      },
+      "0.05": {
+        "TP": 48,
+        "FP": 8,
+        "FN": 0,
+        "TN": 112,
+        "precision": 0.8571428571428571,
+        "recall": 1.0,
+        "f1": 0.923076923076923,
+        "n": 168
+      }
+    },
+    "50000": {
+      "0.015": {
+        "TP": 142,
+        "FP": 24,
+        "FN": 2,
+        "TN": 0,
+        "precision": 0.8554216867469879,
+        "recall": 0.9861111111111112,
+        "f1": 0.9161290322580645,
+        "n": 168
+      },
+      "0.02": {
+        "TP": 82,
+        "FP": 57,
+        "FN": 14,
+        "TN": 15,
+        "precision": 0.5899280575539568,
+        "recall": 0.8541666666666666,
+        "f1": 0.6978723404255319,
+        "n": 168
+      },
+      "0.03": {
+        "TP": 48,
+        "FP": 30,
+        "FN": 0,
+        "TN": 90,
+        "precision": 0.6153846153846154,
+        "recall": 1.0,
+        "f1": 0.761904761904762,
+        "n": 168
+      },
+      "0.05": {
+        "TP": 48,
+        "FP": 8,
+        "FN": 0,
+        "TN": 112,
+        "precision": 0.8571428571428571,
+        "recall": 1.0,
+        "f1": 0.923076923076923,
+        "n": 168
+      }
+    }
+  },
+  "significant_but_not_material_check": {
+    "pickup_longitude": {
+      "population_D": 0.021911483931620263,
+      "m5000_rates": {
+        "significant": 0.8333333333333334,
+        "material": 0.0,
+        "detected": 0.0
+      },
+      "m50000_rates": {
+        "significant": 1.0,
+        "material": 0.0,
+        "detected": 0.0
+      }
+    },
+    "pickup_latitude": {
+      "population_D": 0.01893431207258156,
+      "m5000_rates": {
+        "significant": 0.6666666666666666,
+        "material": 0.0,
+        "detected": 0.0
+      },
+      "m50000_rates": {
+        "significant": 1.0,
+        "material": 0.0,
+        "detected": 0.0
+      }
+    },
+    "dropoff_longitude": {
+      "population_D": 0.02057779029304843,
+      "m5000_rates": {
+        "significant": 0.5,
+        "material": 0.0,
+        "detected": 0.0
+      },
+      "m50000_rates": {
+        "significant": 1.0,
+        "material": 0.0,
+        "detected": 0.0
+      }
+    },
+    "dropoff_latitude": {
+      "population_D": 0.019485638939072736,
+      "m5000_rates": {
+        "significant": 0.6666666666666666,
+        "material": 0.0,
+        "detected": 0.0
+      },
+      "m50000_rates": {
+        "significant": 1.0,
+        "material": 0.0,
+        "detected": 0.0
+      }
+    },
+    "trip_duration": {
+      "population_D": 0.09238409861892027,
+      "m5000_rates": {
+        "significant": 1.0,
+        "material": 1.0,
+        "detected": 1.0
+      },
+      "m50000_rates": {
+        "significant": 1.0,
+        "material": 1.0,
+        "detected": 1.0
+      }
+    }
+  },
+  "data_collapse_points": [
+    {
+      "feature": "pickup_longitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.3978243601263542,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 0.437225196967298,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.3765301220829701,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.4202031649567082,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 1000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 1.9630572502487993,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 0.6531620478983904,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 0.6518752668896464,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 0.6168957551574559,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 0.6584182300052186,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 1000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 2.7476049959587883,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 0.7784637125216828,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 0.6693646175227819,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 0.7322214399014998,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 1000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 0.7076487330144069,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 1000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 3.0993455317116383,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.5967365401895313,
+      "detection_rate": 0.25,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 0.655837795450947,
+      "detection_rate": 0.25,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.5647951831244551,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.6303047474350623,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 3000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 2.944585875373199,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 0.9797430718475855,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 0.9778129003344695,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 0.9253436327361838,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 0.9876273450078279,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 3000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 4.121407493938182,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 1.1676955687825241,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 1.0040469262841727,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 1.0983321598522495,
+      "detection_rate": 0.25,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 3000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 1.0614730995216102,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 3000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 4.649018297567458,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.6890520042274237,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 0.75729625549667,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.6521693020278163,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.7278132312062646,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 5000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 3.4001148955973726,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 1.1313098525357488,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 1.1290810824503894,
+      "detection_rate": 0.625,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 1.0684947909062839,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 1.1404138269986097,
+      "detection_rate": 0.625,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 5000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 4.758991452130701,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 1.348338701936247,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 1.159373526338367,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 1.2682447363006388,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 5000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 1.2256835594926963,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 5000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 5.368223931136135,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.7956487202527084,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 0.874450393934596,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.7530602441659402,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.8404063299134164,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 10000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 3.9261145004975986,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 1.3063240957967808,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 1.3037505337792927,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 1.2337915103149117,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 1.3168364600104372,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 10000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 5.4952099919175765,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 1.5569274250433656,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 1.3387292350455637,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 1.4644428798029996,
+      "detection_rate": 0.625,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 10000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 1.4152974660288138,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 10000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 6.198691063423277,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.8439129082996327,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 0.9274947050436011,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.7987410079376003,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.8913855222508135,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 15000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 4.16427328052503,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 1.3855659398479332,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 1.3828362651163784,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 1.3086335152710995,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 1.3967159858806022,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 15000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 5.828550373993487,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 1.651370910095211,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 1.4199367804100964,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 1.5532762364535857,
+      "detection_rate": 0.25,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 15000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 1.5011496534376674,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 15000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 6.574704728140576,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.8715895038650519,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 0.9579124123545139,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.8249361657800672,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.9206190087274136,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 20000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 4.300842950541325,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 1.4310063493608727,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 1.4281871534206394,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 1.3515508829156901,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 1.4425220673859322,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 20000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 6.019700941602076,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 1.7055285421893698,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 1.4665044008521817,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 1.604216798891859,
+      "detection_rate": 0.625,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 20000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 1.5503806954477657,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 20000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 6.7903258448852295,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.9291175329603006,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 1.0211380625995663,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.8793849074598046,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.9813831607563828,
+      "detection_rate": 0.25,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 50000,
+      "m": 5000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 4.584713989941938,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 1.5254578939658248,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 1.5224526209958018,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 1.4407580821434143,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 1.5377336906272843,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 50000,
+      "m": 5000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 6.417022764980525,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 1.8180995347985678,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 1.5632989440017018,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 1.7101008535672426,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 50000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 1.6527113744668653,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 50000,
+      "m": 5000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 7.238511672087732,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.4315011028681198,
+      "detection_rate": 0.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 0.47423731073984043,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.40840425882986603,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.45577432475453505,
+      "detection_rate": 0.25,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 1000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 2.1292345401035218,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 0.7084537104018442,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 0.7070580004351483,
+      "detection_rate": 0.25,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 0.6691173929634627,
+      "detection_rate": 0.125,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 0.7141548403559067,
+      "detection_rate": 0.25,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 1000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 2.9801960483908343,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 0.844362447762697,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 0.7260278646341338,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 0.7942056609123399,
+      "detection_rate": 0.25,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 1000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 0.7675528181380363,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 1000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 3.3617122256620604,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.7331446853496318,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 0.805755910361321,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.69390184600938,
+      "detection_rate": 0.5,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.7743862569332314,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 3000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 3.6176894486799633,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 1.2037027695757334,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 1.2013313797054153,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 1.1368681499664537,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 1.2133893105799773,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 3000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 5.063520996018155,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 1.4346193717034954,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 1.233562247777011,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 1.3494001649178473,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 3000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 1.3041154833734476,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 3000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 5.711738476534756,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 0.9291175329603006,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 1.0211380625995663,
+      "detection_rate": 0.75,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 0.8793849074598046,
+      "detection_rate": 0.375,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 0.9813831607563828,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 5000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 4.584713989941938,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 1.5254578939658248,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 1.5224526209958018,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 1.4407580821434143,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 1.5377336906272843,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 5000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 6.417022764980525,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 1.8180995347985678,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 1.5632989440017018,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 1.7101008535672426,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 5000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 1.6527113744668653,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 5000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 7.238511672087732,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 1.2580310866983502,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 1.382627472832406,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 1.1906927934434488,
+      "detection_rate": 0.625,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 1.3287990812746469,
+      "detection_rate": 0.875,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 10000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 6.207732088093346,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 2.065479752538909,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 2.061410593701429,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 1.9507956651871252,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 2.0821012597931086,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 10000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 8.688689897687507,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 2.461718407359057,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 2.116716776499445,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 2.315487501696836,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 10000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 2.237781779657917,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 10000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 9.800991136074401,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 1.4803211676418209,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 1.6269333378465962,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 1.4010844127221036,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 1.5635936411685205,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 15000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 7.304618550540936,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 2.4304434376446213,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 2.4256552714178015,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 2.295495037804931,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 2.4500019122218113,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 15000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 10.223953692891945,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 2.8966961990987037,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 2.4907338803353585,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 2.7246267587613175,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 15000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 2.6331906834549477,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 15000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 11.532795012783067,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 1.6471493375436406,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 1.810284300622857,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 1.558982815826578,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 1.7398063923796703,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 20000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 8.12782919648401,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 2.7043478035452018,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 2.6990200240059017,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 2.554191086031923,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 2.726110465018524,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 20000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 11.376165470328887,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 3.2231459832540037,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 2.7714328151690366,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 3.0316847849285544,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 20000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 2.9299441125929695,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 20000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 12.832509647614907,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013781040084548474,
+      "x": 2.1789737596626297,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.0151459251099334,
+      "x": 2.394781030886285,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.013043386040556326,
+      "x": 2.0623404144501682,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.014556264624125292,
+      "x": 2.3015475218185344,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 50000,
+      "m": 50000,
+      "month": 4,
+      "D_pop": 0.06800229791194745,
+      "x": 10.752107376353313,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022626197050714975,
+      "x": 3.577515873402182,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022581621649007788,
+      "x": 3.570467883551599,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.021369895818125678,
+      "x": 3.3788772072892255,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.022808276539972194,
+      "x": 3.606305168464831,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 50000,
+      "m": 50000,
+      "month": 5,
+      "D_pop": 0.09517982904261402,
+      "x": 15.049252354005192,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_longitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02696677403872494,
+      "x": 4.263821355473425,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "pickup_latitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.02318747052676734,
+      "x": 3.6662610021304545,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_longitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.025364894726012777,
+      "x": 4.010541997229648,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "dropoff_latitude",
+      "n": 50000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.024513671189853925,
+      "x": 3.875951738619414,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    },
+    {
+      "feature": "trip_duration",
+      "n": 50000,
+      "m": 50000,
+      "month": 6,
+      "D_pop": 0.10736447862272269,
+      "x": 16.975814612213075,
+      "detection_rate": 1.0,
+      "n_trials": 8
+    }
+  ],
+  "data_collapse_bins": {
+    "0.4": {
+      "n": 6,
+      "mean": 0.0625,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "2.0": {
+      "n": 2,
+      "mean": 1.0,
+      "features": [
+        "dropoff_longitude",
+        "trip_duration"
+      ]
+    },
+    "0.7": {
+      "n": 17,
+      "mean": 0.25,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "0.6": {
+      "n": 4,
+      "mean": 0.21875,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_longitude"
+      ]
+    },
+    "2.7": {
+      "n": 5,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude",
+        "trip_duration"
+      ]
+    },
+    "0.8": {
+      "n": 13,
+      "mean": 0.40384615384615385,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "3.1": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "2.9": {
+      "n": 3,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "pickup_longitude",
+        "trip_duration"
+      ]
+    },
+    "1.0": {
+      "n": 9,
+      "mean": 0.5416666666666666,
+      "features": [
+        "dropoff_latitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "0.9": {
+      "n": 10,
+      "mean": 0.425,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "4.1": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "1.2": {
+      "n": 9,
+      "mean": 0.7777777777777778,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "1.1": {
+      "n": 7,
+      "mean": 0.5178571428571429,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "4.6": {
+      "n": 3,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "3.4": {
+      "n": 3,
+      "mean": 1.0,
+      "features": [
+        "dropoff_longitude",
+        "trip_duration"
+      ]
+    },
+    "4.8": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "1.3": {
+      "n": 11,
+      "mean": 0.7727272727272727,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "5.4": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "3.9": {
+      "n": 2,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "trip_duration"
+      ]
+    },
+    "5.5": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "1.6": {
+      "n": 10,
+      "mean": 0.875,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "1.5": {
+      "n": 10,
+      "mean": 0.95,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "1.4": {
+      "n": 14,
+      "mean": 0.875,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "6.2": {
+      "n": 2,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "4.2": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "5.8": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "1.7": {
+      "n": 7,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_longitude"
+      ]
+    },
+    "6.6": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "4.3": {
+      "n": 2,
+      "mean": 1.0,
+      "features": [
+        "pickup_longitude",
+        "trip_duration"
+      ]
+    },
+    "6.0": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "6.8": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "6.4": {
+      "n": 2,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "1.8": {
+      "n": 3,
+      "mean": 1.0,
+      "features": [
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "7.2": {
+      "n": 2,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "0.5": {
+      "n": 2,
+      "mean": 0.1875,
+      "features": [
+        "dropoff_latitude",
+        "pickup_latitude"
+      ]
+    },
+    "2.1": {
+      "n": 6,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude",
+        "pickup_latitude",
+        "pickup_longitude",
+        "trip_duration"
+      ]
+    },
+    "3.0": {
+      "n": 2,
+      "mean": 1.0,
+      "features": [
+        "dropoff_longitude",
+        "trip_duration"
+      ]
+    },
+    "3.6": {
+      "n": 4,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "pickup_latitude",
+        "pickup_longitude",
+        "trip_duration"
+      ]
+    },
+    "5.1": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "5.7": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "8.7": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "2.5": {
+      "n": 3,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "2.3": {
+      "n": 3,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude"
+      ]
+    },
+    "2.2": {
+      "n": 2,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "9.8": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "7.3": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "2.4": {
+      "n": 3,
+      "mean": 1.0,
+      "features": [
+        "pickup_latitude",
+        "pickup_longitude"
+      ]
+    },
+    "10.2": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "2.6": {
+      "n": 2,
+      "mean": 1.0,
+      "features": [
+        "dropoff_latitude",
+        "dropoff_longitude"
+      ]
+    },
+    "11.5": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "8.1": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "11.4": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "3.2": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "pickup_longitude"
+      ]
+    },
+    "2.8": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "pickup_latitude"
+      ]
+    },
+    "12.8": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "10.8": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "15.0": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    },
+    "3.7": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "pickup_latitude"
+      ]
+    },
+    "4.0": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "dropoff_longitude"
+      ]
+    },
+    "17.0": {
+      "n": 1,
+      "mean": 1.0,
+      "features": [
+        "trip_duration"
+      ]
+    }
+  }
+}

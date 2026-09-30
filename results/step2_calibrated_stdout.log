@@ -1,0 +1,36 @@
+[11:08:29] Loading splits (identical to step1_validation.py)...
+[11:08:34] ===== Reference size 5000 (calibrated) =====
+[11:08:34] Fitting calibrated baseline (project=step2_val_ref5000_calibrated, n=5000)...
+[11:08:34] Running batch-size sweep (identical batches to legacy)...
+[11:08:36]   size=1000: m4=8t, m5=8t, m6=8t
+[11:08:38]   size=3000: m4=8t, m5=8t, m6=8t
+[11:08:39]   size=5000: m4=8t, m5=8t, m6=8t
+[11:08:44]   size=10000: m4=8t, m5=8t, m6=8t
+[11:08:47]   size=15000: m4=8t, m5=8t, m6=8t
+[11:08:50]   size=20000: m4=8t, m5=8t, m6=8t
+[11:08:56]   size=50000: m4=8t, m5=8t, m6=8t
+[11:08:56] Running A/A test (identical batches to legacy)...
+[11:09:01]   A/A size=1000: 100 trials done
+[11:09:08]   A/A size=3000: 100 trials done
+[11:09:14]   A/A size=5000: 100 trials done
+[11:09:25]   A/A size=10000: 100 trials done
+[11:09:34]   A/A size=15000: 100 trials done
+[11:09:44]   A/A size=20000: 100 trials done
+[11:09:44] ===== Reference size 50000 (calibrated) =====
+[11:09:44] Fitting calibrated baseline (project=step2_val_ref50000_calibrated, n=50000)...
+[11:09:45] Running batch-size sweep (identical batches to legacy)...
+[11:09:48]   size=1000: m4=8t, m5=8t, m6=8t
+[11:09:51]   size=3000: m4=8t, m5=8t, m6=8t
+[11:09:55]   size=5000: m4=8t, m5=8t, m6=8t
+[11:10:00]   size=10000: m4=8t, m5=8t, m6=8t
+[11:10:06]   size=15000: m4=8t, m5=8t, m6=8t
+[11:10:13]   size=20000: m4=8t, m5=8t, m6=8t
+[11:10:23]   size=50000: m4=8t, m5=8t, m6=8t
+[11:10:23] Running A/A test (identical batches to legacy)...
+[11:10:46]   A/A size=1000: 100 trials done
+[11:10:57]   A/A size=3000: 100 trials done
+[11:11:08]   A/A size=5000: 100 trials done
+[11:11:20]   A/A size=10000: 100 trials done
+[11:11:35]   A/A size=15000: 100 trials done
+[11:11:50]   A/A size=20000: 100 trials done
+[11:11:50] Wrote results\tabular_validation_calibrated_raw.json

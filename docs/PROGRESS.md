@@ -394,10 +394,55 @@ February-vs-March shift), since both come from the same pooled draw.
 
 ## Step 2 — Two-gate calibrated decisions
 
-**Status (2026-09-30): (a) and (b) DONE and tested end-to-end against the
-live backend. (c) calibrated re-run + side-by-side IN PROGRESS. (d) DCT
-calibration and (e) text/image smoke tests NOT started — per instruction,
-(d)/(e) wait until (c) is reviewed.**
+**Status (2026-09-30): (a), (b), (c) DONE. (d) DCT calibration and (e)
+text/image smoke tests NOT started — per instruction, waiting on the
+user's review of (c) before proceeding (it unblocks the default-mode
+decision).**
+
+**(c) Calibrated re-run of the Step 1 suite + legacy/calibrated
+side-by-side — DONE.** `scripts/step2_calibrated_rerun.py` re-ran the
+sweep + A/A test against two new calibrated-mode projects, reusing
+`step1_validation.py`'s EXACT batch-drawing seeds — every comparison is on
+byte-identical batches, only the decision logic differs. `scripts/step2_analyze.py`
+produced `results/step2_side_by_side.md`/`.json`. Full results in that file;
+headlines:
+- **Precision/recall at the locked floor (D_gt=0.05)**: legacy's precision
+  collapses at large batch sizes (0.333-0.397 at n≥15,000, both reference
+  sizes) since it flags every population effect the p-value finds
+  significant, however small. Calibrated mode holds **precision=1.000 and
+  recall=1.000 (F1=1.000) at every batch size ≥3,000**, both reference
+  sizes — the materiality gate removes exactly the false positives legacy
+  produces, without losing the one real drift (`trip_duration`).
+- **A/A system false-alarm rate**: legacy ranged 0.02-0.27 across sizes
+  (already documented in Step 1 as roughly alpha-predicted for uncorrected
+  tests). **Calibrated stayed at 0.000-0.010 at every batch size, both
+  reference sizes** — Holm correction across 7 features is working as
+  designed.
+- **Significant-but-not-material, confirmed on pooled data (not an
+  anecdote)**: at m=50,000, all four coordinate features are significant in
+  **100% of batches but material in 0%**. `trip_duration` (D=0.092, above
+  the floor) is significant AND material in 100% of batches at both
+  reference sizes. At m=5,000 significance rate is lower (50-83%, matching
+  Step 1's own reduced-power finding) but material rate stays 0% regardless.
+- **Floor sensitivity** (0.015/0.02/0.03/0.05, calibrated, recomputed from
+  stored `effect_size`/`significant` — no new HTTP calls needed): precision
+  is worst at the knife-edge floor 0.02 (as Step 1 already flagged), best at
+  0.05 (locked default) and 0.015. Full table in the results file.
+- **Data-collapse check (x-axis corrected to population D, not observed D,
+  per the 2026-09-30 correction)**: computed on legacy's raw significance
+  decision (`drift_detected` = plain `p<alpha`, since that's what asymptotic
+  KS theory actually makes a claim about — calibrated's two-gate output
+  would confound the check with an arbitrary materiality choice). 210
+  `(feature, n, m, month)` cells. Clean collapse at the extremes (x<0.5 and
+  x>1.7: std=0 in most bins). In the transition region (x≈0.6-1.6), largest
+  within-bin spread was std=0.319 vs. a worst-case binomial-noise floor of
+  ~0.177 for 8 trials/cell (**1.8x the noise floor — reported as
+  suggestive of a real deviation, not just sampling noise, but not
+  confirmable without more trials/cell than this run collected** — stated
+  with that exact hedge in the results file, not overclaimed either way).
+
+Test artifacts (`step1_val_ref*`, `step2_val_ref*_calibrated`) cleaned up
+from `drift.db`. Full suite re-run: 89/89 passing throughout.
 
 **(a) DB schema + migration — DONE** (see commit `cd2e367`): `calibration_config`
 column on `baselines`, self-healing migration, `get_baseline`/
