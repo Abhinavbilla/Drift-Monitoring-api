@@ -104,6 +104,22 @@ class TestFitAndAnalyze:
         state = crud.get_baseline("test_client_calib")
         assert state["calibration_config"]["decision_mode"] == "legacy"
 
+    def test_categorical_column_survives_json_fit_path(self, token):
+        """Regression test: a column the server profiles as categorical
+        (like 'cat' here, 3 low-cardinality values) must not be silently
+        dropped by the JSON fit path -- see client.py's _fit_via_json
+        docstring for the server-side quirk this works around."""
+        client = DriftClient(BASE_URL, token)
+        result = client.fit("test_client_catcol", _reference_df(80))
+        assert result["inferred_feature_types"].get("cat") == "categorical"
+        # crud.get_baseline merges continuous + categorical values into one
+        # "reference_data" key at the storage layer (see db/crud.py's
+        # insert_baseline docstring) -- so a surviving categorical column
+        # shows up there, not under a separate key.
+        state = crud.get_baseline("test_client_catcol")
+        assert "cat" in state["reference_data"]
+        assert len(state["reference_data"]["cat"]) == 80
+
 
 class TestErrors:
     def test_analyze_without_fit_raises_client_error(self, token):
