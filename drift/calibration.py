@@ -32,7 +32,24 @@ import numpy as np
 DEFAULT_ALPHA = 0.05
 DEFAULT_MULTIPLE_TESTING = "holm"
 DEFAULT_EFFECT_FLOORS = {"ks_d": 0.05, "psi": 0.2, "dct_auc": 0.65}
+# CalibrationConfig's own neutral/safe default -- what an ABSENT config
+# resolves to (CalibrationConfig.from_dict(None)). Deliberately stays
+# "legacy" forever: this is what every pre-existing DB row (calibration_config
+# IS NULL, fit before "calibrated" became the new-project default on
+# 2026-09-30) resolves to, and existing projects must stay legacy
+# permanently. Do NOT change this constant to switch the new-project
+# default -- that's NEW_PROJECT_DEFAULT_DECISION_MODE below, applied
+# explicitly by main.py's /fit handler only when creating a brand-new
+# project, never by this class's own fallback.
 DEFAULT_DECISION_MODE = "legacy"
+# The default decision_mode a brand-new project gets when /fit is called
+# with no explicit calibration_config (user decision, 2026-09-30, after
+# reviewing Step 2 (c)'s side-by-side: calibrated held precision=recall=1.000
+# at every batch size >=3,000 vs. legacy's precision collapsing to 0.33-0.51
+# at scale, and A/A system false-alarm rate 0.000-0.010 vs. legacy's
+# 0.02-0.27). Applied explicitly at project-creation time in main.py, NOT
+# by changing DEFAULT_DECISION_MODE above.
+NEW_PROJECT_DEFAULT_DECISION_MODE = "calibrated"
 DEFAULT_PSI_NULL_DRAWS = 1000
 DEFAULT_DCT_CALIBRATION = "precomputed"
 DEFAULT_DCT_PERMUTATIONS = 100

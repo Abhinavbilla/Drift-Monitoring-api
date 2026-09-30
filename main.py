@@ -23,7 +23,7 @@ from models import (
 from db import crud
 from drift.detector import compute_iqr_anomalies, DistributionDetector
 from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES
-from drift.calibration import CalibrationConfig, minimum_detectable_d_at_fit_time
+from drift.calibration import CalibrationConfig, minimum_detectable_d_at_fit_time, NEW_PROJECT_DEFAULT_DECISION_MODE
 from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
 from adapters.image import ImageAdapter
@@ -244,15 +244,27 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
         if inferred_feature_types.get(k) == "categorical"
     }
     
-    # 8. Resolve the calibration config, if the caller provided one -- an
-    # explicit dict (even {}) resolves and stores the fully-settled config;
-    # omitting the field entirely (None) leaves whatever the project already
-    # has untouched (see crud.insert_baseline's __UNSET__ sentinel), or
-    # legacy for a brand-new project.
-    resolved_calibration_config = (
-        CalibrationConfig.from_dict(request.calibration_config).to_dict()
-        if request.calibration_config is not None else "__UNSET__"
-    )
+    # 8. Resolve the calibration config.
+    # - Caller provided one explicitly (even {}): resolve and store it,
+    #   whether this is a new or existing project.
+    # - Caller omitted it AND the project already exists (a re-fit): leave
+    #   whatever it already has untouched (crud.insert_baseline's __UNSET__
+    #   sentinel) -- an existing project's decision_mode never changes just
+    #   because someone re-fit it without mentioning calibration.
+    # - Caller omitted it AND this is a brand-new project: apply the
+    #   new-project default explicitly (NEW_PROJECT_DEFAULT_DECISION_MODE =
+    #   "calibrated", decided 2026-09-30) -- existing projects fit before
+    #   this change keep calibration_config=NULL in the DB and so still
+    #   resolve to CalibrationConfig's own "legacy" default; only a project
+    #   created from this point on gets an explicit "calibrated" config
+    #   written at creation time.
+    is_new_project = crud.get_baseline(project_id) is None
+    if request.calibration_config is not None:
+        resolved_calibration_config = CalibrationConfig.from_dict(request.calibration_config).to_dict()
+    elif is_new_project:
+        resolved_calibration_config = CalibrationConfig(decision_mode=NEW_PROJECT_DEFAULT_DECISION_MODE).to_dict()
+    else:
+        resolved_calibration_config = "__UNSET__"
 
     # 9. Persist baselines
     insert_kwargs = dict(

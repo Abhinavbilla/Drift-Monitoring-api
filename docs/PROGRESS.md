@@ -365,10 +365,30 @@ February-vs-March shift), since both come from the same pooled draw.
 
 ## Step 2 — Two-gate calibrated decisions
 
-**Status (2026-09-30): (a), (b), (c) DONE. (d) DCT calibration and (e)
-text/image smoke tests NOT started — per instruction, waiting on the
-user's review of (c) before proceeding (it unblocks the default-mode
-decision).**
+**Status (2026-09-30): (a), (b), (c) DONE. Default-mode switch for new
+projects DONE (see below). (c) is now under a rigorous six-item
+methodological review (see HANDOFF) before being treated as final. (d) DCT
+calibration and (e) text/image smoke tests NOT started.**
+
+**New-project default switched to "calibrated" — DONE.** Per the user's
+2026-09-30 decision (after reviewing (c)'s numbers): `drift/calibration.py`
+gained `NEW_PROJECT_DEFAULT_DECISION_MODE = "calibrated"`, deliberately
+kept **separate** from `CalibrationConfig`'s own `DEFAULT_DECISION_MODE`
+(which stays `"legacy"` forever — that's the fallback every pre-existing
+NULL `calibration_config` row resolves to). `main.py`'s `/fit` handler now
+checks `crud.get_baseline(project_id) is None` (genuinely new project) and,
+only when true AND the caller didn't supply an explicit
+`calibration_config`, stores an explicit `{"decision_mode": "calibrated",
+...}` config at creation time. A project that already exists (re-fit with
+no calibration mention) keeps whatever it has — the existing `"__UNSET__"`
+preserve-on-refit behavior from (a) is untouched. 4 new tests in
+`tests/test_new_project_default_mode.py`: brand-new project defaults to
+calibrated; explicit `legacy` on a new project is still respected;
+re-fitting a calibrated-by-default project doesn't revert it; a project
+simulating pre-2026-09-30 state (`calibration_config IS NULL`, inserted
+directly via `crud.insert_baseline` with no config argument, exactly how
+every project before this change was created) stays legacy after a normal
+API re-fit with no calibration_config mentioned. Full suite: 93/93 passing.
 
 **(c) Calibrated re-run of the Step 1 suite + legacy/calibrated
 side-by-side — DONE.** `scripts/step2_calibrated_rerun.py` re-ran the
