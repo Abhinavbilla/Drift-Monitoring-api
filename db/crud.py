@@ -60,6 +60,11 @@ def init_db():
         ("modality", "ALTER TABLE baselines ADD COLUMN modality TEXT DEFAULT 'tabular'"),
         ("embedding_reference", "ALTER TABLE baselines ADD COLUMN embedding_reference TEXT"),
         ("embedding_model", "ALTER TABLE baselines ADD COLUMN embedding_model TEXT"),
+        # Step 2: NULL here (the default for every pre-existing row, and for
+        # any row inserted without specifying it) means
+        # CalibrationConfig.from_dict(None) resolves to the legacy default --
+        # existing projects stay legacy permanently with no data migration.
+        ("calibration_config", "ALTER TABLE baselines ADD COLUMN calibration_config TEXT"),
     ]:
         try:
             cursor.execute(ddl)
@@ -145,17 +150,30 @@ def insert_baseline(
     project_id: str,
     feature_types: dict,
     reference_data: dict,
-    categorical_data: Optional[dict] = None
+    categorical_data: Optional[dict] = None,
+    calibration_config: Optional[dict] = "__UNSET__",
 ) -> Dict[str, Dict[str, int]]:
     """
     Stores all raw reference data (continuous + categorical) in `reference_data` column.
     This ensures batch drift detection (PSI/KS) can access the full distribution.
     Real‑time fences (IQR + allowed values) are stored separately in `iqr_fences`.
 
+    calibration_config: the sentinel default ("__UNSET__", distinct from an
+    explicit None) means "preserve whatever this project already has" --
+    this uses `INSERT OR REPLACE`, which in SQLite deletes and re-inserts
+    the row, silently resetting any column not named in the INSERT back to
+    its default (verified: a bare INSERT OR REPLACE would wipe an existing
+    project's calibration_config to NULL on every re-fit). Pass an explicit
+    dict (or None, to deliberately clear it) to actually change the config
+    as part of this call.
+
     Returns a cleaning_summary ({field: {"dropped_non_numeric": n}}) for any
     continuous column that had unconvertible cells dropped, so callers can
     surface that data loss instead of it being silent.
     """
+    if calibration_config == "__UNSET__":
+        existing = get_baseline(project_id)
+        calibration_config = existing["calibration_config"] if existing else None
     # Merge continuous and categorical raw data into a single dictionary
     combined_raw_data = dict(reference_data)
     if categorical_data:
@@ -199,15 +217,16 @@ def insert_baseline(
     # The `categorical_baselines` column is not used by the detector,
     # but we keep it to avoid migration issues.
     cursor.execute('''
-        INSERT OR REPLACE INTO baselines 
-            (project_id, feature_types, reference_data, iqr_fences, categorical_baselines)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO baselines
+            (project_id, feature_types, reference_data, iqr_fences, categorical_baselines, calibration_config)
+        VALUES (?, ?, ?, ?, ?, ?)
     ''', (
         project_id,
         json.dumps(feature_types),
         json.dumps(combined_raw_data),      # <-- now includes categorical raw values
         json.dumps(fences),
-        json.dumps(cat_freq_baselines)
+        json.dumps(cat_freq_baselines),
+        json.dumps(calibration_config) if calibration_config is not None else None,
     ))
 
     conn.commit()
@@ -221,7 +240,8 @@ def get_baseline(project_id: str) -> dict:
     cursor = conn.cursor()
 
     cursor.execute(
-        'SELECT feature_types, reference_data, iqr_fences, modality, embedding_reference, embedding_model '
+        'SELECT feature_types, reference_data, iqr_fences, modality, embedding_reference, embedding_model, '
+        'calibration_config '
         'FROM baselines WHERE project_id = ?',
         (project_id,)
     )
@@ -238,7 +258,27 @@ def get_baseline(project_id: str) -> dict:
         "modality": row[3] or "tabular",
         "embedding_reference": json.loads(row[4]) if row[4] else None,
         "embedding_model": row[5],
+        # None (the default for every pre-Step-2 row) -> legacy, via
+        # CalibrationConfig.from_dict(None) -- callers pass this straight
+        # through, not resolved here, so this module stays independent of
+        # drift/calibration.py.
+        "calibration_config": json.loads(row[6]) if row[6] else None,
     }
+
+
+def set_calibration_config(project_id: str, config: Optional[dict]) -> None:
+    """Stores (or clears, if config=None) a project's calibration config,
+    independent of any /fit call -- lets a project's decision_mode/floors be
+    changed without re-fitting its baseline. Row must already exist (created
+    by a prior /fit call); this only updates the calibration_config column."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'UPDATE baselines SET calibration_config = ? WHERE project_id = ?',
+        (json.dumps(config) if config is not None else None, project_id)
+    )
+    conn.commit()
+    conn.close()
 
 
 def insert_embedding_baseline(project_id: str, modality: str, embeddings, model_name: str, max_reference_samples: int = 3000):
@@ -254,13 +294,19 @@ def insert_embedding_baseline(project_id: str, modality: str, embeddings, model_
         idx = rng.choice(len(embeddings_list), size=max_reference_samples, replace=False)
         embeddings_list = embeddings_list[idx]
 
+    # Preserve any existing calibration_config -- INSERT OR REPLACE deletes
+    # and re-inserts the row, which would otherwise silently wipe it back to
+    # NULL on every re-fit (verified in db/crud.py's insert_baseline).
+    existing = get_baseline(project_id)
+    calibration_config = existing["calibration_config"] if existing else None
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT OR REPLACE INTO baselines
             (project_id, feature_types, reference_data, iqr_fences, categorical_baselines,
-             modality, embedding_reference, embedding_model)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             modality, embedding_reference, embedding_model, calibration_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         project_id,
         json.dumps({}),
@@ -270,6 +316,7 @@ def insert_embedding_baseline(project_id: str, modality: str, embeddings, model_
         modality,
         json.dumps(embeddings_list.tolist()),
         model_name,
+        json.dumps(calibration_config) if calibration_config is not None else None,
     ))
     conn.commit()
     conn.close()
@@ -293,13 +340,17 @@ def insert_joint_baseline(project_id: str, embeddings, tabular_stats: dict, mode
         idx = rng.choice(len(embeddings_arr), size=max_reference_samples, replace=False)
         embeddings_arr = embeddings_arr[idx]
 
+    # Preserve any existing calibration_config -- see insert_embedding_baseline.
+    existing = get_baseline(project_id)
+    calibration_config = existing["calibration_config"] if existing else None
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT OR REPLACE INTO baselines
             (project_id, feature_types, reference_data, iqr_fences, categorical_baselines,
-             modality, embedding_reference, embedding_model)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             modality, embedding_reference, embedding_model, calibration_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         project_id,
         json.dumps(tabular_stats),
@@ -309,6 +360,7 @@ def insert_joint_baseline(project_id: str, embeddings, tabular_stats: dict, mode
         "joint",
         json.dumps(embeddings_arr.tolist()),
         model_name,
+        json.dumps(calibration_config) if calibration_config is not None else None,
     ))
     conn.commit()
     conn.close()
