@@ -107,7 +107,7 @@ def build_joint_classifier() -> LogisticRegression:
     hypothetical one. Keeping this classifier joint-only avoids that
     trade entirely.
     """
-    return LogisticRegression(max_iter=2000, solver="liblinear", C=2.0, l1_ratio=1.0)
+    return LogisticRegression(max_iter=2000, solver="liblinear", penalty="l1", C=2.0)
 
 
 class JointAdapter(BaseAdapter):

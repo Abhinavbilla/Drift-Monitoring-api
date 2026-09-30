@@ -166,6 +166,29 @@ class TestCategoricalFrequencyEncoding:
         assert vec[0] == 0.0
 
 
+class TestBuildJointClassifierConfig:
+    def test_penalty_is_actually_l1(self):
+        """Regression test (2026-09-30 hardening pass item 2, found via a
+        clean-venv run on the pinned scikit-learn 1.5.2): build_joint_classifier's
+        docstring extensively describes and justifies L1 regularization
+        (sparsity concentrating weight onto the interaction-feature
+        dimensions), but the constructor never actually passed
+        penalty="l1" -- it silently defaulted to L2 the whole time (the
+        l1_ratio=1.0 it DID pass is a no-op for any penalty other than
+        "elasticnet", which liblinear doesn't even support). This diluted
+        the interaction signal exactly the way the docstring says L2
+        does, and only happened to still clear the AUC threshold under
+        whatever numeric conditions existed in the dev environment's
+        newer scikit-learn (1.9.0) -- it failed outright (AUC=0.43, 0.49
+        vs. a 0.65 threshold) on the pinned 1.5.2. A downstream AUC-
+        threshold test alone wasn't enough to catch the root cause, since
+        it can pass or fail by getting lucky on accidental L2 behavior in
+        a specific environment -- this test pins the actual parameter,
+        not just an outcome that depends on it plus unrelated numerics."""
+        params = build_joint_classifier().get_params()
+        assert params["penalty"] == "l1"
+
+
 class TestJointEmbeddingDriftDetector:
     def test_same_distribution_centers_near_point_five(self):
         adapter = JointAdapter()
