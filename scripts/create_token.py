@@ -8,8 +8,14 @@ Usage:
         --project my_project_1 --project my_project_2
     python scripts/create_token.py create --email alice@example.com --name "admin-script" \
         --all-projects --expires-days 90
+    python scripts/create_token.py create --email alice@example.com --name "long-lived" \
+        --all-projects --no-expiry
     python scripts/create_token.py list --email alice@example.com
     python scripts/create_token.py revoke --email alice@example.com --id <token-id>
+
+Default expiry is 90 days (2026-10-01 cleanup) -- pass --no-expiry for a
+token that never expires; that's an explicit opt-in now, not the silent
+default.
 
 The full token is printed ONCE, at creation time, and is never stored or
 recoverable afterward -- only its SHA-256 hash persists in api_tokens.
@@ -36,8 +42,8 @@ def cmd_create(args):
     token_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
     expires_at = (
-        (datetime.now(timezone.utc) + timedelta(days=args.expires_days)).isoformat()
-        if args.expires_days else None
+        None if args.no_expiry
+        else (datetime.now(timezone.utc) + timedelta(days=args.expires_days)).isoformat()
     )
 
     crud.init_db()
@@ -93,8 +99,12 @@ def main():
                            help="A project_id this token may access. Repeatable.")
     p_create.add_argument("--all-projects", action="store_true",
                            help="Scope this token to all of this user's projects, present and future.")
-    p_create.add_argument("--expires-days", type=int, default=None,
-                           help="Days until expiry. Omit for a token that never expires.")
+    p_create.add_argument("--expires-days", type=int, default=90,
+                           help="Days until expiry (default 90, 2026-10-01 cleanup). Pass --no-expiry "
+                                "for a token that never expires -- that's now an explicit opt-in, not "
+                                "the silent default.")
+    p_create.add_argument("--no-expiry", action="store_true",
+                           help="Token never expires. Overrides --expires-days.")
     p_create.set_defaults(func=cmd_create)
 
     p_list = sub.add_parser("list", help="List a user's tokens.")
