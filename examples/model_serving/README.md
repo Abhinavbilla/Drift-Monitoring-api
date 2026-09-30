@@ -5,18 +5,21 @@ a small scikit-learn model trained on Citi Bike data, served with
 FastAPI, with its input features logged asynchronously and periodically
 sent to the Drift Monitoring API for analysis.
 
-**Correction (2026-09-30)**: the original version of this example
-mischaracterized two flagged windows from the real Apr-Jun replay as
-"real drift." They were not. The monitored coordinate features' true
-population D between the Jan-Mar reference and Apr-Jun production is
-**~0.02** (see "The real replay" below) -- comfortably BELOW the 0.05
-materiality floor. Any window from that replay that crosses the floor is
-doing so from sampling noise on a genuinely sub-floor effect, not from
-detecting a real distributional shift. This version fixes that framing,
-uses the current (50,000-row) reference and the redefined
-`recommended_batch_size`, and adds a separately-labeled synthetic
-scenario with an actual, substantial injected drift so the reader can
-see both cases side by side.
+**Correction (2026-09-30, revised 2026-10-01)**: the original version of
+this example mischaracterized a flagged window from the real Apr-Jun
+replay as "real drift." It is not that either. The monitored coordinate
+features' pooled population D between the Jan-Mar reference and Apr-Jun
+production is ~0.02 (see "The real replay" below), below the 0.05
+materiality floor -- but the flagged window's cause is **not
+established**: it is not explained by pure sampling noise either (ruled
+out by this project's own null simulation -- see below), and the
+window's own local population D, while still sub-floor, is meaningfully
+higher than the pooled figure. This version uses the current
+(50,000-row) reference and the redefined `recommended_batch_size`, and
+adds a separately-labeled synthetic scenario with an actual, substantial
+injected drift so the reader can see a confirmed-drift case for contrast
+-- but the real replay's one flagged window is reported as unresolved,
+not as either "real drift" or "noise."
 
 ## Pipeline
 
@@ -103,28 +106,54 @@ python examples/model_serving/scheduled_job.py \
 python examples/model_serving/generate_readme_tables.py
 ```
 
-## The real replay: noise, not drift
+## The real replay: flagged; cause not established
 
-Population D between the Jan-Mar reference and Apr-Jun production, for
-each monitored continuous feature (from `results/tabular_validation_legacy.json`'s
-stored population truth -- computed once, independent of any batch draw):
+**Correction (2026-10-01):** this section previously called window 3's
+alert "consistent with noise." That claim contradicted this project's own
+simulation (`results/step2_hardening_batch_size_simulation.md`), which
+found a 0% rate of exceeding the floor under the true null at this n/m —
+D_obs=0.0550 is roughly an 8-standard-deviation event against that null
+(mean 0.0159, std 0.0047), not a plausible noise fluctuation. Findings
+from re-examining this window:
 
-| Feature | Population D | vs. 0.05 floor |
+1. Windows are **ordered chronological slices** of the replay log, not
+   iid draws — window 3 spans 2016-05-28 through 2016-06-17, straddling
+   May and June, not a random sample of the full Apr-Jun period.
+2. Population D for `dropoff_longitude` (baseline vs. the REAL
+   population in that exact May 28-Jun 17 date range, all rows, not a
+   sample) is **0.0309** — notably higher than the pooled Apr-Jun figure
+   below (0.0206) used in the original "noise" claim, and reflecting
+   real temporal variation the pooled average hides.
+3. Under the pure null (true D=0) at n=3,146/m=50,000, D_obs=0.0550 is
+   effectively impossible (~8σ) — so "just sampling noise on a near-zero
+   effect" is ruled out.
+4. That window's elevated local population D (0.031, still below the
+   0.05 floor) is a more plausible partial explanation, but wasn't
+   itself simulated at this n/m, so no exact P(D_obs>=0.0550 | true
+   D=0.031) is available to confirm it's sufficient on its own.
+5. **Conclusion: this window's alert is flagged, not explained.** It is
+   not evidence of a real drift event in the sense this system is meant
+   to catch (a shift from the FIT-TIME reference), and it is also not
+   cleanly dismissible as pure noise — real temporal structure within
+   the Apr-Jun period, not represented in the pooled population-D table,
+   is the leading candidate but unconfirmed.
+
+Population D between the Jan-Mar reference and the POOLED Apr-Jun
+production (from `results/tabular_validation_legacy.json`'s stored
+population truth) -- this is an average over the whole period and, per
+finding 2 above, can differ substantially from any specific sub-period:
+
+| Feature | Population D (pooled Apr-Jun) | vs. 0.05 floor |
 |---|---|---|
 | `pickup_longitude` | 0.0219 | 0.44x |
 | `pickup_latitude` | 0.0189 | 0.38x |
 | `dropoff_longitude` | 0.0206 | 0.41x |
 | `dropoff_latitude` | 0.0195 | 0.39x |
 
-Every one of these is well below the 0.05 materiality floor. A run
-of this replay should mostly show `alert=False`; an occasional window
-crossing the floor from sampling noise is expected and consistent with
-the false-material rates characterized in
-`results/step2_hardening_batch_size_simulation.md` at true D near this
-range -- not evidence of real drift. One real run (2026-09-30), 15,000
-replayed predictions (5,000/month, Apr/May/Jun) through the actual served
-model, split into complete 3,146-row windows (`recommended_batch_size`
-for this 50,000-row reference):
+One real run (2026-09-30), 15,000 replayed predictions (5,000/month,
+Apr/May/Jun) through the actual served model, split into complete
+3,146-row windows (`recommended_batch_size` for this 50,000-row
+reference):
 
 <!-- BEGIN REAL_REPLAY_TABLE -->
 | Window | Alert | Drifted feature(s) (statistic, p_value_adjusted) |
@@ -135,12 +164,12 @@ for this 50,000-row reference):
 | 3 | **True** | `dropoff_longitude` (D=0.0550, p_adj=1.614e-07) |
 <!-- END REAL_REPLAY_TABLE -->
 
-Any window above showing `alert=True` has an observed statistic close to
-the 0.05 floor -- read it as "consistent with the floor-adjacent noise
-this hardening pass's simulation already characterizes," not as a
-detected real-world shift. Four windows from one run is not enough data
-to precisely re-estimate that false-material rate; that's what the
-dedicated simulation is for.
+See the corrected framing above -- window 3's alert is flagged with its
+cause not established, neither confirmed real drift nor cleanly
+dismissible as noise. Four windows from one run is also not enough data
+to characterize this on its own; that's what the dedicated simulation
+(same document) is for, and it doesn't cover this window's actual local
+population D.
 
 ## The synthetic scenario: real, substantial drift
 
