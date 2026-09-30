@@ -1,0 +1,65 @@
+{
+  "system_alert_triggered": false,
+  "feature_metrics": {
+    "pickup_longitude": {
+      "statistic": 0.05519746835443038,
+      "p_value": 0.02104494171351861,
+      "drift_detected": false,
+      "effect_size": 0.05519746835443038,
+      "effect_floor": 0.05,
+      "p_value_adjusted": 0.08417976685407444,
+      "significant": false,
+      "material": true,
+      "decision_mode": "calibrated",
+      "threshold_used": "p_adj<0.05 [KS (holm)], effect>=0.05"
+    },
+    "pickup_latitude": {
+      "statistic": 0.03507640966628309,
+      "p_value": 0.3138251653956315,
+      "drift_detected": false,
+      "effect_size": 0.03507640966628309,
+      "effect_floor": 0.05,
+      "p_value_adjusted": 0.627650330791263,
+      "significant": false,
+      "material": false,
+      "decision_mode": "calibrated",
+      "threshold_used": "p_adj<0.05 [KS (holm)], effect>=0.05"
+    },
+    "dropoff_longitude": {
+      "statistic": 0.034331645569620255,
+      "p_value": 0.3386382821890924,
+      "drift_detected": false,
+      "effect_size": 0.034331645569620255,
+      "effect_floor": 0.05,
+      "p_value_adjusted": 0.627650330791263,
+      "significant": false,
+      "material": false,
+      "decision_mode": "calibrated",
+      "threshold_used": "p_adj<0.05 [KS (holm)], effect>=0.05"
+    },
+    "dropoff_latitude": {
+      "statistic": 0.03987042577675489,
+      "p_value": 0.1842341269437115,
+      "drift_detected": false,
+      "effect_size": 0.03987042577675489,
+      "effect_floor": 0.05,
+      "p_value_adjusted": 0.5527023808311344,
+      "significant": false,
+      "material": false,
+      "decision_mode": "calibrated",
+      "threshold_used": "p_adj<0.05 [KS (holm)], effect>=0.05"
+    },
+    "gender_id": {
+      "statistic": 0.022301538367531046,
+      "p_value": 0.000999000999000999,
+      "drift_detected": false,
+      "effect_size": 0.022301538367531046,
+      "effect_floor": 0.2,
+      "p_value_adjusted": 0.004995004995004995,
+      "significant": true,
+      "material": false,
+      "decision_mode": "calibrated",
+      "threshold_used": "p_adj<0.05 [PSI-bootstrap (holm)], effect>=0.2"
+    }
+  }
+}

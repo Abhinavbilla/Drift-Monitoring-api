@@ -1,0 +1,3 @@
+artifacts/*.pkl
+logs/*.jsonl
+logs/.cursor
