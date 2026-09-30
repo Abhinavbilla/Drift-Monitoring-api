@@ -29,8 +29,8 @@ right but the scope below (from the user directly) is authoritative.
 **New step order (user, 2026-09-30), from here:**
 1. **Step 3 — programmatic access** (PATs, file-parsing refactor +
    multipart upload endpoints, `DELETE /projects/{project_id}`, Python
-   client, end-to-end model-serving example). Full scope below. **IN
-   PROGRESS.**
+   client, end-to-end model-serving example). Full scope below.
+   **DONE (2026-09-30)** — see the detailed writeup after the scope list.
 2. **Step 5 — history, k-of-m sustained alerts, baseline versioning**,
    with **webhooks now newly in scope**: HMAC-SHA256 signed payloads,
    retries with backoff, delivered in the background (never blocking the
@@ -94,6 +94,66 @@ change; don't push.
 example's per-window drift output (actual numbers, not illustrative
 ones).
 
+**Step 3 completion writeup (2026-09-30) — all five sub-parts DONE, full
+suite 146/146 passing throughout, nothing pushed:**
+- **(a)** `auth/tokens.py` (token gen/hash/verify) + `db/crud.py`'s new
+  `api_tokens` table + `main.py`'s `verify_access` (session JWT or PAT,
+  auto-detected) / `verify_project_access` / `verify_model_access`
+  (PAT project-scope enforcement) + `scripts/create_token.py`. Real bug
+  caught before shipping: the prefix was originally generated with
+  `secrets.token_urlsafe`, whose alphabet includes `_` — a prefix
+  containing `_` would break the `split("_", 2)` parsing used to look it
+  up, silently failing auth for a fraction of minted tokens. Fixed by
+  generating the prefix with `token_hex` instead (0-9a-f only, can never
+  collide with the delimiter). 13 tests, `tests/test_api_tokens.py`.
+- **(b)** `ingest/readers.py` (dashboard.py's file-parsing moved out
+  verbatim, Streamlit dependency removed); two new endpoints,
+  `POST /fit/{project_id}/upload` and `POST /analyze/{project_id}/upload`
+  (CSV/Parquet, 200MB cap); both existing JSON endpoints refactored to
+  share their tail logic with the new upload endpoints (`_resolve_and_
+  persist_fit`, `_run_tabular_analysis`) rather than duplicating it.
+  15 + 9 tests (`test_ingest_readers.py`, `test_upload_endpoints.py`).
+- **(c)** `DELETE /projects/{project_id}`; `DELETE /models/{model_id}`
+  kept as a `deprecated=True` alias, identical behavior. 2 tests
+  (`test_delete_project.py`).
+- **(d)** `clients/python/` (`drift_monitor_client`): `DriftClient(base_url,
+  token).fit()/.analyze()`, urllib3 retry-with-backoff, automatic Parquet
+  upload above `large_frame_row_threshold` (default 10,000 rows). Real
+  bug caught while building (e): the JSON `fit()` path put every column
+  under `reference_data` only, so any column the server profiled as
+  categorical (e.g. `gender_id`) was silently dropped by a pre-existing
+  server-side quirk (main.py only retains a column under the dict it
+  arrived in — not touched, see (b)'s note below). Fixed by replicating
+  `utils/profiler.py`'s own classification threshold client-side and
+  pre-splitting columns before sending — NOT by submitting every column
+  under both dicts, which seemed simpler but crashes with a 500 (the
+  server `pd.concat()`s both dicts into one frame; a column in both
+  produces a duplicate column name). A SECOND bug surfaced fixing the
+  first: the heuristic's `series.dtype == object` check silently misses
+  every string column on pandas 3.0.3 (the actually-installed version;
+  requirements.txt still pins 2.2.2 — environment drift), which gives
+  string columns their own `str` dtype. Fixed with
+  `pd.api.types.is_string_dtype()`. 8 tests against a locally running
+  server, `clients/python/tests/test_client.py`.
+- **(e)** `examples/model_serving/`: full pipeline actually run, not just
+  written. 5,000-row reference (`tests/splits/reference_n5000.csv`) ->
+  `/fit` (`decision_mode="calibrated"`) -> `recommended_batch_size=869`
+  for every continuous feature -> 9,000 replayed predictions (3,000 each
+  from Apr/May/Jun 2016) through a real served model -> 10 complete
+  869-row windows analyzed -> 2 flagged real drift (window 4:
+  `dropoff_longitude`, D=0.0670; window 6: `pickup_latitude`, D=0.0659;
+  both Holm+floor gates clear). All 10 window reports committed as real
+  evidence (`examples/model_serving/reports/window_*.json`); see that
+  directory's README.md for the full table and how to re-run.
+- **Known gap, surfaced but deliberately NOT touched this pass**: neither
+  session-JWT auth nor the existing JSON `/fit` endpoint's
+  reference_data-vs-categorical_data column retention has any
+  cross-user ownership check or silent-drop fix applied — both are
+  pre-existing behavior, out of scope for "additive changes only," and
+  are noted here rather than fixed quietly. The PAT system enforces
+  project scope properly (new code, no existing behavior to preserve);
+  the Python client works around the column-retention quirk client-side.
+
 **Evidence-fix caveats (user, 2026-09-30 — record only, do NOT rerun
 anything now; revisit if/when this matters for a real decision):**
 1. **A/A multi-draw design caveat**: clean batches were drawn from the
@@ -122,11 +182,12 @@ anything now; revisit if/when this matters for a real decision):**
    minimum-reference-size report.
 
 **Where things stand (2026-09-30)**: Step 0, Step 1, Step 2 (a)/(b)/(c)
-(plus its six-item review and the evidence fixes above) are DONE — see
-their sections below for full detail. **Step 3 is now in progress** (see
-above). **(d) DCT calibration and (e) text/image smoke tests are not
-started** — they are now ordered AFTER Step 3 and Step 5 per the new step
-order above, not next.
+(plus its six-item review and the evidence fixes above), and **Step 3
+(all five sub-parts)** are DONE — see their sections for full detail.
+**Next up per the new step order: Step 5** (history, k-of-m alerts,
+baseline versioning, webhooks). **Step 2 (d) DCT calibration and (e)
+text/image smoke tests are NOT started** — ordered after Step 5, not
+next.
 
 **Decisions locked (user, 2026-09-29/30 — do not re-litigate, do not
 re-derive from data, just implement):**
