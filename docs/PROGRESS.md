@@ -51,10 +51,29 @@ test. Scope, in order:
    test file's cleanup fixture used an anchored `LIKE 'prefix_%'` pattern
    that silently stopped matching namespaced rows (`email::prefix_x`) --
    changed to `LIKE '%prefix_%'` across 7 files.
-2. History: `analysis_runs` table (statistics only, never raw rows), one
-   row per `/analyze` and upload-analyze call. `GET /history/{project_id}`
-   with since/until/feature/alert_only filters, pagination, per-feature
-   time series.
+2. **DONE.** History: `analysis_runs` table (statistics only, never raw
+   rows), one row per `/analyze` and upload-analyze call (the two
+   tabular endpoints that share `_run_tabular_analysis` -- text/image/
+   joint analyze are unchanged, matching item 3's later "both analyze
+   endpoints" scoping). Columns match the spec exactly, including ones
+   items 3/5/6 haven't built yet (`idempotency_key`, `schema_report`,
+   `sustained_alert` stored NULL; `baseline_version` hardcoded to 1 --
+   the only version that exists before item 5) so those items only ever
+   need to start writing real values into an already-existing column,
+   no further schema change. `payload_hash` is a sha256 digest of the
+   production payload (one-way, not the raw data itself) for item 3's
+   idempotency replay detection. `GET /history/{project_id}`:
+   since/until (lexicographic on the UTC ISO8601 `ts`, which sorts
+   identically to chronological order), `feature` (narrows runs to ones
+   that measured it and trims each run's `feature_metrics` to just it),
+   `alert_only`, `limit`/`offset` pagination (1-500, validated),
+   `feature_time_series` regrouping the returned page by feature,
+   oldest-first. New `tests/test_history.py` (11 tests: recording,
+   never-stores-raw-values, all four filters, pagination, and the
+   required two-user isolation test). Full suite green (198 backend).
+   Live-verified against the running server: a real `/analyze` +
+   `/history` response pair (see chat transcript; the full <=25-line
+   report comes after item 7, per instruction).
 3. Idempotency: optional `Idempotency-Key` header on both analyze
    endpoints, same-key-same-payload returns the stored result (no new
    row), same-key-different-payload is 409, 7-day expiry, scoped per

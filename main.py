@@ -1,6 +1,7 @@
 import sqlite3
 import jwt
 import binascii
+import hashlib
 import pandas as pd
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
@@ -371,6 +372,80 @@ def get_logs(project_id: str, client: dict = Depends(verify_project_access)):
             "is_ood": row[2]
         })
     return logs
+
+
+@app.get("/history/{project_id}", tags=["Analytics"])
+def get_analysis_history(
+    project_id: str,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    feature: Optional[str] = None,
+    alert_only: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    client: dict = Depends(verify_project_access),
+):
+    """Step 5 item 2: history of /analyze calls for a project -- statistics
+    only, never raw production rows (see analysis_runs.feature_results).
+    since/until compare lexicographically against each run's UTC ISO8601
+    timestamp (safe: ISO8601 sorts identically to chronological order).
+    feature narrows to runs that measured that feature and trims each
+    run's feature_metrics down to just it; alert_only keeps only runs
+    where system_alert fired. Pagination applies after every other
+    filter; feature_time_series regroups the returned page by feature,
+    oldest first, as a convenience over reassembling it from `runs`."""
+    _require_existing_project(client["internal_project_id"])
+    if not (1 <= limit <= 500):
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500.")
+    if offset < 0:
+        raise HTTPException(status_code=422, detail="offset must be >= 0.")
+
+    runs = crud.get_analysis_runs(client["internal_project_id"], since=since, until=until, alert_only=alert_only)
+    if feature is not None:
+        runs = [r for r in runs if feature in r["feature_results"]]
+
+    total = len(runs)
+    page = runs[offset: offset + limit]
+
+    def _narrowed_metrics(run):
+        if feature is not None:
+            return {feature: run["feature_results"][feature]} if feature in run["feature_results"] else {}
+        return run["feature_results"]
+
+    feature_time_series: Dict[str, List[dict]] = {}
+    for run in reversed(page):  # oldest first within the series
+        for feat_name, metrics in _narrowed_metrics(run).items():
+            feature_time_series.setdefault(feat_name, []).append({
+                "ts": run["ts"],
+                "statistic": metrics.get("statistic"),
+                "effect_size": metrics.get("effect_size"),
+                "p_value_adjusted": metrics.get("p_value_adjusted"),
+                "significant": metrics.get("significant"),
+                "material": metrics.get("material"),
+            })
+
+    runs_out = [{
+        "id": run["id"],
+        "ts": run["ts"],
+        "baseline_version": run["baseline_version"],
+        "batch_size": run["batch_size"],
+        "decision_mode": run["decision_mode"],
+        "system_alert": run["system_alert"],
+        "sustained_alert": run["sustained_alert"],
+        "feature_metrics": _narrowed_metrics(run),
+        "schema_report": run["schema_report"],
+    } for run in page]
+
+    return {
+        "project_id": project_id,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "runs": runs_out,
+        "feature_time_series": feature_time_series,
+    }
+
+
 # 1. Define the Expected Request Data
 class ProfileRequest(BaseModel):
     reference_data: Dict[str, List[Any]]
@@ -781,6 +856,30 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     )
 
     report = detector.analyze_production_window(production_data)
+
+    # Step 5 item 2: one history row per /analyze call, statistics only
+    # (never the raw production_data itself -- payload_hash is a one-way
+    # digest of it, kept for item 3's idempotency replay-detection, not
+    # for recovering the data). baseline_version is hardcoded to 1 until
+    # item 5 adds real versioning; idempotency_key/schema_report/
+    # sustained_alert are NULL until items 3/4/6 populate them for real.
+    batch_size = len(next(iter(production_data.values()), []))
+    payload_hash = hashlib.sha256(
+        json.dumps(production_data, sort_keys=True, default=str).encode()
+    ).hexdigest()
+    crud.insert_analysis_run(
+        project=internal_id,
+        baseline_version=1,
+        ts=datetime.now(timezone.utc).isoformat(),
+        batch_size=batch_size,
+        idempotency_key=None,
+        payload_hash=payload_hash,
+        decision_mode=calibration_config.decision_mode,
+        system_alert=report["system_alert_triggered"],
+        sustained_alert=None,
+        feature_results=report["feature_metrics"],
+        schema_report=None,
+    )
 
     # ==========================================
     # NEW: ASYNCHRONOUS ALERT TRIGGER

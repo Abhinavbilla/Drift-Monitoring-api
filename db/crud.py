@@ -77,6 +77,34 @@ def init_db():
         )
     ''')
 
+    # Step 5 item 2: one row per /analyze (and /analyze/upload) call --
+    # statistics only, never raw production rows. "id" is a plain
+    # autoincrement surrogate key so history entries never need a natural
+    # key; project stores the INTERNAL (owner-namespaced) project key, same
+    # as baselines/logs. baseline_version, idempotency_key, schema_report
+    # and sustained_alert are columns items 3/4/5/6 will populate for real
+    # -- item 2 writes them as NULL (or baseline_version=1, the only
+    # version that exists before item 5) since those features don't exist
+    # yet; this way item 3/4/5/6 only ever need to START writing real
+    # values into an already-existing column, no further schema change.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS analysis_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project TEXT NOT NULL,
+            baseline_version INTEGER,
+            ts TEXT NOT NULL,
+            batch_size INTEGER,
+            idempotency_key TEXT,
+            payload_hash TEXT,
+            decision_mode TEXT,
+            system_alert INTEGER,
+            sustained_alert INTEGER,
+            feature_results TEXT,
+            schema_report TEXT
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_runs_project_ts ON analysis_runs (project, ts)')
+
     # Self-healing migration for DBs created before the multimodal (v2.0)
     # columns existed — avoids requiring a separate manual migration step.
     for _column, ddl in [
@@ -490,3 +518,73 @@ def touch_api_token_last_used(token_id: str, when_iso: str):
     cursor.execute("UPDATE api_tokens SET last_used_at = ? WHERE id = ?", (when_iso, token_id))
     conn.commit()
     conn.close()
+
+
+def insert_analysis_run(
+    project: str, baseline_version: Optional[int], ts: str, batch_size: int,
+    idempotency_key: Optional[str], payload_hash: Optional[str], decision_mode: Optional[str],
+    system_alert: bool, sustained_alert: Optional[bool], feature_results: dict,
+    schema_report: Optional[dict],
+) -> int:
+    """Step 5 item 2: one row per /analyze call. feature_results/schema_report
+    are the already-aggregated statistics dicts the response itself returns
+    -- never raw production rows, per instruction."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO analysis_runs (project, baseline_version, ts, batch_size, idempotency_key, "
+        "payload_hash, decision_mode, system_alert, sustained_alert, feature_results, schema_report) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            project, baseline_version, ts, batch_size, idempotency_key, payload_hash, decision_mode,
+            1 if system_alert else 0,
+            None if sustained_alert is None else (1 if sustained_alert else 0),
+            json.dumps(feature_results) if feature_results is not None else None,
+            json.dumps(schema_report) if schema_report is not None else None,
+        ),
+    )
+    run_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return run_id
+
+
+def _row_to_analysis_run(row) -> Dict[str, Any]:
+    return {
+        "id": row[0], "project": row[1], "baseline_version": row[2], "ts": row[3],
+        "batch_size": row[4], "idempotency_key": row[5], "payload_hash": row[6],
+        "decision_mode": row[7], "system_alert": bool(row[8]),
+        "sustained_alert": None if row[9] is None else bool(row[9]),
+        "feature_results": json.loads(row[10]) if row[10] else {},
+        "schema_report": json.loads(row[11]) if row[11] else None,
+    }
+
+
+def get_analysis_runs(
+    project: str, since: Optional[str] = None, until: Optional[str] = None,
+    alert_only: bool = False,
+) -> List[Dict[str, Any]]:
+    """Newest first. since/until/alert_only are applied here in SQL; a
+    `feature` filter and pagination are the caller's job (main.py) since
+    they operate on the decoded feature_results JSON, not raw columns."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = (
+        "SELECT id, project, baseline_version, ts, batch_size, idempotency_key, payload_hash, "
+        "decision_mode, system_alert, sustained_alert, feature_results, schema_report "
+        "FROM analysis_runs WHERE project = ?"
+    )
+    params: List[Any] = [project]
+    if since:
+        query += " AND ts >= ?"
+        params.append(since)
+    if until:
+        query += " AND ts <= ?"
+        params.append(until)
+    if alert_only:
+        query += " AND system_alert = 1"
+    query += " ORDER BY ts DESC, id DESC"
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_row_to_analysis_run(r) for r in rows]
