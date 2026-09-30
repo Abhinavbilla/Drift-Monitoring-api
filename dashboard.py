@@ -8,16 +8,12 @@ import requests
 from streamlit_google_auth import Authenticate
 import os
 from dotenv import load_dotenv
-import time 
+import time
 import urllib.parse
 import io
-import csv
-import gzip
-import zipfile
-import importlib.util
-import time
 import base64
 import jwt
+import ingest.readers as ingest_readers
 DEFAULT_BASELINE_SAMPLE_SIZE = 50000
 # Mirrors drift/embedding_detector.py's thresholds (kept as a local constant
 # since the dashboard and backend are separately deployed services that only
@@ -116,221 +112,33 @@ def _backend_error_detail(response) -> str:
     return response.text
 
 def _is_module_available(module_name: str) -> bool:
-    """
-    Checks if a module can be imported without actually importing it.
-    Used to give a friendly install message instead of a raw ImportError
-    when optional dependencies (openpyxl, xlrd, pyarrow) are missing.
-    """
-    return importlib.util.find_spec(module_name) is not None
+    """Thin wrapper -- see ingest/readers.py (Step 3b: file parsing moved
+    there so both this dashboard and the new multipart upload endpoints
+    share one implementation)."""
+    return ingest_readers.is_module_available(module_name)
+
 
 def _read_csv_with_encoding_fallback(file_or_bytes, **kwargs):
-    """
-    Shared helper: tries multiple encodings until one works.
-    Accepts either a file-like object or raw bytes.
-    """
-    encodings = ['utf-8-sig', 'cp1252', 'latin1', 'iso-8859-1']
-    last_error = None
-
-    for enc in encodings:
-        try:
-            if isinstance(file_or_bytes, bytes):
-                buf = io.BytesIO(file_or_bytes)
-            else:
-                file_or_bytes.seek(0)
-                buf = file_or_bytes
-            return pd.read_csv(buf, encoding=enc, **kwargs)
-        except UnicodeDecodeError as e:
-            last_error = e
-            continue
-        except Exception as e:
-            last_error = e
-            continue
-
-    raise ValueError(f"Could not decode file with any common encoding. Last error: {last_error}")
+    """Thin wrapper preserving the old dual bytes-or-file-like signature
+    some call sites here still use; delegates to ingest/readers.py."""
+    raw_bytes = file_or_bytes if isinstance(file_or_bytes, bytes) else file_or_bytes.getvalue()
+    return ingest_readers.read_csv_with_encoding_fallback(raw_bytes, **kwargs)
 
 
 def read_uploaded_file(file):
     """
-    Reads a Streamlit UploadedFile object.
-    Supports: CSV, TSV, Excel (.xlsx, .xls), JSON, JSON Lines, Parquet,
-    ARFF, libsvm .dat, and gzip/zip compressed CSVs.
-    Auto-detects encoding for text files.
+    Reads a Streamlit UploadedFile object. See ingest/readers.py for the
+    actual parsing logic (Step 3b) -- this wrapper just adapts the
+    Streamlit UploadedFile's (.name, .getvalue()) shape to the shared
+    (filename, raw_bytes) interface, and turns the two "friendly install
+    message" cases into a dashboard-specific st.error before re-raising
+    (matching the original UX exactly).
     """
-    filename = file.name.lower()
-    raw_bytes = file.getvalue()
-
-    # --------------------------------------------------------
-    # 1. ARFF (Weka) – handles % comments and @ATTRIBUTE headers
-    # --------------------------------------------------------
-    if filename.endswith(".arff"):
-        encodings = ['utf-8', 'cp1252', 'latin1', 'iso-8859-1']
-        content = None
-        for enc in encodings:
-            try:
-                content = raw_bytes.decode(enc).splitlines()
-                break
-            except UnicodeDecodeError:
-                continue
-        if content is None:
-            raise ValueError("Could not decode .arff file with any common encoding.")
-
-        column_names = []
-        data_rows = []
-        in_data = False
-
-        for line in content:
-            line = line.strip()
-            if not line or line.startswith('%'):
-                continue
-            if line.upper().startswith('@RELATION'):
-                continue
-            if line.upper().startswith('@ATTRIBUTE'):
-                parts = line.split()
-                if len(parts) >= 3:
-                    attr = parts[1].strip("'\"")
-                    column_names.append(attr)
-                continue
-            if line.upper().startswith('@DATA'):
-                in_data = True
-                continue
-            if in_data and line:
-                # FIX: Use csv.reader instead of naive line.split(',') so
-                # quoted strings with embedded commas (e.g. "Smith, John")
-                # are parsed correctly — common in real-world ARFF exports.
-                reader = csv.reader([line], skipinitialspace=True)
-                row = next(reader)
-                data_rows.append([x.strip() for x in row])
-
-        if not column_names:
-            # Fallback – treat as normal CSV
-            return _read_csv_with_encoding_fallback(file, sep=None, engine='python')
-
-        df = pd.DataFrame(data_rows, columns=column_names)
-
-        # FIX: pd.to_numeric(errors='ignore') was removed in pandas 3.0.
-        # Convert column-by-column with explicit try/except instead.
-        for col in df.columns:
-            try:
-                df[col] = pd.to_numeric(df[col])
-            except (ValueError, TypeError):
-                pass  # leave as text — intended "ignore" behaviour
-        return df
-
-    # --------------------------------------------------------
-    # 2. DAT (libsvm style, with proper fallback to generic text)
-    # --------------------------------------------------------
-    if filename.endswith(".dat"):
-        encodings = ['utf-8', 'cp1252', 'latin1', 'iso-8859-1']
-        content = None
-        for enc in encodings:
-            try:
-                content = raw_bytes.decode(enc).splitlines()
-                break
-            except UnicodeDecodeError:
-                continue
-        if content is None:
-            raise ValueError("Could not decode .dat file with any common encoding.")
-
-        parsed_rows = []
-        for line in content:
-            parts = line.strip().split()
-            if not parts:
-                continue
-            row = {}
-            is_libsvm = False
-            for token in parts[1:]:
-                if ':' in token:
-                    is_libsvm = True
-                    idx, val = token.split(':')
-                    row[f"Sensor_{idx}"] = float(val)
-            if is_libsvm:
-                parsed_rows.append(row)
-
-        if parsed_rows:
-            return pd.DataFrame(parsed_rows)
-
-        # FIX: Previously this just did file.seek(0) and returned None.
-        # Now it actually falls through to whitespace/CSV parsing.
-        try:
-            # Most non-libsvm .dat files are whitespace-delimited
-            return _read_csv_with_encoding_fallback(file, sep=r'\s+', engine='python')
-        except Exception:
-            # Final fallback: try comma-separated in case it's CSV-like
-            return _read_csv_with_encoding_fallback(file, sep=None, engine='python')
-
-    # --------------------------------------------------------
-    # 3. Excel (.xlsx, .xls) – reads all sheets, concatenates them
-    # --------------------------------------------------------
-    if filename.endswith((".xlsx", ".xls")):
-        engine = 'openpyxl' if filename.endswith('.xlsx') else 'xlrd'
-        required_module = 'openpyxl' if filename.endswith('.xlsx') else 'xlrd'
- 
-        if not _is_module_available(required_module):
-            st.error(
-                f"Please install {required_module} for Excel support: "
-                f"`pip install {required_module}`"
-            )
-            raise ImportError(f"Missing {required_module}")
- 
-        # Read ALL sheets and concatenate, not just the first one.
-        # Production Excel exports often have data split across sheets.
-        all_sheets = pd.read_excel(io.BytesIO(raw_bytes), sheet_name=None, engine=engine)
-        if len(all_sheets) == 1:
-            return next(iter(all_sheets.values()))
-        return pd.concat(all_sheets.values(), ignore_index=True)
-
-    # --------------------------------------------------------
-    # 4. JSON and JSON Lines (.json, .jsonl, .ndjson)
-    # --------------------------------------------------------
-    if filename.endswith((".json", ".jsonl", ".ndjson")):
-        # FIX: Standard JSON and JSON Lines need different read modes.
-        # Try standard JSON first, fall back to lines=True for JSONL exports
-        # (common in production logging systems).
-        try:
-            return pd.read_json(io.BytesIO(raw_bytes))
-        except ValueError:
-            return pd.read_json(io.BytesIO(raw_bytes), lines=True)
-
-    # --------------------------------------------------------
-    # 5. Parquet
-    # --------------------------------------------------------
-    if filename.endswith(".parquet"):
-        try:
-            import pyarrow  # noqa: F401
-            return pd.read_parquet(io.BytesIO(raw_bytes))
-        except ImportError:
-            st.error("Please install pyarrow for Parquet support: `pip install pyarrow`")
-            raise
-
-    # --------------------------------------------------------
-    # 6. TSV (tab-separated)
-    # --------------------------------------------------------
-    if filename.endswith(".tsv"):
-        return _read_csv_with_encoding_fallback(file, sep='\t', engine='python')
-
-    # --------------------------------------------------------
-    # 7. Compressed CSV (.csv.gz, .gz)
-    # --------------------------------------------------------
-    if filename.endswith(".gz"):
-        decompressed = gzip.decompress(raw_bytes)
-        return _read_csv_with_encoding_fallback(decompressed, sep=None, engine='python')
-
-    # --------------------------------------------------------
-    # 8. Zipped CSV (.zip containing a single CSV/TXT file)
-    # --------------------------------------------------------
-    if filename.endswith(".zip"):
-        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as z:
-            inner_names = [n for n in z.namelist() if not n.endswith('/')]
-            if not inner_names:
-                raise ValueError("Zip file contains no readable files.")
-            with z.open(inner_names[0]) as f:
-                inner_bytes = f.read()
-            return _read_csv_with_encoding_fallback(inner_bytes, sep=None, engine='python')
-
-    # --------------------------------------------------------
-    # 9. CSV / TXT / other text – auto-detect delimiter and encoding
-    # --------------------------------------------------------
-    return _read_csv_with_encoding_fallback(file, sep=None, engine='python')
+    try:
+        return ingest_readers.read_uploaded_file(file.name, file.getvalue())
+    except ImportError as e:
+        st.error(str(e))
+        raise
 
 # ---------------------------------------------------------
 # v2.0: TEXT / IMAGE (EMBEDDING-BASED) MONITORING HELPERS

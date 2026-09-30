@@ -3,9 +3,11 @@ import jwt
 import binascii
 import pandas as pd
 from datetime import datetime, timezone
-from typing import Dict, List, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status
+from typing import Dict, List, Any, Optional
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import json
+import ingest.readers as ingest_readers
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from PIL import UnidentifiedImageError
@@ -332,9 +334,39 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     #   resolve to CalibrationConfig's own "legacy" default; only a project
     #   created from this point on gets an explicit "calibrated" config
     #   written at creation time.
+    return _resolve_and_persist_fit(
+        project_id, inferred_feature_types, continuous_features, categorical_features,
+        combined_df, request.calibration_config, client,
+    )
+
+
+def _resolve_and_persist_fit(
+    project_id: str, inferred_feature_types: dict, continuous_features: dict,
+    categorical_features: dict, combined_df: pd.DataFrame,
+    calibration_config_request: Any, client: dict,
+) -> FitBaselineResponse:
+    """Shared tail of /fit/{project_id} (JSON body) and
+    /fit/{project_id}/upload (multipart file) -- both endpoints build
+    inferred_feature_types/continuous_features/categorical_features their
+    own way (see each caller), then converge here: resolve the
+    calibration config, persist the baseline, and build the response."""
+    # 8. Resolve the calibration config.
+    # - Caller provided one explicitly (even {}): resolve and store it,
+    #   whether this is a new or existing project.
+    # - Caller omitted it AND the project already exists (a re-fit): leave
+    #   whatever it already has untouched (crud.insert_baseline's __UNSET__
+    #   sentinel) -- an existing project's decision_mode never changes just
+    #   because someone re-fit it without mentioning calibration.
+    # - Caller omitted it AND this is a brand-new project: apply the
+    #   new-project default explicitly (NEW_PROJECT_DEFAULT_DECISION_MODE =
+    #   "calibrated", decided 2026-09-30) -- existing projects fit before
+    #   this change keep calibration_config=NULL in the DB and so still
+    #   resolve to CalibrationConfig's own "legacy" default; only a project
+    #   created from this point on gets an explicit "calibrated" config
+    #   written at creation time.
     is_new_project = crud.get_baseline(project_id) is None
-    if request.calibration_config is not None:
-        resolved_calibration_config = CalibrationConfig.from_dict(request.calibration_config).to_dict()
+    if calibration_config_request is not None:
+        resolved_calibration_config = CalibrationConfig.from_dict(calibration_config_request).to_dict()
     elif is_new_project:
         resolved_calibration_config = CalibrationConfig(decision_mode=NEW_PROJECT_DEFAULT_DECISION_MODE).to_dict()
     else:
@@ -404,6 +436,73 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
         cleaning_summary=cleaning_summary,
         calibration_info=calibration_info,
     )
+MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024  # 200MB
+
+
+@app.post("/fit/{project_id}/upload", response_model=FitBaselineResponse, tags=["Machine Learning"])
+async def fit_model_baseline_upload(
+    project_id: str,
+    file: UploadFile = File(..., description="CSV or Parquet file of reference data."),
+    calibration_config: Optional[str] = Form(None, description="Optional calibration_config, JSON-encoded."),
+    client: dict = Depends(verify_project_access),
+):
+    """
+    Multipart-upload counterpart to /fit/{project_id} for large reference
+    sets that are awkward to inline as JSON -- CSV or Parquet, up to
+    MAX_UPLOAD_SIZE_BYTES. Every column is profiled and classified as
+    continuous or categorical from the uploaded frame itself (there is no
+    caller-provided pre-split to reconcile against, unlike the JSON
+    endpoint), then persisted via the same shared tail as /fit/{project_id}.
+    """
+    raw_bytes = await file.read()
+    if len(raw_bytes) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File exceeds the {MAX_UPLOAD_SIZE_BYTES // (1024*1024)}MB upload limit.",
+        )
+    if not raw_bytes:
+        raise ValidationError("Uploaded file is empty.")
+
+    try:
+        combined_df = ingest_readers.read_uploaded_file(file.filename or "upload.csv", raw_bytes)
+    except (ValueError, ImportError) as e:
+        raise ValidationError(f"Could not parse uploaded file: {e}")
+
+    if combined_df.empty:
+        raise ValidationError("Uploaded file parsed to zero rows.")
+
+    detailed_profiles = profile_columns(combined_df)
+    inferred_feature_types = {}
+    for p in detailed_profiles:
+        if p["monitor"] is True:
+            inferred_feature_types[p["name"]] = "continuous"
+        elif p["monitor"] == "Categorical":
+            inferred_feature_types[p["name"]] = "categorical"
+
+    # Split from the PROFILED classification of the combined frame itself
+    # (not from a caller-provided dict, since there isn't one here) -- so
+    # every classified column lands somewhere, continuous or categorical.
+    continuous_features = {
+        col: combined_df[col].tolist() for col, ftype in inferred_feature_types.items() if ftype == "continuous"
+    }
+    categorical_features = {
+        col: [str(v) for v in combined_df[col].tolist()]
+        for col, ftype in inferred_feature_types.items() if ftype == "categorical"
+    }
+
+    parsed_calibration_config = None
+    if calibration_config:
+        try:
+            parsed_calibration_config = json.loads(calibration_config)
+        except json.JSONDecodeError as e:
+            raise ValidationError(f"calibration_config is not valid JSON: {e}")
+
+    return _resolve_and_persist_fit(
+        project_id, inferred_feature_types, continuous_features, categorical_features,
+        combined_df, parsed_calibration_config, client,
+    )
+
+
 # ---------------------------------------------------------
 # ENDPOINT 2: REAL-TIME ANOMALY TRIPWIRE
 # ---------------------------------------------------------
@@ -444,9 +543,17 @@ def analyze_production_batch(
     client: dict = Depends(verify_project_access) # <-- 2. Fixed dependency
 ):
     """
-    Analyze a large batch of recent production data using KS Tests and TVD 
+    Analyze a large batch of recent production data using KS Tests and TVD
     to detect long-term mathematical drift.
     """
+    return _run_tabular_analysis(project_id, request.production_data, client, background_tasks)
+
+
+def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
+                           background_tasks: BackgroundTasks) -> AnalyzeBatchResponse:
+    """Shared tail of /analyze/{project_id} (JSON body) and
+    /analyze/{project_id}/upload (multipart file) -- both converge on the
+    same flat {feature_name: [values...]} shape."""
     state = crud.get_baseline(project_id)
     if not state:
         raise HTTPException(status_code=404, detail="Baseline not found. Call /fit first.")
@@ -462,20 +569,20 @@ def analyze_production_batch(
         feature_types=state["feature_types"]
     )
 
-    report = detector.analyze_production_window(request.production_data)
-    
+    report = detector.analyze_production_window(production_data)
+
     # ==========================================
     # NEW: ASYNCHRONOUS ALERT TRIGGER
     # ==========================================
     if report["system_alert_triggered"]:
         # We extract the features that actually drifted to include in the email
         drifted_features = [f for f, metrics in report["feature_metrics"].items() if metrics["drift_detected"]]
-        
+
         # Add the email dispatch to the background queue so the API responds instantly
         background_tasks.add_task(
-            send_drift_email, 
-            project_id=project_id, 
-            owner_email=client["email"], 
+            send_drift_email,
+            project_id=project_id,
+            owner_email=client["email"],
             flagged_features=drifted_features
         )
     # ==========================================
@@ -484,6 +591,37 @@ def analyze_production_batch(
         system_alert_triggered=report["system_alert_triggered"],
         feature_metrics=report["feature_metrics"]
     )
+
+
+@app.post("/analyze/{project_id}/upload", response_model=AnalyzeBatchResponse, tags=["Analytics"])
+async def analyze_production_batch_upload(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="CSV or Parquet file of production data."),
+    client: dict = Depends(verify_project_access),
+):
+    """Multipart-upload counterpart to /analyze/{project_id} -- CSV or
+    Parquet, up to MAX_UPLOAD_SIZE_BYTES."""
+    raw_bytes = await file.read()
+    if len(raw_bytes) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File exceeds the {MAX_UPLOAD_SIZE_BYTES // (1024*1024)}MB upload limit.",
+        )
+    if not raw_bytes:
+        raise ValidationError("Uploaded file is empty.")
+
+    try:
+        df = ingest_readers.read_uploaded_file(file.filename or "upload.csv", raw_bytes)
+    except (ValueError, ImportError) as e:
+        raise ValidationError(f"Could not parse uploaded file: {e}")
+
+    if df.empty:
+        raise ValidationError("Uploaded file parsed to zero rows.")
+
+    production_data = {col: df[col].tolist() for col in df.columns}
+    return _run_tabular_analysis(project_id, production_data, client, background_tasks)
+
 
 # ---------------------------------------------------------
 # ENDPOINTS: TEXT DRIFT MONITORING (v2.0 — Domain Classifier Test)
