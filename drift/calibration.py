@@ -96,6 +96,27 @@ def minimum_detectable_d_at_fit_time(m: int, alpha: float = DEFAULT_ALPHA) -> fl
     return ks_c_alpha(alpha) / math.sqrt(m)
 
 
+def recommended_batch_size(m: int, floor: float, alpha: float = DEFAULT_ALPHA) -> Optional[int]:
+    """Smallest integer n such that c(alpha)*sqrt((n+m)/(n*m)) <= floor --
+    i.e. the smallest future /analyze batch size at which this reference
+    could, in principle, resolve an effect as small as the configured
+    floor. Solving c^2*(n+m) <= floor^2*n*m for n gives
+    n >= c^2*m / (floor^2*m - c^2), valid only when floor^2*m > c^2 (i.e.
+    floor > minimum_detectable_d_at_fit_time(m, alpha) -- otherwise no
+    finite batch size can ever reach this floor with this reference, and
+    this returns None rather than a misleading number."""
+    if m <= 0:
+        raise ValueError("m must be positive.")
+    if floor <= 0:
+        raise ValueError("floor must be positive.")
+    c = ks_c_alpha(alpha)
+    denom = floor ** 2 * m - c ** 2
+    if denom <= 0:
+        return None  # unreachable at any batch size with this reference
+    n_min = (c ** 2 * m) / denom
+    return math.ceil(n_min)
+
+
 # ---------------------------------------------------------------------------
 # Multiple-testing correction
 # ---------------------------------------------------------------------------

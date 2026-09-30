@@ -23,6 +23,7 @@ from drift.calibration import (
     ks_c_alpha,
     minimum_detectable_d,
     psi_bootstrap_pvalue,
+    recommended_batch_size,
 )
 
 
@@ -128,6 +129,43 @@ class TestMinimumDetectableD:
         assert ks_c_alpha(0.05) == 1.36
         assert ks_c_alpha(0.01) == 1.63
         assert ks_c_alpha(0.10) == 1.22
+
+
+class TestRecommendedBatchSize:
+    def test_boundary_crosses_exactly_at_recommended_n(self):
+        """The whole point of the formula: min_detectable_d at the
+        recommended n must be <= floor, and at n-1 it must be > floor."""
+        for m, floor in [(5000, 0.05), (50000, 0.05), (5000, 0.02), (1000, 0.1)]:
+            n_rec = recommended_batch_size(m, floor)
+            assert n_rec is not None
+            assert minimum_detectable_d(n_rec, m) <= floor
+            assert minimum_detectable_d(n_rec - 1, m) > floor
+
+    def test_matches_hand_computed_example(self):
+        """m=5000, floor=0.05, alpha=0.05 -- hand-solved n >= c^2*m/(floor^2*m-c^2)
+        = 1.8496*5000/(0.0025*5000-1.8496) = 9248/10.6504 ~= 868.4 -> 869."""
+        assert recommended_batch_size(5000, 0.05) == 869
+
+    def test_infeasible_returns_none(self):
+        """A reference too small to ever reach the floor (floor below the
+        fit-time n->infinity floor) has no finite recommended batch size."""
+        assert recommended_batch_size(100, 0.01) is None
+
+    def test_larger_reference_needs_smaller_batch(self):
+        n_small_ref = recommended_batch_size(5000, 0.05)
+        n_large_ref = recommended_batch_size(50000, 0.05)
+        assert n_large_ref < n_small_ref
+
+    def test_tighter_floor_needs_larger_batch(self):
+        n_loose = recommended_batch_size(5000, 0.05)
+        n_tight = recommended_batch_size(5000, 0.02)
+        assert n_tight > n_loose
+
+    def test_rejects_nonpositive_inputs(self):
+        with pytest.raises(ValueError):
+            recommended_batch_size(0, 0.05)
+        with pytest.raises(ValueError):
+            recommended_batch_size(5000, 0)
 
 
 class TestTwoGateLegacyReducesToToday:

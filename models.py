@@ -30,6 +30,14 @@ class FeatureCalibrationInfo(BaseModel):
                     "no matter how large future production batches are. A prompt to enlarge the "
                     "reference or raise the floor, not an error. False/None otherwise."
     )
+    recommended_batch_size: Optional[int] = Field(
+        default=None,
+        description="The smallest /analyze batch size (n) at which this reference could, in principle, "
+                    "resolve an effect as small as the configured floor: the smallest n with "
+                    "c(alpha)*sqrt((n+m)/(n*m)) <= floor. None if reference_too_small_for_floor is True "
+                    "(no finite batch size would help -- enlarge the reference or raise the floor "
+                    "instead). Continuous features only."
+    )
 
 class FitBaselineResponse(BaseModel):
     status: str

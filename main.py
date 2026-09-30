@@ -23,7 +23,9 @@ from models import (
 from db import crud
 from drift.detector import compute_iqr_anomalies, DistributionDetector
 from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES
-from drift.calibration import CalibrationConfig, minimum_detectable_d_at_fit_time, NEW_PROJECT_DEFAULT_DECISION_MODE
+from drift.calibration import (
+    CalibrationConfig, minimum_detectable_d_at_fit_time, recommended_batch_size, NEW_PROJECT_DEFAULT_DECISION_MODE,
+)
 from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
 from adapters.image import ImageAdapter
@@ -294,10 +296,12 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
             if m > 0:
                 min_d = minimum_detectable_d_at_fit_time(m, active_config.alpha)
                 floor = active_config.effect_floor_for(feature, "ks_d")
+                too_small = bool(min_d > floor)
                 calibration_info[feature] = FeatureCalibrationInfo(
                     minimum_detectable_d=min_d,
                     effect_floor=floor,
-                    reference_too_small_for_floor=bool(min_d > floor),
+                    reference_too_small_for_floor=too_small,
+                    recommended_batch_size=None if too_small else recommended_batch_size(m, floor, active_config.alpha),
                 )
         else:
             floor = active_config.effect_floor_for(feature, "psi")

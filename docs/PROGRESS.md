@@ -105,11 +105,25 @@ treated as final:**
 6. Verify `/fit` returns, per KS feature: the floor, `minimum_detectable_d`,
    and a new `recommended_batch_size` (smallest n with
    `c(alpha)*sqrt((n+m)/(nm)) <= floor`) — add if missing (additive field).
+   **DONE (2026-09-30)**: `minimum_detectable_d`/`effect_floor` already
+   existed; `recommended_batch_size` was missing, added.
+   `drift/calibration.py`'s new `recommended_batch_size(m, floor, alpha)`
+   solves `c^2*(n+m) <= floor^2*n*m` for the smallest integer n (returns
+   `None`, not a misleading number, when `floor <= minimum_detectable_d_at_fit_time(m,alpha)`
+   — no finite batch size would ever reach that floor with that reference).
+   Verified: boundary crosses exactly (m=5000, floor=0.05 -> n=869; D at
+   n=869 is 0.04998 <= 0.05, at n=868 is 0.05001 > 0.05). 6 new tests in
+   `tests/test_calibration.py::TestRecommendedBatchSize`. Wired into
+   `models.py`'s `FeatureCalibrationInfo` and `main.py`'s `/fit` handler;
+   confirmed live via the actual running backend (not just unit tests):
+   `/fit` now returns `{"minimum_detectable_d": 0.0192, "effect_floor": 0.05,
+   "reference_too_small_for_floor": false, "recommended_batch_size": 869}`
+   for a 5,000-row reference. Full suite: 99/99 passing.
 
-Items 1-3 are offline from already-stored results; items 4-6 need new
-work/runs. Commit per logical change; don't push. Stop after these checks
-and report the numbers — don't proceed to (d)/(e) or the programmatic-
-integration work without a further go-ahead.
+Items 1-3 are offline from already-stored results; items 4-5 need new
+work/runs, item 6 is done. Commit per logical change; don't push. Stop
+after these checks and report the numbers — don't proceed to (d)/(e) or
+the programmatic-integration work without a further go-ahead.
 
 ---
 
