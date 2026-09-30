@@ -8,11 +8,29 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
-**Where things stand**: Step 0 and Step 1 are done. Step 2's core
-statistical engine (`drift/calibration.py`) is built and tested (29 tests,
-68/68 full suite). Nothing is wired into the live API yet — `/fit` and
-`/analyze` behave exactly as before this session. Session paused here by
-user request; resume with the ordered work list below.
+**Project goal, for context on every decision below (recorded 2026-09-30):**
+this API exists so ML teams can integrate it into their model-serving
+pipelines to monitor **data drift of model inputs only** — no labels, no
+accuracy/performance tracking, no ground-truth-outcome monitoring of any
+kind. Every design choice (batch-based, not streaming; statistical
+significance + materiality, not accuracy metrics; per-feature not
+per-prediction) should be read against that scope.
+
+**Next priority AFTER the checks below (2026-09-30): programmatic
+integration** — personal access tokens, upload endpoints, a Python client,
+and an end-to-end model-serving example, so a team can wire this into a
+real pipeline without the dashboard. **Do NOT start this in this pass** —
+it will be requested separately. This supersedes/absorbs what was
+previously sketched as "Step 3" in `docs/step2_proposal.md`'s references;
+treat that as directionally right but not yet scoped in detail.
+
+**Where things stand (2026-09-30)**: Step 0, Step 1, and Step 2 (a)/(b)/(c)
+are DONE — see their sections below for full detail. The user is now
+running a rigorous methodological review of (c)'s side-by-side before
+treating it as final (see "Step 2 (c) review checks" below for that work,
+in progress). **(d) DCT calibration and (e) text/image smoke tests are not
+started and should not be started until the review checks below are done
+and reviewed.**
 
 **Decisions locked (user, 2026-09-29/30 — do not re-litigate, do not
 re-derive from data, just implement):**
@@ -22,16 +40,22 @@ re-derive from data, just implement):**
   default chosen *independent* of the Citi Bike knife-edge cluster —
   explicitly not tuned to this evaluation's data, per ground rule 6).
   Floors are **per-project, per-feature overridable**. At `/fit`, each
-  feature's floor must be shown next to the minimum detectable D for the
-  current reference size (`drift/calibration.py`'s `minimum_detectable_d`)
-  — **API response field, not a dashboard UI element** (see UI decision
-  below). **PSI floor = 0.2** (industry convention). **DCT AUC floor = 0.65**,
-  labeled provisional/unvalidated until Step 8's text/image validation runs.
-- **Default decision_mode = "legacy"**, for both new and existing projects,
-  for now. Existing projects stay legacy **permanently**. Switching the
-  default for *new* projects to `"calibrated"` requires the user's explicit
-  approval after reviewing the calibrated-mode side-by-side (see step (c)
-  below) — do not flip this default unilaterally.
+  feature's floor is shown next to the minimum detectable D for the
+  current reference size — **API response field, not a dashboard UI
+  element** (see UI decision below). **PSI floor = 0.2** (industry
+  convention). **DCT AUC floor = 0.65**, labeled provisional/unvalidated
+  until Step 8's text/image validation runs.
+- **Default decision_mode for NEW projects = "calibrated"** (changed
+  2026-09-30, after reviewing (c)'s side-by-side: calibrated held
+  precision=recall=1.000 at every batch size ≥3,000 vs. legacy's precision
+  collapsing to 0.33-0.51 at scale, and A/A system false-alarm rate
+  0.000-0.010 vs. legacy's 0.02-0.27 — see the Step 2 (c) section for
+  numbers). **Existing projects stay legacy PERMANENTLY, with no
+  migration** — this is a default for newly-created projects only, never
+  retroactive. Implemented with a test (`tests/test_calibration_db.py` or
+  a new test — see Step 2 (a)/(b) section for exact location) confirming
+  new-project-with-no-explicit-config resolves to calibrated while a
+  project fit before this change stays legacy.
 - **DCT calibration default = "precomputed"**; permutation is opt-in only.
   Document the half-size-pseudo-reference bias explicitly wherever this is
   surfaced (conservative: fewer false alarms, slightly less power). For a
@@ -41,104 +65,51 @@ re-derive from data, just implement):**
 **UI decision (user, 2026-09-30): the Streamlit dashboard is being replaced
 by a new React + TypeScript frontend after Step 3.**
 - **Build no new Streamlit UI from this point forward, for any step.**
-- Step 2's `/fit` additions (min-detectable-D, floors) are **API response
-  fields only** — no dashboard rendering work. The response field additions
-  from the original Step 2 spec (`effect_size`, `effect_floor`,
-  `p_value_adjusted`, `significant`, `material`, `decision_mode`,
-  `threshold_used`) are likewise API-only.
-- This also means: when Step 3's PAT token-management page and any other
-  previously-planned dashboard work comes up, check with the user whether
-  it's still in scope given the upcoming React rewrite, rather than
-  assuming the old plan still calls for new `dashboard.py` code.
+- All Step 2 response-field additions are **API response fields only** —
+  no dashboard rendering work.
+- When PAT/upload-endpoint/client work (see "Next priority" above) comes
+  up, it targets the API and a Python client, not `dashboard.py`.
 
-**Remaining Step 2 work, in this exact order (per user, 2026-09-30) — do
-not reorder, in particular do not start DCT work before (c):**
+**Step 2 (a)/(b)/(c): DONE.** Full detail, numbers, and commit hashes in
+the "Step 2 — Two-gate calibrated decisions" section below. Do not re-read
+this HANDOFF as the source of truth for their status — it's in that section.
 
-**(a) DB schema + migration** to persist `CalibrationConfig`
-(`drift/calibration.py`) per project. Add a `calibration_config TEXT`
-column to `baselines` via the existing self-healing migration pattern in
-`db/crud.py::init_db()` (see how `modality`/`embedding_reference`/
-`embedding_model` were added — `ALTER TABLE ... ADD COLUMN`, wrapped in
-`try/except sqlite3.OperationalError: pass`). Existing rows get `NULL` →
-`CalibrationConfig.from_dict(None)` → legacy, no data migration needed.
+**Step 2 (c) review checks (user, 2026-09-30) — IN PROGRESS, before (c) is
+treated as final:**
+1. Rewrite `results/step2_side_by_side.md`'s claims: at D_gt=0.05,
+   calibrated's gate and the ground truth share one threshold, so
+   precision/recall=1.000 is nearly true by construction (only
+   `trip_duration`, D=0.092, is a true positive, far above the floor) —
+   state this shows the materiality gate removes legacy's false positives,
+   not "perfect accuracy."
+2. A/A decomposition per batch/reference size: Gate-1-only rate
+   (`significant`), Gate-2-only/combined rate, raw counts, Clopper-Pearson
+   95% CIs. State the combined 0-1% mostly reflects the materiality gate,
+   and that A/A batches are iid (don't capture temporal variation).
+3. 2x2 ablation {Holm on/off} x {floor on/off} at D_gt=0.05: precision,
+   recall, A/A system rate, attributing each improvement to its gate —
+   computable offline from already-stored `p_value`/`p_value_adjusted`/
+   `effect_size`.
+4. NEW RUN: near-floor power curve + reference-draw variability. Normal-
+   score-tilted D_pop in {0.02,0.03,0.04,0.05,0.06,0.08,0.10}, every
+   continuous feature, >=10 independent reference draws per reference size,
+   >=20 disjoint batches per draw at n in {1000,5000,20000}. Report
+   detection(material) rate vs. D_pop with 95% CIs and between-draw
+   variance. Expect a soft ramp around 0.05, report what actually happens.
+5. Redo the data-collapse analysis as a binomial GLM (probit/logit) of
+   detection on x=sqrt(nm/(n+m))*D_pop, then add feature and m as
+   covariates with likelihood-ratio tests — the earlier within-bin-std
+   check conflated curve slope with noise; theory only guarantees
+   *approximate* collapse (power depends on the shape of F-G, not just
+   sup|F-G|). Use item 4's multi-reference-draw data if possible.
+6. Verify `/fit` returns, per KS feature: the floor, `minimum_detectable_d`,
+   and a new `recommended_batch_size` (smallest n with
+   `c(alpha)*sqrt((n+m)/(nm)) <= floor`) — add if missing (additive field).
 
-**(b) Wire the engine into `drift/detector.py` and the tabular
-`/fit`+`/analyze` endpoints**, additive response fields only (nothing
-existing removed or renamed):
-- KS: run `apply_two_gate` per continuous feature; correct the batch's
-  p-values across features via `holm_adjust`/`bh_adjust` per the project's
-  `multiple_testing` setting before evaluating Gate 1.
-- PSI: replace the internal decision with `psi_bootstrap_pvalue` when
-  `decision_mode="calibrated"`; **legacy mode must keep using today's flat
-  `PSI > 0.2` check verbatim** — don't route legacy through the bootstrap
-  path even to reproduce the same threshold, since that would change
-  behavior in principle (bootstrap p-values have sampling noise même at the
-  same nominal cutoff). Verify this with an exact-output regression test
-  against current fixtures before doing anything else in (b).
-- `/fit`: add the minimum-detectable-D + configured floor per feature to
-  the response (see UI decision — response field only).
-- `/analyze`: add `effect_size`, `effect_floor`, `p_value_adjusted`,
-  `significant`, `material`, `decision_mode`, `threshold_used` to each
-  feature's metrics block, alongside the existing fields.
-
-**(c) Calibrated re-run of the Step 1 suite + legacy/calibrated
-side-by-side** (`results/tabular_validation_calibrated.json`) — **this
-unblocks the user's default-mode decision, so it must happen before any
-DCT work (d), not after.** Reuse `scripts/step1_validation.py`'s
-methodology and the *same* normal-score-tilted synthetic data
-(`tests/splits/*`, `results/tabular_validation_severity_v3.json`'s method)
-so legacy and calibrated are compared on identical inputs — no re-tuning
-the synthetic generator for this pass. Report:
-  - A/A system false-alarm rate per batch size, legacy vs. calibrated,
-    both reference sizes.
-  - Precision/recall at matched thresholds (D_gt = the configured 0.05
-    floor), legacy vs. calibrated.
-  - The floor-sensitivity table across 0.015/0.02/0.03/0.05 (already
-    partially done in Step 1's notes — extend it to calibrated mode).
-  - **New, specifically requested (user, 2026-09-30, CORRECTED 2026-09-30):
-    a data-collapse plot/table.** **Correction, applied before this was
-    ever implemented**: the x-axis must use POPULATION D, not the per-batch
-    observed KS statistic. Detection is a deterministic function of the
-    observed statistic (reject iff `sqrt(nm/(n+m))*D_observed` exceeds the
-    critical value), so plotting against `D_observed` collapses onto a step
-    function by construction and tests nothing. Use:
-    - x = `sqrt(n*m/(n+m)) * D_pop`, where `D_pop` is the TRUE distance
-      between the two generating distributions: for real batches, the
-      population D between the full baseline CSV and that month's full
-      production data (already computed in Step 1's ground-truth fix); for
-      synthetic batches, the achieved population D of the tilted
-      distribution (as in `results/tabular_validation_severity_v3.json`).
-    - y = empirical detection rate over the repeated batches in that
-      `(feature, n, m, D_pop)` cell.
-    - Keep the per-batch observed D only as a diagnostic column, never as
-      the x-axis for the collapse claim itself.
-    Pooled across every feature and every `(n, m)` combination already run
-    in Step 1. If asymptotic two-sample KS theory holds, every point should
-    collapse onto one curve regardless of which feature or which `(n, m)`
-    produced it — that's the whole content of the asymptotic
-    distribution-free claim. **Report plainly whether the points actually
-    collapse, and if not, which features/regimes deviate and by how much**
-    — this is exactly the kind of check that would surface a second
-    near-discrete-data artifact (like the one already found and documented
-    for the coordinate features in `results/tabular_validation_notes.md`)
-    if one exists in the detection-rate data too. Since this is a data
-    table/plot, use the `dataviz` skill if rendering it as a chart.
-  - State explicitly at the end: "at the 0.05 default, the Citi Bike
-    coordinate drifts (D≈0.019–0.022) come back as significant-but-not-
-    material: visible in the response, not alerting" (per the user's
-    2026-09-29 instruction) — confirm this is what the calibrated-mode
-    output actually shows, don't just assert it.
-
-**(d) DCT precomputed grid + text/image wiring** — only after (c) is
-reviewed and the default-mode question is settled. Build the pseudo-
-reference/pseudo-batch calibration grid at `/fit` time (per
-`docs/step2_proposal.md`), store null AUC quantiles, interpolate in
-`log(n)` at analyze time, clamp-and-warn (never extrapolate) for batch
-sizes outside the calibrated grid.
-
-**(e) Text/image smoke tests under calibrated mode**, including the
-~40-sample borderline case (AUC 0.69 vs. the 0.65 threshold) that's
-already documented as borderline in legacy mode.
+Items 1-3 are offline from already-stored results; items 4-6 need new
+work/runs. Commit per logical change; don't push. Stop after these checks
+and report the numbers — don't proceed to (d)/(e) or the programmatic-
+integration work without a further go-ahead.
 
 ---
 
