@@ -23,7 +23,10 @@ import requests
 HERE = os.path.dirname(__file__)
 REPO_ROOT = os.path.join(HERE, "..", "..")
 SERVE_URL = os.environ.get("MODEL_SERVE_URL", "http://127.0.0.1:8001")
-REPLAY_ROWS_PER_MONTH = 3000
+# 5,000/month x 3 months = 15,000 rows -- enough for 4 complete windows at
+# the new recommended_batch_size (3,146, m=50,000; hardening pass item 5),
+# with some left over for the "incomplete window, picked up next run" case.
+REPLAY_ROWS_PER_MONTH = 5000
 SEED = 42
 MONTHS = [4, 5, 6]
 INPUT_FEATURES = ["pickup_longitude", "pickup_latitude", "dropoff_longitude", "dropoff_latitude", "gender_id"]

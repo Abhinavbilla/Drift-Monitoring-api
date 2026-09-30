@@ -1,8 +1,10 @@
 """
 Step 3e end-to-end example, part 1: train a small scikit-learn model on
-the Jan-Mar Citi Bike reference split (tests/splits/reference_n5000.csv,
-the same 5,000-row sample used throughout this project's Step 1/2
-validation work).
+the Jan-Mar Citi Bike reference split (tests/splits/reference_n50000.csv,
+50,000 rows -- updated 2026-09-30 hardening pass item 5, from the
+original 5,000-row reference, so the drift-monitoring side of this
+example uses the same reference size as recommended_batch_size's
+simulation verification, m=50,000).
 
 Target: trip_duration (regression). Inputs: pickup_longitude,
 pickup_latitude, dropoff_longitude, dropoff_latitude, gender_id -- these
@@ -25,7 +27,7 @@ from sklearn.model_selection import train_test_split
 
 HERE = os.path.dirname(__file__)
 REPO_ROOT = os.path.join(HERE, "..", "..")
-REFERENCE_CSV = os.path.join(REPO_ROOT, "tests", "splits", "reference_n5000.csv")
+REFERENCE_CSV = os.path.join(REPO_ROOT, "tests", "splits", "reference_n50000.csv")
 MODEL_PATH = os.path.join(HERE, "artifacts", "model.pkl")
 
 INPUT_FEATURES = ["pickup_longitude", "pickup_latitude", "dropoff_longitude", "dropoff_latitude", "gender_id"]

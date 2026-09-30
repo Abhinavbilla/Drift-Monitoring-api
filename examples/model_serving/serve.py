@@ -30,7 +30,10 @@ from pydantic import BaseModel
 
 HERE = os.path.dirname(__file__)
 MODEL_PATH = os.path.join(HERE, "artifacts", "model.pkl")
-LOG_PATH = os.path.join(HERE, "logs", "served_features.jsonl")
+# Overridable so a second instance can serve the labeled synthetic
+# scenario (item 5) on its own port, logging to its own file, without
+# duplicating this whole module.
+LOG_PATH = os.environ.get("MODEL_SERVE_LOG_PATH", os.path.join(HERE, "logs", "served_features.jsonl"))
 
 _state = {}
 
