@@ -1,7 +1,9 @@
 import logging
 import numpy as np
 from scipy import stats
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
+from drift.calibration import CalibrationConfig, adjust_p_values, apply_two_gate, psi_bootstrap_pvalue
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +55,16 @@ def compute_iqr_anomalies(input_data: dict, baselines: list) -> tuple:
 
 
 class DistributionDetector:
-    def __init__(self, p_value_threshold: float = 0.05):
-        # Setting a standard threshold. 
+    def __init__(self, p_value_threshold: float = 0.05, calibration_config: Optional[CalibrationConfig] = None):
+        # Setting a standard threshold.
         # If the p-value dips below this, we sound the alarm.
         self.p_value_threshold = p_value_threshold
         self.reference_data: Dict[str, np.ndarray] = {}
-        self.feature_types: Dict[str, str] = {} 
+        self.feature_types: Dict[str, str] = {}
+        # None (every existing caller) -> legacy behavior, byte-identical to
+        # before this parameter existed. Only main.py's calibrated-mode path
+        # passes an actual CalibrationConfig; see analyze_production_window.
+        self.calibration_config = calibration_config
 
     def fit_baseline(self, reference_features: Dict[str, List[Any]], feature_types: Dict[str, str]) -> None:
         """
@@ -124,12 +130,41 @@ class DistributionDetector:
             "p_value": None,
             "drift_detected": bool(psi_score > 0.2)
         }
+
+    @staticmethod
+    def _reference_frequencies(ref_data: np.ndarray) -> Dict[str, float]:
+        """Same category-key normalization as _check_categorical_drift (kept
+        as a separate helper rather than refactoring that method, so the
+        legacy PSI code path is provably untouched). Used only by the
+        calibrated-mode PSI bootstrap below."""
+        elements, counts = np.unique(ref_data, return_counts=True)
+
+        def _normalize_key(k):
+            if isinstance(k, float) and k.is_integer():
+                return str(int(k))
+            return str(k)
+
+        return {_normalize_key(k): float(v) for k, v in zip(elements, counts / len(ref_data))}
+
     def analyze_production_window(self, production_features: Dict[str, List[Any]]) -> Dict[str, Any]:
         """
         Scan a fresh batch of production data to see if the model is going off the rails.
+
+        Legacy mode (self.calibration_config is None, or decision_mode ==
+        "legacy"): byte-identical to the pre-Step-2 behavior below -- single
+        per-feature threshold, no correction, no materiality gate.
+
+        Calibrated mode: raw statistics are computed with the EXACT SAME
+        _check_continuous_drift/_check_categorical_drift calls (so D/PSI
+        values never differ between modes for the same data), then
+        Holm/BH-corrected across every feature in this batch and passed
+        through the two-gate (significance + materiality) decision.
         """
-        drift_report = {}
-        system_alert = False
+        cfg = self.calibration_config
+        is_calibrated = cfg is not None and cfg.decision_mode == "calibrated"
+
+        raw_results: Dict[str, Dict[str, Any]] = {}
+        feature_kind: Dict[str, str] = {}
 
         for feature_name, prod_data_list in production_features.items():
             if feature_name not in self.reference_data:
@@ -138,18 +173,82 @@ class DistributionDetector:
             ref_data = self.reference_data[feature_name]
             prod_data = np.array(prod_data_list)
             f_type = self.feature_types.get(feature_name, 'continuous')
+            feature_kind[feature_name] = f_type
 
             if f_type == 'continuous':
-                result = self._check_continuous_drift(ref_data, prod_data)
+                raw_results[feature_name] = self._check_continuous_drift(ref_data, prod_data)
             else:
-                result = self._check_categorical_drift(ref_data, prod_data)
+                raw_results[feature_name] = self._check_categorical_drift(ref_data, prod_data)
 
-            if result["drift_detected"]:
+        if not is_calibrated:
+            # --- LEGACY: exactly the pre-Step-2 aggregation, untouched ---
+            drift_report = {}
+            system_alert = False
+            for feature_name, result in raw_results.items():
+                if result["drift_detected"]:
+                    system_alert = True
+                drift_report[feature_name] = result
+            return {
+                "system_alert_triggered": system_alert,
+                "feature_metrics": drift_report,
+            }
+
+        # --- CALIBRATED: two-gate decision with family-wise correction ---
+        # Categorical features need an actual p-value (legacy PSI has none)
+        # so they can join the same corrected family as the continuous ones.
+        p_values: List[float] = []
+        feature_order: List[str] = []
+        for feature_name, result in raw_results.items():
+            if feature_kind[feature_name] == 'continuous':
+                p = result["p_value"]
+            else:
+                ref_freq = self._reference_frequencies(self.reference_data[feature_name])
+                batch_size = len(production_features[feature_name])
+                p = psi_bootstrap_pvalue(
+                    ref_freq, result["statistic"], batch_size,
+                    null_draws=cfg.psi_null_draws, seed=42,
+                )
+            p_values.append(p)
+            feature_order.append(feature_name)
+
+        adjusted = adjust_p_values(p_values, cfg.multiple_testing)
+
+        drift_report = {}
+        system_alert = False
+        for feature_name, p_raw, p_adj in zip(feature_order, p_values, adjusted):
+            result = raw_results[feature_name]
+            f_type = feature_kind[feature_name]
+            floor_type = "ks_d" if f_type == "continuous" else "psi"
+            floor = cfg.effect_floor_for(feature_name, floor_type)
+            threshold_label = ("KS" if f_type == "continuous" else "PSI-bootstrap") + f" ({cfg.multiple_testing})"
+
+            gate = apply_two_gate(
+                effect_size=result["statistic"],
+                effect_floor=floor,
+                p_value=p_raw,
+                p_value_adjusted=p_adj,
+                alpha=cfg.alpha,
+                decision_mode="calibrated",
+                threshold_used=f"p_adj<{cfg.alpha} [{threshold_label}], effect>={floor}",
+            )
+
+            entry = dict(result)  # keep "statistic" as-is; "p_value"/"drift_detected" overwritten below
+            entry.update({
+                "p_value": gate.p_value,  # categorical: legacy None replaced with the real bootstrap p-value
+                "effect_size": gate.effect_size,
+                "effect_floor": gate.effect_floor,
+                "p_value_adjusted": gate.p_value_adjusted,
+                "significant": gate.significant,
+                "material": gate.material,
+                "decision_mode": gate.decision_mode,
+                "threshold_used": gate.threshold_used,
+                "drift_detected": gate.drift_detected,  # calibrated semantics: significant AND material
+            })
+            drift_report[feature_name] = entry
+            if gate.drift_detected:
                 system_alert = True
-
-            drift_report[feature_name] = result
 
         return {
             "system_alert_triggered": system_alert,
-            "feature_metrics": drift_report
+            "feature_metrics": drift_report,
         }

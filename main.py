@@ -11,7 +11,7 @@ from PIL import UnidentifiedImageError
 from drift.alerts import send_drift_email
 # Importing custom modules
 from models import (
-    FitBaselineRequest, FitBaselineResponse,
+    FitBaselineRequest, FitBaselineResponse, FeatureCalibrationInfo,
     PredictRequest, PredictResponse,
     AnalyzeBatchRequest, AnalyzeBatchResponse,
     HealthCheckResponse,
@@ -23,6 +23,7 @@ from models import (
 from db import crud
 from drift.detector import compute_iqr_anomalies, DistributionDetector
 from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES
+from drift.calibration import CalibrationConfig, minimum_detectable_d_at_fit_time
 from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
 from adapters.image import ImageAdapter
@@ -243,15 +244,52 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
         if inferred_feature_types.get(k) == "categorical"
     }
     
-    # 8. Persist baselines
-    cleaning_summary = crud.insert_baseline(
+    # 8. Resolve the calibration config, if the caller provided one -- an
+    # explicit dict (even {}) resolves and stores the fully-settled config;
+    # omitting the field entirely (None) leaves whatever the project already
+    # has untouched (see crud.insert_baseline's __UNSET__ sentinel), or
+    # legacy for a brand-new project.
+    resolved_calibration_config = (
+        CalibrationConfig.from_dict(request.calibration_config).to_dict()
+        if request.calibration_config is not None else "__UNSET__"
+    )
+
+    # 9. Persist baselines
+    insert_kwargs = dict(
         project_id=project_id,
         feature_types=inferred_feature_types,
         reference_data=continuous_features,
-        categorical_data=categorical_features
+        categorical_data=categorical_features,
     )
+    if resolved_calibration_config != "__UNSET__":
+        insert_kwargs["calibration_config"] = resolved_calibration_config
+    cleaning_summary = crud.insert_baseline(**insert_kwargs)
 
     crud.create_project(project_id, f"Project {project_id}", client["email"])
+
+    # 10. Minimum-detectable-D + configured floor per continuous feature, at
+    # this reference's size -- API response field only, shown regardless of
+    # decision_mode so a caller can see what this reference size can and
+    # cannot detect before choosing floors (see docs/PROGRESS.md HANDOFF).
+    active_config = CalibrationConfig.from_dict(
+        resolved_calibration_config if resolved_calibration_config != "__UNSET__"
+        else (crud.get_baseline(project_id) or {}).get("calibration_config")
+    )
+    calibration_info = {}
+    for feature, ftype in inferred_feature_types.items():
+        if ftype == "continuous":
+            m = len(continuous_features.get(feature, []))
+            if m > 0:
+                min_d = minimum_detectable_d_at_fit_time(m, active_config.alpha)
+                floor = active_config.effect_floor_for(feature, "ks_d")
+                calibration_info[feature] = FeatureCalibrationInfo(
+                    minimum_detectable_d=min_d,
+                    effect_floor=floor,
+                    reference_too_small_for_floor=bool(min_d > floor),
+                )
+        else:
+            floor = active_config.effect_floor_for(feature, "psi")
+            calibration_info[feature] = FeatureCalibrationInfo(effect_floor=floor)
 
     message = (
         f"Baseline locked for project '{project_id}' by {client['name']}. "
@@ -264,12 +302,19 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     if cleaning_summary:
         dropped_note = ", ".join(f"{col}: {info['dropped_non_numeric']} dropped" for col, info in cleaning_summary.items())
         message += f" Note: non-numeric values were dropped during cleaning ({dropped_note})."
+    too_small = [f for f, info in calibration_info.items() if info.reference_too_small_for_floor]
+    if too_small:
+        message += (
+            f" Warning: this reference is too small to reliably detect effects as small as the "
+            f"configured floor for: {', '.join(too_small)} (see calibration_info)."
+        )
 
     return FitBaselineResponse(
         status="success",
         message=message,
         inferred_feature_types=inferred_feature_types,
         cleaning_summary=cleaning_summary,
+        calibration_info=calibration_info,
     )
 # ---------------------------------------------------------
 # ENDPOINT 2: REAL-TIME ANOMALY TRIPWIRE
@@ -317,14 +362,18 @@ def analyze_production_batch(
     state = crud.get_baseline(project_id)
     if not state:
         raise HTTPException(status_code=404, detail="Baseline not found. Call /fit first.")
-        
-    detector = DistributionDetector(p_value_threshold=0.05)
-    
+
+    # None (every project fit before Step 2, or never given a config) ->
+    # CalibrationConfig.from_dict(None) -> legacy -> DistributionDetector's
+    # calibrated branch never runs -- byte-identical to pre-Step-2 behavior.
+    calibration_config = CalibrationConfig.from_dict(state.get("calibration_config"))
+    detector = DistributionDetector(p_value_threshold=0.05, calibration_config=calibration_config)
+
     detector.fit_baseline(
-        reference_features=state["reference_data"], 
+        reference_features=state["reference_data"],
         feature_types=state["feature_types"]
     )
-    
+
     report = detector.analyze_production_window(request.production_data)
     
     # ==========================================

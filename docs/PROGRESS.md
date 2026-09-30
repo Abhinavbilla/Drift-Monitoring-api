@@ -394,11 +394,48 @@ February-vs-March shift), since both come from the same pooled draw.
 
 ## Step 2 — Two-gate calibrated decisions
 
-**Status: decisions locked, severity-scale prerequisite DONE, core
-statistical engine DONE and tested. DB wiring, detector integration, DCT
-calibration, and the calibrated re-evaluation are NOT yet done. Session
-paused here by user request (2026-09-30) — see the HANDOFF section at the
-top of this file for the full resume plan, in strict order (a)-(e).**
+**Status (2026-09-30): (a) and (b) DONE and tested end-to-end against the
+live backend. (c) calibrated re-run + side-by-side IN PROGRESS. (d) DCT
+calibration and (e) text/image smoke tests NOT started — per instruction,
+(d)/(e) wait until (c) is reviewed.**
+
+**(a) DB schema + migration — DONE** (see commit `cd2e367`): `calibration_config`
+column on `baselines`, self-healing migration, `get_baseline`/
+`set_calibration_config` in `db/crud.py`. Found and fixed a real risk:
+`INSERT OR REPLACE` (used by all three `insert_*_baseline` functions)
+deletes and re-inserts the row, which would have silently wiped
+`calibration_config` back to NULL on every re-fit — fixed by reading and
+carrying forward the existing config unless the caller explicitly passes a
+new one. 10 tests in `tests/test_calibration_db.py`.
+
+**(b) Wired into `drift/detector.py` and the tabular `/fit`+`/analyze`
+endpoints — DONE.** `DistributionDetector` takes an optional
+`calibration_config`; `None` (every pre-Step-2 caller) or
+`decision_mode="legacy"` produces the exact pre-Step-2 code path and
+response shape (`statistic`/`p_value`/`drift_detected` only) — **verified
+byte-identical**, not assumed (`tests/test_detector_calibration.py`).
+Calibrated mode: raw KS/PSI statistics computed via the SAME
+`_check_continuous_drift`/`_check_categorical_drift` calls as legacy (so
+D/PSI values never differ between modes for identical data), categorical
+features get a real p-value via `psi_bootstrap_pvalue` (legacy PSI has
+none), all features' p-values corrected together via Holm/BH, then
+`apply_two_gate` per feature. `models.py`'s `FeatureDriftMetric` gained 7
+new Optional fields (`effect_size`, `effect_floor`, `p_value_adjusted`,
+`significant`, `material`, `decision_mode`, `threshold_used`) — found and
+fixed a real gap here too: the original strict pydantic model would have
+silently dropped all of these on serialization if left unextended.
+`/fit`'s response gained `calibration_info` (`FeatureCalibrationInfo` per
+feature: `minimum_detectable_d`, `effect_floor`, `reference_too_small_for_floor`)
+via a new `minimum_detectable_d_at_fit_time(m, alpha)` helper — shown
+**regardless of decision_mode**, and a warning is added to `/fit`'s message
+when the reference is too small for its configured floor. API response
+fields only, per the UI decision — no dashboard changes.
+**End-to-end verified against the live backend** (not just unit tests):
+fit a calibrated project, analyze the documented small-effect/large-batch
+case — `drift_detected: false` (`significant: true`, `material: false`),
+vs. `drift_detected: true` for the identical data under a legacy project.
+Large-effect case: both gates pass, `drift_detected: true`. 11 new tests in
+`tests/test_detector_calibration.py`. Full suite: 89/89 passing.
 
 **Core statistical engine — `drift/calibration.py` (new module, purely
 additive, nothing in `drift/detector.py`/`drift/embedding_detector.py`

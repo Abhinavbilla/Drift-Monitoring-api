@@ -67,6 +67,18 @@ def minimum_detectable_d(n: int, m: int, alpha: float = DEFAULT_ALPHA) -> float:
     return c * math.sqrt((n + m) / (n * m))
 
 
+def minimum_detectable_d_at_fit_time(m: int, alpha: float = DEFAULT_ALPHA) -> float:
+    """minimum_detectable_d as the future batch size n -> infinity:
+    c(alpha) / sqrt(m). This is the best-case floor a reference of size m
+    could ever support, regardless of how large a future /analyze batch is
+    -- exactly what's shown at /fit time, since the batch size isn't known
+    yet. A reference this size can never resolve an effect smaller than
+    this, no matter how much production data is later compared against it."""
+    if m <= 0:
+        raise ValueError("m must be positive.")
+    return ks_c_alpha(alpha) / math.sqrt(m)
+
+
 # ---------------------------------------------------------------------------
 # Multiple-testing correction
 # ---------------------------------------------------------------------------
