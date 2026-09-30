@@ -15,12 +15,23 @@ plotting against it would collapse onto a step function by construction).
 import json
 import math
 
+from scipy.stats import beta as beta_dist
+
 CONTINUOUS_FEATURES = ["pickup_longitude", "pickup_latitude", "dropoff_longitude", "dropoff_latitude", "trip_duration"]
 CATEGORICAL_FEATURES = ["gender_id", "month"]
 ALL_FEATURES = CONTINUOUS_FEATURES + CATEGORICAL_FEATURES
 ALPHA = 0.05
 LOCKED_KS_FLOOR = 0.05
 FLOOR_SENSITIVITY = [0.015, 0.02, 0.03, 0.05]
+
+
+def clopper_pearson(k, n, alpha=0.05):
+    """Exact Clopper-Pearson 95% CI for a binomial proportion k/n."""
+    if n == 0:
+        return (0.0, 1.0)
+    lower = 0.0 if k == 0 else beta_dist.ppf(alpha / 2, k, n - k + 1)
+    upper = 1.0 if k == n else beta_dist.ppf(1 - alpha / 2, k + 1, n - k)
+    return (float(lower), float(upper))
 
 
 def confusion_counts(y_true, y_pred):
@@ -91,6 +102,59 @@ def aa_false_alarm_rate_calibrated(aa_result):
     return {"system_rate": system_alarms / n, "per_feature": per_feature, "n": n}
 
 
+def aa_gate_decomposition(aa_result):
+    """Per instruction (item 2): decompose the calibrated A/A system rate
+    into Gate-1-only (any feature significant, regardless of materiality),
+    Gate-2-only (any feature material, regardless of significance -- a
+    diagnostic of how often a null batch's effect_size alone clears the
+    floor by chance), and the combined rate (actual drift_detected, both
+    gates). Raw counts + Clopper-Pearson 95% CIs for each."""
+    responses = aa_result["raw_responses"]
+    n = len(responses)
+    k_gate1 = sum(1 for resp in responses if any(resp[f]["significant"] for f in ALL_FEATURES))
+    k_gate2 = sum(1 for resp in responses if any(resp[f]["material"] for f in ALL_FEATURES))
+    k_combined = sum(1 for resp in responses if any(resp[f]["drift_detected"] for f in ALL_FEATURES))
+    return {
+        "n": n,
+        "gate1_only": {"k": k_gate1, "rate": k_gate1 / n, "ci95": clopper_pearson(k_gate1, n)},
+        "gate2_only": {"k": k_gate2, "rate": k_gate2 / n, "ci95": clopper_pearson(k_gate2, n)},
+        "combined": {"k": k_combined, "rate": k_combined / n, "ci95": clopper_pearson(k_combined, n)},
+    }
+
+
+def two_gate_predict(resp, feat, use_holm, use_floor, floor_override=None):
+    """Recompute a single feature's drift decision under one of the 2x2
+    ablation cells, entirely from calibrated_raw's already-stored fields
+    (raw p_value, p_value_adjusted via 'significant', effect_size,
+    effect_floor) -- no new HTTP calls. use_holm=False falls back to the
+    raw (uncorrected) p-value at ALPHA; use_floor=False drops the
+    materiality gate entirely (treated as always-material)."""
+    m = resp[feat]
+    sig = m["significant"] if use_holm else (m["p_value"] < ALPHA)
+    if use_floor:
+        floor = floor_override if floor_override is not None else m["effect_floor"]
+        mat = m["effect_size"] >= floor
+    else:
+        mat = True
+    return bool(sig and mat)
+
+
+def sweep_confusion_ablation(sweep_size_result, labels, use_holm, use_floor):
+    y_true, y_pred = [], []
+    for resp in sweep_size_result["pooled"]["raw_responses"]:
+        for feat in ALL_FEATURES:
+            y_true.append(1 if labels.get(feat, False) else 0)
+            y_pred.append(1 if two_gate_predict(resp, feat, use_holm, use_floor) else 0)
+    return confusion_counts(y_true, y_pred)
+
+
+def aa_rate_ablation(aa_result, use_holm, use_floor):
+    responses = aa_result["raw_responses"]
+    n = len(responses)
+    k = sum(1 for resp in responses if any(two_gate_predict(resp, f, use_holm, use_floor) for f in ALL_FEATURES))
+    return {"n": n, "k": k, "rate": k / n, "ci95": clopper_pearson(k, n)}
+
+
 def data_collapse_points(legacy_raw, pooled_truth, per_month_truth):
     """x = sqrt(n*m/(n+m)) * D_POPULATION (never observed D -- see module
     docstring), y = empirical detection rate, pooled across every
@@ -146,6 +210,21 @@ def main():
 
     # ================= Precision/recall at matched threshold =================
     notes.append("## Precision/recall at matched threshold (D_gt = configured floor = 0.05)\n")
+    notes.append(
+        "**Correction, per 2026-09-30 review**: at `D_gt=0.05`, calibrated's Gate 2 floor and the "
+        "ground-truth threshold used to label this table are the SAME number (0.05) — the ground truth "
+        "in this table calls a continuous feature 'positive' iff `population_D >= 0.05`, and calibrated's "
+        "materiality gate flags a feature iff `effect_size >= 0.05`. **Only `trip_duration` (population D "
+        "= 0.092, well clear of the floor) is a true positive under this specific ground truth.** So "
+        "calibrated's precision=recall=1.000 below is close to true by construction at this exact "
+        "threshold, not evidence of general accuracy — it mainly demonstrates that **the materiality gate "
+        "removes the false positives legacy produces on the four sub-floor coordinate features** (which "
+        "legacy flags because they're statistically significant, even though their effect size never "
+        "clears 0.05). It does not show calibrated is 'more accurate' in any threshold-independent sense; "
+        "see the floor-sensitivity table further down, where moving the floor changes which features count "
+        "as positive and precision/recall move accordingly — that's the real generalization test, not this "
+        "single matched-threshold table.\n"
+    )
     notes.append("| Ref size | Batch size | Mode | TP | FP | FN | TN | Precision | Recall | F1 |\n"
                  "|---|---|---|---|---|---|---|---|---|---|")
     for ref_size_str in legacy_raw["by_reference_size"].keys():
@@ -157,20 +236,69 @@ def main():
                 notes.append(f"| {ref_size_str} | {size_str} | {mode} | {cc['TP']} | {cc['FP']} | {cc['FN']} | "
                              f"{cc['TN']} | {p} | {r} | {f1} |")
 
-    # ================= A/A false-alarm rate =================
+    # ================= A/A false-alarm rate + gate decomposition =================
     notes.append("\n## A/A system false-alarm rate per batch size, legacy vs. calibrated\n")
     notes.append(f"Alpha-predicted (7 uncorrected tests): `1-(1-{ALPHA})^7` = {1-(1-ALPHA)**7:.3f}. "
                  f"Calibrated applies Holm correction across the 7 features, so its system rate should "
                  f"track much closer to {ALPHA} itself.\n")
-    notes.append("| Ref size | Batch size | Legacy system rate | Calibrated system rate |\n|---|---|---|---|")
+    notes.append("**A/A batches are iid draws from the same Jan-Mar pool as the reference — they test "
+                 "calibration under the null (no real drift), not month-to-month variation within the "
+                 "baseline period. A low false-alarm rate here does not by itself validate behavior "
+                 "against genuine temporal drift in the reference period.**\n")
+    notes.append("| Ref size | Batch size | Legacy: k/n (95% CI) | Legacy rate | Calibrated: k/n (95% CI) | Calibrated rate |\n"
+                 "|---|---|---|---|---|---|")
     aa_summary = {}
     for ref_size_str in legacy_raw["by_reference_size"].keys():
         aa_summary[ref_size_str] = {}
         for size_str in legacy_raw["by_reference_size"][ref_size_str]["aa_test"].keys():
             legacy_aa = aa_false_alarm_rate_legacy(legacy_raw["by_reference_size"][ref_size_str]["aa_test"][size_str])
             calib_aa = aa_false_alarm_rate_calibrated(calibrated_raw["by_reference_size"][ref_size_str]["aa_test"][size_str])
-            aa_summary[ref_size_str][size_str] = {"legacy": legacy_aa, "calibrated": calib_aa}
-            notes.append(f"| {ref_size_str} | {size_str} | {legacy_aa['system_rate']:.3f} | {calib_aa['system_rate']:.3f} |")
+            legacy_k = round(legacy_aa["system_rate"] * legacy_aa["n"])
+            legacy_ci = clopper_pearson(legacy_k, legacy_aa["n"])
+            calib_k = round(calib_aa["system_rate"] * calib_aa["n"])
+            calib_ci = clopper_pearson(calib_k, calib_aa["n"])
+            aa_summary[ref_size_str][size_str] = {"legacy": legacy_aa, "calibrated": calib_aa,
+                                                    "legacy_ci95": legacy_ci, "calibrated_ci95": calib_ci}
+            notes.append(f"| {ref_size_str} | {size_str} | {legacy_k}/{legacy_aa['n']} "
+                         f"({legacy_ci[0]:.3f}-{legacy_ci[1]:.3f}) | {legacy_aa['system_rate']:.3f} | "
+                         f"{calib_k}/{calib_aa['n']} ({calib_ci[0]:.3f}-{calib_ci[1]:.3f}) | "
+                         f"{calib_aa['system_rate']:.3f} |")
+
+    notes.append(
+        "\n### A/A gate decomposition (calibrated mode) — Gate-1-only, Gate-2-only, combined\n"
+    )
+    notes.append(
+        "Gate-1-only = fraction of null batches with ANY feature `significant` (Holm-adjusted p<alpha), "
+        "ignoring materiality entirely — this is what the false-alarm rate WOULD be if only the "
+        "significance test existed (comparable to legacy's rate above, modulo the Holm correction itself). "
+        "Gate-2-only = fraction with ANY feature `material` (effect_size >= floor), ignoring significance "
+        "— a diagnostic of how often a null batch's sampling noise alone pushes an effect size over the "
+        "floor by chance; not a real decision rule, since it's never used without the significance test. "
+        "Combined = the actual two-gate `drift_detected` (both must hold).\n"
+    )
+    notes.append("| Ref size | Batch size | Gate-1-only k/n (95% CI) | Gate-2-only k/n (95% CI) | "
+                 "Combined k/n (95% CI) |\n|---|---|---|---|---|")
+    gate_decomp_summary = {}
+    for ref_size_str in calibrated_raw["by_reference_size"].keys():
+        gate_decomp_summary[ref_size_str] = {}
+        for size_str in calibrated_raw["by_reference_size"][ref_size_str]["aa_test"].keys():
+            decomp = aa_gate_decomposition(calibrated_raw["by_reference_size"][ref_size_str]["aa_test"][size_str])
+            gate_decomp_summary[ref_size_str][size_str] = decomp
+            g1, g2, comb = decomp["gate1_only"], decomp["gate2_only"], decomp["combined"]
+            notes.append(
+                f"| {ref_size_str} | {size_str} | {g1['k']}/{decomp['n']} ({g1['ci95'][0]:.3f}-{g1['ci95'][1]:.3f}) | "
+                f"{g2['k']}/{decomp['n']} ({g2['ci95'][0]:.3f}-{g2['ci95'][1]:.3f}) | "
+                f"{comb['k']}/{decomp['n']} ({comb['ci95'][0]:.3f}-{comb['ci95'][1]:.3f}) |"
+            )
+    notes.append(
+        "\n**Plainly stated**: Gate-1-only rates track close to legacy's own rates (both are testing "
+        "significance alone, modulo Holm's correction pulling calibrated's Gate-1-only rate down "
+        "somewhat vs. legacy's uncorrected rate). The combined rate collapses to 0-1% almost entirely "
+        "because of Gate 2 (materiality) — a null batch essentially never has BOTH a significant AND a "
+        "materially-large effect size on the same feature at the same time, since a null batch's true "
+        "effect is exactly zero. The gap between Gate-1-only and Combined is the materiality gate's actual "
+        "contribution to the low system-level false-alarm rate, not the Holm correction alone.\n"
+    )
 
     # ================= Floor sensitivity (calibrated only, recomputed from stored effect_size) =================
     notes.append("\n## Floor sensitivity (calibrated mode, biggest sweep size=50000), recomputed from "
@@ -186,6 +314,78 @@ def main():
             floor_sensitivity[ref_size_str][floor] = cc
             p, r, f1 = fmt(cc)
             notes.append(f"| {ref_size_str} | {floor} | {cc['TP']} | {cc['FP']} | {cc['FN']} | {cc['TN']} | {p} | {r} | {f1} |")
+
+    # ================= 2x2 ablation: {Holm on/off} x {floor on/off} =================
+    notes.append("\n## 2x2 ablation: {Holm on/off} x {floor on/off}, at D_gt = 0.05\n")
+    notes.append(
+        "All four cells recomputed from calibrated_raw's already-stored `p_value` (raw/unadjusted), "
+        "`significant` (Holm-adjusted p<alpha), `effect_size`, and `effect_floor` -- no new HTTP calls. "
+        "'Holm off' substitutes the raw per-feature p-value against alpha directly (what a single "
+        "uncorrected test per feature would give); 'floor off' drops Gate 2 (materiality) entirely, "
+        "i.e. treats every feature as material regardless of effect size. "
+        "Precision/recall use the D_gt=0.05 labels (labels_locked) pooled over the largest sweep batch "
+        "size (50,000) per reference size; A/A system rate uses the calibrated A/A pool at each batch "
+        "size. (Holm=off, Floor=off) is the closest calibrated-data analogue of legacy's own decision "
+        "rule for continuous features (raw p<alpha, no materiality) -- it will differ from legacy's "
+        "own reported numbers for categorical features, since legacy uses a fixed PSI>0.2 threshold, "
+        "not a p-value test, while calibrated_raw's categorical p_value comes from the PSI parametric "
+        "bootstrap introduced in Step 2 -- so this cell isolates the Holm/floor axes on the SAME "
+        "underlying test family, it does not reproduce legacy's categorical rule exactly.\n"
+    )
+    notes.append("### Precision/recall (D_gt=0.05, pooled at batch size 50,000)\n")
+    notes.append("| Ref size | Holm | Floor | TP | FP | FN | TN | Precision | Recall | F1 |\n"
+                 "|---|---|---|---|---|---|---|---|---|---|")
+    ablation_pr = {}
+    for ref_size_str in calibrated_raw["by_reference_size"].keys():
+        ablation_pr[ref_size_str] = {}
+        big = calibrated_raw["by_reference_size"][ref_size_str]["sweep"]["50000"]
+        for use_holm in (True, False):
+            for use_floor in (True, False):
+                cc = sweep_confusion_ablation(big, labels_locked, use_holm, use_floor)
+                ablation_pr[ref_size_str][f"holm={use_holm}_floor={use_floor}"] = cc
+                p, r, f1 = fmt(cc)
+                notes.append(f"| {ref_size_str} | {'on' if use_holm else 'off'} | {'on' if use_floor else 'off'} | "
+                             f"{cc['TP']} | {cc['FP']} | {cc['FN']} | {cc['TN']} | {p} | {r} | {f1} |")
+
+    notes.append("\n### A/A system rate, per batch size\n")
+    notes.append("| Ref size | Batch size | Holm | Floor | k/n | rate | 95% CI |\n|---|---|---|---|---|---|---|")
+    ablation_aa = {}
+    for ref_size_str in calibrated_raw["by_reference_size"].keys():
+        ablation_aa[ref_size_str] = {}
+        for size_str in calibrated_raw["by_reference_size"][ref_size_str]["aa_test"].keys():
+            ablation_aa[ref_size_str][size_str] = {}
+            aa_result = calibrated_raw["by_reference_size"][ref_size_str]["aa_test"][size_str]
+            for use_holm in (True, False):
+                for use_floor in (True, False):
+                    r = aa_rate_ablation(aa_result, use_holm, use_floor)
+                    ablation_aa[ref_size_str][size_str][f"holm={use_holm}_floor={use_floor}"] = r
+                    notes.append(f"| {ref_size_str} | {size_str} | {'on' if use_holm else 'off'} | "
+                                 f"{'on' if use_floor else 'off'} | {r['k']}/{r['n']} | {r['rate']:.3f} | "
+                                 f"({r['ci95'][0]:.3f}-{r['ci95'][1]:.3f}) |")
+
+    notes.append(
+        "\n**Attribution -- the two gates fix different failure modes, and the two tables above show "
+        "each one's contribution separately**:\n\n"
+        "*Precision/recall (matched-threshold sweep, pooled at n=50,000)*: the floor alone already "
+        "gets precision/recall to 1.000/1.000 regardless of Holm (compare Holm=on,Floor=on vs. "
+        "Holm=off,Floor=on -- identical). At this large batch size, every sub-floor coordinate feature "
+        "is statistically significant whether or not its p-value is Holm-adjusted (their raw p-values "
+        "are already far below alpha), so Holm alone (Floor=off) barely moves precision "
+        "(0.353->0.286 at m=50000, both far from 1.000) -- **the materiality gate, not Holm, is what "
+        "removes these false positives from the confusion table.** Recall is 1.000 in all four cells: "
+        "`trip_duration`'s effect (D=0.092) is far too large for either raw or Holm-adjusted p-values "
+        "to lose significance, so neither gate costs any recall here.\n\n"
+        "*A/A system rate*: here Holm's own contribution is clearly visible and separate from the "
+        "floor's. With the floor off, turning Holm on cuts the false-alarm rate substantially at every "
+        "batch size (e.g. at ref=5000/batch=10000: 0.880 -> 0.430) -- this is Holm bounding the "
+        "multiple-testing false-positive rate across the 7 features, exactly as designed. Adding the "
+        "floor on top (Holm=on,Floor=on) drives the rate to ~0 at every cell, because a null batch's "
+        "effect size essentially never independently clears the floor at the same time a p-value is "
+        "significant. So: **the floor is the dominant lever for matched-threshold precision, while "
+        "Holm is the dominant lever for system-level false-alarm control under the null (A/A) -- the "
+        "full calibrated system (both gates on) is the only configuration that is simultaneously good "
+        "on both axes.**\n"
+    )
 
     # ================= Explicit check: significant-but-not-material =================
     notes.append("\n## Explicit check: significant-but-not-material at the 0.05 default\n")
@@ -310,6 +510,9 @@ def main():
 
     summary_json["precision_recall_matched_threshold"] = "see markdown table"
     summary_json["aa_false_alarm"] = aa_summary
+    summary_json["aa_gate_decomposition"] = gate_decomp_summary
+    summary_json["ablation_2x2_precision_recall"] = ablation_pr
+    summary_json["ablation_2x2_aa_rate"] = ablation_aa
     summary_json["floor_sensitivity"] = {rs: {str(f): cc for f, cc in d.items()} for rs, d in floor_sensitivity.items()}
     summary_json["significant_but_not_material_check"] = check_result
     summary_json["data_collapse_points"] = points

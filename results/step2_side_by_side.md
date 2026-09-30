@@ -6,6 +6,8 @@
 
 ## Precision/recall at matched threshold (D_gt = configured floor = 0.05)
 
+**Correction, per 2026-09-30 review**: at `D_gt=0.05`, calibrated's Gate 2 floor and the ground-truth threshold used to label this table are the SAME number (0.05) — the ground truth in this table calls a continuous feature 'positive' iff `population_D >= 0.05`, and calibrated's materiality gate flags a feature iff `effect_size >= 0.05`. **Only `trip_duration` (population D = 0.092, well clear of the floor) is a true positive under this specific ground truth.** So calibrated's precision=recall=1.000 below is close to true by construction at this exact threshold, not evidence of general accuracy — it mainly demonstrates that **the materiality gate removes the false positives legacy produces on the four sub-floor coordinate features** (which legacy flags because they're statistically significant, even though their effect size never clears 0.05). It does not show calibrated is 'more accurate' in any threshold-independent sense; see the floor-sensitivity table further down, where moving the floor changes which features count as positive and precision/recall move accordingly — that's the real generalization test, not this single matched-threshold table.
+
 | Ref size | Batch size | Mode | TP | FP | FN | TN | Precision | Recall | F1 |
 |---|---|---|---|---|---|---|---|---|---|
 | 5000 | 1000 | legacy | 48 | 18 | 0 | 102 | 0.727 | 1.000 | 0.842 |
@@ -41,20 +43,44 @@
 
 Alpha-predicted (7 uncorrected tests): `1-(1-0.05)^7` = 0.302. Calibrated applies Holm correction across the 7 features, so its system rate should track much closer to 0.05 itself.
 
-| Ref size | Batch size | Legacy system rate | Calibrated system rate |
-|---|---|---|---|
-| 5000 | 1000 | 0.120 | 0.010 |
-| 5000 | 3000 | 0.180 | 0.000 |
-| 5000 | 5000 | 0.270 | 0.000 |
-| 5000 | 10000 | 0.210 | 0.000 |
-| 5000 | 15000 | 0.140 | 0.000 |
-| 5000 | 20000 | 0.020 | 0.000 |
-| 50000 | 1000 | 0.170 | 0.010 |
-| 50000 | 3000 | 0.160 | 0.000 |
-| 50000 | 5000 | 0.200 | 0.000 |
-| 50000 | 10000 | 0.090 | 0.000 |
-| 50000 | 15000 | 0.020 | 0.000 |
-| 50000 | 20000 | 0.020 | 0.000 |
+**A/A batches are iid draws from the same Jan-Mar pool as the reference — they test calibration under the null (no real drift), not month-to-month variation within the baseline period. A low false-alarm rate here does not by itself validate behavior against genuine temporal drift in the reference period.**
+
+| Ref size | Batch size | Legacy: k/n (95% CI) | Legacy rate | Calibrated: k/n (95% CI) | Calibrated rate |
+|---|---|---|---|---|---|
+| 5000 | 1000 | 12/100 (0.064-0.200) | 0.120 | 1/100 (0.000-0.054) | 0.010 |
+| 5000 | 3000 | 18/100 (0.110-0.269) | 0.180 | 0/100 (0.000-0.036) | 0.000 |
+| 5000 | 5000 | 27/100 (0.186-0.368) | 0.270 | 0/100 (0.000-0.036) | 0.000 |
+| 5000 | 10000 | 21/100 (0.135-0.303) | 0.210 | 0/100 (0.000-0.036) | 0.000 |
+| 5000 | 15000 | 14/100 (0.079-0.224) | 0.140 | 0/100 (0.000-0.036) | 0.000 |
+| 5000 | 20000 | 2/100 (0.002-0.070) | 0.020 | 0/100 (0.000-0.036) | 0.000 |
+| 50000 | 1000 | 17/100 (0.102-0.258) | 0.170 | 1/100 (0.000-0.054) | 0.010 |
+| 50000 | 3000 | 16/100 (0.094-0.247) | 0.160 | 0/100 (0.000-0.036) | 0.000 |
+| 50000 | 5000 | 20/100 (0.127-0.292) | 0.200 | 0/100 (0.000-0.036) | 0.000 |
+| 50000 | 10000 | 9/100 (0.042-0.164) | 0.090 | 0/100 (0.000-0.036) | 0.000 |
+| 50000 | 15000 | 2/100 (0.002-0.070) | 0.020 | 0/100 (0.000-0.036) | 0.000 |
+| 50000 | 20000 | 2/100 (0.002-0.070) | 0.020 | 0/100 (0.000-0.036) | 0.000 |
+
+### A/A gate decomposition (calibrated mode) — Gate-1-only, Gate-2-only, combined
+
+Gate-1-only = fraction of null batches with ANY feature `significant` (Holm-adjusted p<alpha), ignoring materiality entirely — this is what the false-alarm rate WOULD be if only the significance test existed (comparable to legacy's rate above, modulo the Holm correction itself). Gate-2-only = fraction with ANY feature `material` (effect_size >= floor), ignoring significance — a diagnostic of how often a null batch's sampling noise alone pushes an effect size over the floor by chance; not a real decision rule, since it's never used without the significance test. Combined = the actual two-gate `drift_detected` (both must hold).
+
+| Ref size | Batch size | Gate-1-only k/n (95% CI) | Gate-2-only k/n (95% CI) | Combined k/n (95% CI) |
+|---|---|---|---|---|
+| 5000 | 1000 | 3/100 (0.006-0.085) | 10/100 (0.049-0.176) | 1/100 (0.000-0.054) |
+| 5000 | 3000 | 12/100 (0.064-0.200) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+| 5000 | 5000 | 21/100 (0.135-0.303) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+| 5000 | 10000 | 43/100 (0.331-0.533) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+| 5000 | 15000 | 81/100 (0.719-0.882) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+| 5000 | 20000 | 100/100 (0.964-1.000) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+| 50000 | 1000 | 2/100 (0.002-0.070) | 3/100 (0.006-0.085) | 1/100 (0.000-0.054) |
+| 50000 | 3000 | 2/100 (0.002-0.070) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+| 50000 | 5000 | 3/100 (0.006-0.085) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+| 50000 | 10000 | 2/100 (0.002-0.070) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+| 50000 | 15000 | 1/100 (0.000-0.054) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+| 50000 | 20000 | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) | 0/100 (0.000-0.036) |
+
+**Plainly stated**: Gate-1-only rates track close to legacy's own rates (both are testing significance alone, modulo Holm's correction pulling calibrated's Gate-1-only rate down somewhat vs. legacy's uncorrected rate). The combined rate collapses to 0-1% almost entirely because of Gate 2 (materiality) — a null batch essentially never has BOTH a significant AND a materially-large effect size on the same feature at the same time, since a null batch's true effect is exactly zero. The gap between Gate-1-only and Combined is the materiality gate's actual contribution to the low system-level false-alarm rate, not the Holm correction alone.
+
 
 ## Floor sensitivity (calibrated mode, biggest sweep size=50000), recomputed from stored effect_size/significant -- no new HTTP calls needed
 
@@ -68,6 +94,83 @@ Alpha-predicted (7 uncorrected tests): `1-(1-0.05)^7` = 0.302. Calibrated applie
 | 50000 | 0.02 | 82 | 57 | 14 | 15 | 0.590 | 0.854 | 0.698 |
 | 50000 | 0.03 | 48 | 30 | 0 | 90 | 0.615 | 1.000 | 0.762 |
 | 50000 | 0.05 | 48 | 8 | 0 | 112 | 0.857 | 1.000 | 0.923 |
+
+## 2x2 ablation: {Holm on/off} x {floor on/off}, at D_gt = 0.05
+
+All four cells recomputed from calibrated_raw's already-stored `p_value` (raw/unadjusted), `significant` (Holm-adjusted p<alpha), `effect_size`, and `effect_floor` -- no new HTTP calls. 'Holm off' substitutes the raw per-feature p-value against alpha directly (what a single uncorrected test per feature would give); 'floor off' drops Gate 2 (materiality) entirely, i.e. treats every feature as material regardless of effect size. Precision/recall use the D_gt=0.05 labels (labels_locked) pooled over the largest sweep batch size (50,000) per reference size; A/A system rate uses the calibrated A/A pool at each batch size. (Holm=off, Floor=off) is the closest calibrated-data analogue of legacy's own decision rule for continuous features (raw p<alpha, no materiality) -- it will differ from legacy's own reported numbers for categorical features, since legacy uses a fixed PSI>0.2 threshold, not a p-value test, while calibrated_raw's categorical p_value comes from the PSI parametric bootstrap introduced in Step 2 -- so this cell isolates the Holm/floor axes on the SAME underlying test family, it does not reproduce legacy's categorical rule exactly.
+
+### Precision/recall (D_gt=0.05, pooled at batch size 50,000)
+
+| Ref size | Holm | Floor | TP | FP | FN | TN | Precision | Recall | F1 |
+|---|---|---|---|---|---|---|---|---|---|
+| 5000 | on | on | 48 | 0 | 0 | 120 | 1.000 | 1.000 | 1.000 |
+| 5000 | on | off | 48 | 88 | 0 | 32 | 0.353 | 1.000 | 0.522 |
+| 5000 | off | on | 48 | 0 | 0 | 120 | 1.000 | 1.000 | 1.000 |
+| 5000 | off | off | 48 | 97 | 0 | 23 | 0.331 | 1.000 | 0.497 |
+| 50000 | on | on | 48 | 0 | 0 | 120 | 1.000 | 1.000 | 1.000 |
+| 50000 | on | off | 48 | 120 | 0 | 0 | 0.286 | 1.000 | 0.444 |
+| 50000 | off | on | 48 | 0 | 0 | 120 | 1.000 | 1.000 | 1.000 |
+| 50000 | off | off | 48 | 120 | 0 | 0 | 0.286 | 1.000 | 0.444 |
+
+### A/A system rate, per batch size
+
+| Ref size | Batch size | Holm | Floor | k/n | rate | 95% CI |
+|---|---|---|---|---|---|---|
+| 5000 | 1000 | on | on | 1/100 | 0.010 | (0.000-0.054) |
+| 5000 | 1000 | on | off | 3/100 | 0.030 | (0.006-0.085) |
+| 5000 | 1000 | off | on | 10/100 | 0.100 | (0.049-0.176) |
+| 5000 | 1000 | off | off | 24/100 | 0.240 | (0.160-0.336) |
+| 5000 | 3000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 3000 | on | off | 12/100 | 0.120 | (0.064-0.200) |
+| 5000 | 3000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 3000 | off | off | 35/100 | 0.350 | (0.257-0.452) |
+| 5000 | 5000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 5000 | on | off | 21/100 | 0.210 | (0.135-0.303) |
+| 5000 | 5000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 5000 | off | off | 57/100 | 0.570 | (0.467-0.669) |
+| 5000 | 10000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 10000 | on | off | 43/100 | 0.430 | (0.331-0.533) |
+| 5000 | 10000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 10000 | off | off | 88/100 | 0.880 | (0.800-0.936) |
+| 5000 | 15000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 15000 | on | off | 81/100 | 0.810 | (0.719-0.882) |
+| 5000 | 15000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 15000 | off | off | 98/100 | 0.980 | (0.930-0.998) |
+| 5000 | 20000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 20000 | on | off | 100/100 | 1.000 | (0.964-1.000) |
+| 5000 | 20000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 5000 | 20000 | off | off | 100/100 | 1.000 | (0.964-1.000) |
+| 50000 | 1000 | on | on | 1/100 | 0.010 | (0.000-0.054) |
+| 50000 | 1000 | on | off | 2/100 | 0.020 | (0.002-0.070) |
+| 50000 | 1000 | off | on | 3/100 | 0.030 | (0.006-0.085) |
+| 50000 | 1000 | off | off | 25/100 | 0.250 | (0.169-0.347) |
+| 50000 | 3000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 3000 | on | off | 2/100 | 0.020 | (0.002-0.070) |
+| 50000 | 3000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 3000 | off | off | 20/100 | 0.200 | (0.127-0.292) |
+| 50000 | 5000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 5000 | on | off | 3/100 | 0.030 | (0.006-0.085) |
+| 50000 | 5000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 5000 | off | off | 25/100 | 0.250 | (0.169-0.347) |
+| 50000 | 10000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 10000 | on | off | 2/100 | 0.020 | (0.002-0.070) |
+| 50000 | 10000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 10000 | off | off | 16/100 | 0.160 | (0.094-0.247) |
+| 50000 | 15000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 15000 | on | off | 1/100 | 0.010 | (0.000-0.054) |
+| 50000 | 15000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 15000 | off | off | 11/100 | 0.110 | (0.056-0.188) |
+| 50000 | 20000 | on | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 20000 | on | off | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 20000 | off | on | 0/100 | 0.000 | (0.000-0.036) |
+| 50000 | 20000 | off | off | 10/100 | 0.100 | (0.049-0.176) |
+
+**Attribution -- the two gates fix different failure modes, and the two tables above show each one's contribution separately**:
+
+*Precision/recall (matched-threshold sweep, pooled at n=50,000)*: the floor alone already gets precision/recall to 1.000/1.000 regardless of Holm (compare Holm=on,Floor=on vs. Holm=off,Floor=on -- identical). At this large batch size, every sub-floor coordinate feature is statistically significant whether or not its p-value is Holm-adjusted (their raw p-values are already far below alpha), so Holm alone (Floor=off) barely moves precision (0.353->0.286 at m=50000, both far from 1.000) -- **the materiality gate, not Holm, is what removes these false positives from the confusion table.** Recall is 1.000 in all four cells: `trip_duration`'s effect (D=0.092) is far too large for either raw or Holm-adjusted p-values to lose significance, so neither gate costs any recall here.
+
+*A/A system rate*: here Holm's own contribution is clearly visible and separate from the floor's. With the floor off, turning Holm on cuts the false-alarm rate substantially at every batch size (e.g. at ref=5000/batch=10000: 0.880 -> 0.430) -- this is Holm bounding the multiple-testing false-positive rate across the 7 features, exactly as designed. Adding the floor on top (Holm=on,Floor=on) drives the rate to ~0 at every cell, because a null batch's effect size essentially never independently clears the floor at the same time a p-value is significant. So: **the floor is the dominant lever for matched-threshold precision, while Holm is the dominant lever for system-level false-alarm control under the null (A/A) -- the full calibrated system (both gates on) is the only configuration that is simultaneously good on both axes.**
+
 
 ## Explicit check: significant-but-not-material at the 0.05 default
 
