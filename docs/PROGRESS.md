@@ -76,20 +76,43 @@ this HANDOFF as the source of truth for their status — it's in that section.
 
 **Step 2 (c) review checks (user, 2026-09-30) — IN PROGRESS, before (c) is
 treated as final:**
-1. Rewrite `results/step2_side_by_side.md`'s claims: at D_gt=0.05,
-   calibrated's gate and the ground truth share one threshold, so
-   precision/recall=1.000 is nearly true by construction (only
-   `trip_duration`, D=0.092, is a true positive, far above the floor) —
-   state this shows the materiality gate removes legacy's false positives,
-   not "perfect accuracy."
-2. A/A decomposition per batch/reference size: Gate-1-only rate
-   (`significant`), Gate-2-only/combined rate, raw counts, Clopper-Pearson
-   95% CIs. State the combined 0-1% mostly reflects the materiality gate,
-   and that A/A batches are iid (don't capture temporal variation).
-3. 2x2 ablation {Holm on/off} x {floor on/off} at D_gt=0.05: precision,
-   recall, A/A system rate, attributing each improvement to its gate —
-   computable offline from already-stored `p_value`/`p_value_adjusted`/
-   `effect_size`.
+1. **DONE (2026-09-30)**: Rewrote `results/step2_side_by_side.md`'s
+   precision/recall section. States plainly that at D_gt=0.05, calibrated's
+   Gate 2 floor and the ground-truth threshold are the SAME number, so only
+   `trip_duration` (D=0.092) is a true positive and precision=recall=1.000
+   is close to true by construction — it demonstrates the materiality gate
+   removes legacy's false positives on the four sub-floor coordinate
+   features, not general accuracy. Points to the floor-sensitivity table
+   (unchanged, already in the doc) as the real generalization test.
+2. **DONE (2026-09-30)**: Added `aa_gate_decomposition()` to
+   `scripts/step2_analyze.py` — splits the calibrated A/A system rate into
+   Gate-1-only (`significant`, any feature), Gate-2-only (`material`, any
+   feature), and combined (`drift_detected`), each with raw k/n and
+   Clopper-Pearson 95% CIs, per (reference_size, batch_size). Findings:
+   Gate-1-only rates track close to legacy's own (uncorrected) rates,
+   modulo Holm pulling them down somewhat; the combined rate collapses to
+   0-1% almost entirely because of Gate 2, since a null batch's true effect
+   is exactly zero and essentially never independently clears the floor at
+   the same moment a p-value is significant. States plainly that A/A
+   batches are iid draws from the reference pool and don't capture
+   month-to-month temporal variation within the baseline period.
+3. **DONE (2026-09-30)**: Added the 2x2 ablation {Holm on/off} x
+   {floor on/off} at D_gt=0.05 to `scripts/step2_analyze.py`, recomputed
+   entirely offline from calibrated_raw's stored `p_value` (raw),
+   `significant` (Holm-adjusted), `effect_size`/`effect_floor` — no new
+   HTTP calls. Finding: **the floor is the dominant lever for
+   matched-threshold precision** — (Holm=off,Floor=on) already reaches
+   1.000/1.000 identically to (Holm=on,Floor=on) at the largest sweep size,
+   since sub-floor coordinate features are significant whether or not
+   Holm-adjusted at that sample size. **Holm is the dominant lever for
+   system-level false-alarm control under the null (A/A)** — with the
+   floor off, turning Holm on cuts the A/A rate substantially at every
+   batch size (e.g. ref=5000/batch=10000: 0.880 -> 0.430); adding the
+   floor on top drives it to ~0. The two gates fix different failure
+   modes; both are needed for a system good on both axes. Recall is 1.000
+   in all four cells (`trip_duration`'s D=0.092 is far too large for
+   either gate to cost recall). All three items in commit `04e3ffe`; full
+   suite 99/99 passing.
 4. NEW RUN: near-floor power curve + reference-draw variability. Normal-
    score-tilted D_pop in {0.02,0.03,0.04,0.05,0.06,0.08,0.10}, every
    continuous feature, >=10 independent reference draws per reference size,
@@ -120,10 +143,11 @@ treated as final:**
    "reference_too_small_for_floor": false, "recommended_batch_size": 869}`
    for a 5,000-row reference. Full suite: 99/99 passing.
 
-Items 1-3 are offline from already-stored results; items 4-5 need new
-work/runs, item 6 is done. Commit per logical change; don't push. Stop
-after these checks and report the numbers — don't proceed to (d)/(e) or
-the programmatic-integration work without a further go-ahead.
+Items 1-3 (offline) and item 6 are DONE (2026-09-30). Items 4-5 need new
+work/runs — NOT started as of this writing. Commit per logical change;
+don't push. Stop after these checks and report the numbers — don't
+proceed to (d)/(e) or the programmatic-integration work without a further
+go-ahead.
 
 ---
 
