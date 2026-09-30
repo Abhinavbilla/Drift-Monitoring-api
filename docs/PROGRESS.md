@@ -8,6 +8,28 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Short cleanup pass (user, 2026-10-01) — IN PROGRESS, four items:**
+1. `build_joint_classifier` ran as L2 while docs described L1 (found and
+   fixed in the hardening pass, commit `bac6f1d`). Add a test asserting
+   the FITTED model's penalty AND solver (not just the constructor's
+   params). Mark every joint-detection number in README/docs as
+   "unverified: measured on a mis-specified classifier" until Step 4
+   re-evaluates -- do NOT rerun evaluations now.
+2. The model-serving example's window 4 (`dropoff_longitude`, D=0.0550)
+   was called "consistent with noise," but the hardening simulation says
+   0% of null trials exceed the floor at n=3,146/m=50,000 -- a real
+   contradiction. Compute: that window's actual calendar month(s) and its
+   population D vs. baseline for `dropoff_longitude`; P(D_obs>=0.0550 |
+   true D=0, n=3146, m=50000) from the existing null simulation; whether
+   windows are iid draws or ordered chronological slices. Rewrite the
+   README section to "flagged; cause not established."
+3. PAT default expiry: propose 90 days (override allowed, "never" still
+   optional) -- ASK before changing the current default (never).
+4. New isolation test: user B calling `/fit` on A's existing project_id
+   must not distinguish "exists, not yours" from "doesn't exist yet" --
+   404 or identical-to-new-project-creation behavior, never a
+   distinguishing 409 or other tell.
+
 **Hardening pass (user, 2026-09-30) — required before Step 5, DONE (all
 5 items).** The 2026-09-30 precondition check for Step 5 found this pass
 had NOT actually been done (no matching commits, no cross-user isolation
