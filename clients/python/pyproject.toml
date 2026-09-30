@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drift-monitor-client"
+version = "0.1.0"
+description = "Python client for the Drift Monitoring API."
+requires-python = ">=3.9"
+dependencies = [
+    "pandas>=2.0",
+    "requests>=2.28",
+    "pyarrow>=14.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["drift_monitor_client*"]
