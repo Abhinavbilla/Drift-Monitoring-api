@@ -47,8 +47,8 @@ def cleanup():
     conn = crud.get_connection()
     cur = conn.cursor()
     cur.execute("DELETE FROM api_tokens WHERE user_email LIKE 'test-pat-%@example.com'")
-    cur.execute("DELETE FROM baselines WHERE project_id LIKE 'test_pat_%'")
-    cur.execute("DELETE FROM projects WHERE id LIKE 'test_pat_%'")
+    cur.execute("DELETE FROM baselines WHERE project_id LIKE '%test_pat_%'")
+    cur.execute("DELETE FROM projects WHERE id LIKE '%test_pat_%'")
     conn.commit()
     conn.close()
 

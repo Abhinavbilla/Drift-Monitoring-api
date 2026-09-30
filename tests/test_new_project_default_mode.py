@@ -20,11 +20,17 @@ sys.path.insert(0, "tests")
 from _session_auth import mint_session_token  # noqa: E402
 
 import db.crud as crud
-from main import app
+from main import app, _internal_project_key
 
 client = TestClient(app)
-TOKEN = mint_session_token("new-project-default-test@example.com")
+EMAIL = "new-project-default-test@example.com"
+TOKEN = mint_session_token(EMAIL)
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+
+
+def _internal(public_id):
+    """Step 5 item 1: brand-new projects are stored owner-namespaced."""
+    return _internal_project_key(public_id, EMAIL)
 
 
 @pytest.fixture(autouse=True)
@@ -32,8 +38,8 @@ def cleanup():
     yield
     conn = crud.get_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM baselines WHERE project_id LIKE 'test_new_default_%'")
-    cur.execute("DELETE FROM projects WHERE id LIKE 'test_new_default_%'")
+    cur.execute("DELETE FROM baselines WHERE project_id LIKE '%test_new_default_%'")
+    cur.execute("DELETE FROM projects WHERE id LIKE '%test_new_default_%'")
     conn.commit()
     conn.close()
 
@@ -46,7 +52,7 @@ class TestNewProjectDefaultsToCalibrated:
             headers=HEADERS,
         )
         assert resp.status_code == 200
-        state = crud.get_baseline("test_new_default_brand_new")
+        state = crud.get_baseline(_internal("test_new_default_brand_new"))
         assert state["calibration_config"]["decision_mode"] == "calibrated"
 
     def test_brand_new_project_explicit_legacy_respected(self):
@@ -58,7 +64,7 @@ class TestNewProjectDefaultsToCalibrated:
             headers=HEADERS,
         )
         assert resp.status_code == 200
-        state = crud.get_baseline("test_new_default_explicit_legacy")
+        state = crud.get_baseline(_internal("test_new_default_explicit_legacy"))
         assert state["calibration_config"]["decision_mode"] == "legacy"
 
     def test_refit_of_new_default_project_stays_calibrated(self):
@@ -69,12 +75,12 @@ class TestNewProjectDefaultsToCalibrated:
         first_data = [rng.uniform(0, 1) for _ in range(100)]  # non-monotonic, high-cardinality -> continuous
         client.post("/fit/test_new_default_refit",
                     json={"reference_data": {"x": first_data}}, headers=HEADERS)
-        assert crud.get_baseline("test_new_default_refit")["calibration_config"]["decision_mode"] == "calibrated"
+        assert crud.get_baseline(_internal("test_new_default_refit"))["calibration_config"]["decision_mode"] == "calibrated"
 
         second_data = [rng.uniform(1000, 1001) for _ in range(100)]
         client.post("/fit/test_new_default_refit",
                     json={"reference_data": {"x": second_data}}, headers=HEADERS)
-        state = crud.get_baseline("test_new_default_refit")
+        state = crud.get_baseline(_internal("test_new_default_refit"))
         assert state["calibration_config"]["decision_mode"] == "calibrated"
         assert state["reference_data"]["x"][0] >= 1000  # the re-fit's new data did apply
 

@@ -27,8 +27,8 @@ def cleanup():
     yield
     conn = crud.get_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM baselines WHERE project_id LIKE 'test_del_proj_%'")
-    cur.execute("DELETE FROM projects WHERE id LIKE 'test_del_proj_%'")
+    cur.execute("DELETE FROM baselines WHERE project_id LIKE '%test_del_proj_%'")
+    cur.execute("DELETE FROM projects WHERE id LIKE '%test_del_proj_%'")
     conn.commit()
     conn.close()
 

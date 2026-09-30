@@ -19,11 +19,16 @@ from _session_auth import mint_session_token  # noqa: E402
 
 import db.crud as crud
 import main as main_module
-from main import app
+from main import app, _internal_project_key
 
 client = TestClient(app)
-TOKEN = mint_session_token("upload-endpoint-test@example.com")
+EMAIL = "upload-endpoint-test@example.com"
+TOKEN = mint_session_token(EMAIL)
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+
+
+def _internal(public_id):
+    return _internal_project_key(public_id, EMAIL)
 
 # Non-monotonic values -- a strictly increasing/linear sequence gets
 # excluded by the profiler as "Monotonic sequence (Likely Time or Row
@@ -41,8 +46,8 @@ def cleanup():
     yield
     conn = crud.get_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM baselines WHERE project_id LIKE 'test_upload_%'")
-    cur.execute("DELETE FROM projects WHERE id LIKE 'test_upload_%'")
+    cur.execute("DELETE FROM baselines WHERE project_id LIKE '%test_upload_%'")
+    cur.execute("DELETE FROM projects WHERE id LIKE '%test_upload_%'")
     conn.commit()
     conn.close()
 
@@ -58,7 +63,7 @@ class TestFitUpload:
         body = resp.json()
         assert body["inferred_feature_types"]["x"] == "continuous"
         assert body["inferred_feature_types"]["cat"] == "categorical"
-        state = crud.get_baseline("test_upload_csv_proj")
+        state = crud.get_baseline(_internal("test_upload_csv_proj"))
         assert state is not None
         assert len(state["reference_data"]["x"]) == 60
 
@@ -83,7 +88,7 @@ class TestFitUpload:
             headers=HEADERS,
         )
         assert resp.status_code == 200
-        state = crud.get_baseline("test_upload_calib_proj")
+        state = crud.get_baseline(_internal("test_upload_calib_proj"))
         assert state["calibration_config"]["decision_mode"] == "legacy"
 
     def test_malformed_calibration_config_json_rejected(self):

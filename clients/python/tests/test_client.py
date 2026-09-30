@@ -26,8 +26,15 @@ from drift_monitor_client import DriftClient, DriftClientError  # noqa: E402
 
 import db.crud as crud  # noqa: E402
 from auth.tokens import generate_token  # noqa: E402
+from main import _internal_project_key  # noqa: E402
 
 BASE_URL = os.environ.get("DRIFT_API_BASE_URL", "http://127.0.0.1:8000")
+CLIENT_TEST_EMAIL = "drift-client-test@example.com"
+
+
+def _internal(public_id):
+    """Step 5 item 1: fitted projects are stored owner-namespaced."""
+    return _internal_project_key(public_id, CLIENT_TEST_EMAIL)
 
 
 def _server_reachable() -> bool:
@@ -64,8 +71,8 @@ def cleanup_projects():
     yield
     conn = crud.get_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM baselines WHERE project_id LIKE 'test_client_%'")
-    cur.execute("DELETE FROM projects WHERE id LIKE 'test_client_%'")
+    cur.execute("DELETE FROM baselines WHERE project_id LIKE '%test_client_%'")
+    cur.execute("DELETE FROM projects WHERE id LIKE '%test_client_%'")
     conn.commit()
     conn.close()
 
@@ -101,7 +108,7 @@ class TestFitAndAnalyze:
     def test_calibration_config_passed_through(self, token):
         client = DriftClient(BASE_URL, token)
         client.fit("test_client_calib", _reference_df(80), calibration_config={"decision_mode": "legacy"})
-        state = crud.get_baseline("test_client_calib")
+        state = crud.get_baseline(_internal("test_client_calib"))
         assert state["calibration_config"]["decision_mode"] == "legacy"
 
     def test_categorical_column_survives_json_fit_path(self, token):
@@ -119,7 +126,7 @@ class TestFitAndAnalyze:
         # "reference_data" key at the storage layer (see db/crud.py's
         # insert_baseline docstring) -- so a surviving categorical column
         # shows up there, not under a separate key.
-        state = crud.get_baseline("test_client_catcol")
+        state = crud.get_baseline(_internal("test_client_catcol"))
         assert "cat" in state["reference_data"]
         assert len(state["reference_data"]["cat"]) == 80
 

@@ -138,6 +138,9 @@ def verify_access(credentials: HTTPAuthorizationCredentials = Security(bearer_sc
     return {"name": payload.get("name", "User"), "email": email, "auth_type": "session", "pat_scope": None}
 
 
+PROJECT_NAMESPACE_SEP = "::"
+
+
 def _project_owner(project_id: str) -> Optional[str]:
     conn = sqlite3.connect("drift.db")
     cursor = conn.cursor()
@@ -145,6 +148,68 @@ def _project_owner(project_id: str) -> Optional[str]:
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
+
+
+def _row_exists(internal_id: str) -> bool:
+    conn = sqlite3.connect("drift.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM projects WHERE id = ?", (internal_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
+
+def _baseline_row_exists(project_id: str) -> bool:
+    conn = sqlite3.connect("drift.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM baselines WHERE project_id = ?", (project_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
+
+def _internal_project_key(public_id: str, owner_email: str) -> str:
+    return f"{owner_email}{PROJECT_NAMESPACE_SEP}{public_id}"
+
+
+def _display_project_id(internal_id: str, owner_email: str) -> str:
+    prefix = f"{owner_email}{PROJECT_NAMESPACE_SEP}"
+    return internal_id[len(prefix):] if internal_id.startswith(prefix) else internal_id
+
+
+def _resolve_project_key(public_id: str, client: dict) -> str:
+    """Step 5 item 1 (2026-10-01): project ids are namespaced per owner
+    so two different users' same-named project ("demo") are always
+    different rows -- never a collision, and so /fit on it can never
+    reveal whether ANOTHER user already has one, by construction (not by
+    404 wording, which was cleanup item 4's narrower fix).
+
+    Resolution, always scoped to THIS caller, never another user's row:
+    1. Does the namespaced key (owner::public_id) already exist? Use it.
+    2. Else, does a LEGACY plain-key row (public_id, no namespace) exist
+       AND belong to this exact caller? Use it as-is -- pre-migration
+       projects are never force-migrated, they just keep their old key.
+       "Belongs to this caller" covers two cases: (a) a `projects` row
+       exists for it with a matching owner_email, or (b) NO `projects`
+       row exists at all but a `baselines` row does -- true legacy data
+       that predates ownership tracking entirely (e.g. inserted before
+       the projects table existed). Ownerless legacy rows are adoptable
+       by whichever caller references their exact plain id, same as
+       before this namespacing change -- unchanged behavior for them.
+    3. Else: brand new project for this caller -- namespaced from the
+       start. (If public_id happens to be taken by ANOTHER user under
+       the old plain-key scheme, this deliberately does NOT touch that
+       row -- the caller gets their own fresh namespaced one instead,
+       indistinguishable from any other new-project creation.)"""
+    namespaced = _internal_project_key(public_id, client["email"])
+    if _row_exists(namespaced):
+        return namespaced
+    owner = _project_owner(public_id)
+    if owner == client["email"]:
+        return public_id
+    if owner is None and _baseline_row_exists(public_id):
+        return public_id
+    return namespaced
 
 
 def _enforce_ownership(project_id: str, client: dict) -> None:
@@ -177,13 +242,36 @@ def _enforce_ownership(project_id: str, client: dict) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Baseline not found")
 
 
+def _require_existing_project(internal_id: str) -> None:
+    """Step 5 item 1 regression guard: _resolve_project_key always
+    returns EITHER a row the caller already owns OR a brand-new,
+    not-yet-created namespaced key (so /fit can create it) -- so
+    ownership checks on the resolved key alone can no longer tell 'yours'
+    apart from 'nothing here yet'. Fine for /fit (create-or-use is the
+    point); wrong for any endpoint that only reads/deletes/lists, since
+    those would otherwise silently succeed against a caller's own
+    nonexistent row instead of 404ing -- exactly the same information
+    leak the hardening pass closed, reopened as a side effect of
+    namespacing a resolved-but-absent key. Call this in every
+    non-/fit handler that doesn't already fail closed by needing the
+    baseline's contents to do its job (get_baseline, /analyze, /predict,
+    /health already do, implicitly, by requiring crud.get_baseline(...)
+    to return something)."""
+    if not _row_exists(internal_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Baseline not found")
+
+
 def verify_project_access(project_id: str, client: dict = Depends(verify_access)) -> dict:
     """Wraps verify_access with PAT project-scope enforcement AND
     cross-user ownership isolation (both session-JWT and PAT). A PAT's
-    project_scope is a JSON list of project_ids it may access, or ["*"]
-    for unrestricted-but-still-this-user's-tokens -- scope narrows what
-    THIS user's own token can reach, ownership stops it reaching anyone
-    else's project regardless of scope."""
+    project_scope is checked against the PUBLIC project_id (what the
+    token was scoped to), not the internal key. Resolves and attaches
+    client["internal_project_id"] (Step 5 item 1) -- handlers use that
+    for all storage calls, never the raw path param, so two users'
+    same-named projects are always different rows. _enforce_ownership on
+    the resolved key is a redundant safety net (resolution already
+    guarantees it belongs to this caller or is brand new) kept for
+    defense in depth."""
     if client.get("auth_type") == "pat":
         scope = client.get("pat_scope")
         if scope is not None and "*" not in scope and project_id not in scope:
@@ -191,7 +279,9 @@ def verify_project_access(project_id: str, client: dict = Depends(verify_access)
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This access token is not scoped to project '{project_id}'."
             )
-    _enforce_ownership(project_id, client)
+    internal_id = _resolve_project_key(project_id, client)
+    _enforce_ownership(internal_id, client)
+    client["internal_project_id"] = internal_id
     return client
 
 
@@ -205,7 +295,9 @@ def verify_model_access(model_id: str, client: dict = Depends(verify_access)) ->
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This access token is not scoped to project '{model_id}'."
             )
-    _enforce_ownership(model_id, client)
+    internal_id = _resolve_project_key(model_id, client)
+    _enforce_ownership(internal_id, client)
+    client["internal_project_id"] = internal_id
     return client
 
 
@@ -246,7 +338,8 @@ def get_baseline(project_id: str, client: dict = Depends(verify_project_access))
     import json
     conn = sqlite3.connect("drift.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT iqr_fences, feature_types, modality FROM baselines WHERE project_id = ?", (project_id,))
+    cursor.execute("SELECT iqr_fences, feature_types, modality FROM baselines WHERE project_id = ?",
+                    (client["internal_project_id"],))
     row = cursor.fetchone()
     conn.close()
     if not row:
@@ -261,11 +354,12 @@ def get_logs(project_id: str, client: dict = Depends(verify_project_access)):
     """Returns the recent logs for a project (last 1000)."""
     import sqlite3
     import json
+    _require_existing_project(client["internal_project_id"])
     conn = sqlite3.connect("drift.db")
     cursor = conn.cursor()
     cursor.execute(
         "SELECT input_data, score, is_ood FROM logs WHERE project_id = ? ORDER BY rowid DESC LIMIT 1000",
-        (project_id,)
+        (client["internal_project_id"],)
     )
     rows = cursor.fetchall()
     conn.close()
@@ -438,7 +532,12 @@ def _resolve_and_persist_fit(
     /fit/{project_id}/upload (multipart file) -- both endpoints build
     inferred_feature_types/continuous_features/categorical_features their
     own way (see each caller), then converge here: resolve the
-    calibration config, persist the baseline, and build the response."""
+    calibration config, persist the baseline, and build the response.
+
+    project_id here is the PUBLIC id (used only in the response message);
+    all storage calls use client["internal_project_id"] (Step 5 item 1:
+    owner-namespaced, so two users' same-named projects never collide)."""
+    internal_id = client["internal_project_id"]
     # 8. Resolve the calibration config.
     # - Caller provided one explicitly (even {}): resolve and store it,
     #   whether this is a new or existing project.
@@ -453,7 +552,7 @@ def _resolve_and_persist_fit(
     #   resolve to CalibrationConfig's own "legacy" default; only a project
     #   created from this point on gets an explicit "calibrated" config
     #   written at creation time.
-    is_new_project = crud.get_baseline(project_id) is None
+    is_new_project = crud.get_baseline(internal_id) is None
     if calibration_config_request is not None:
         resolved_calibration_config = CalibrationConfig.from_dict(calibration_config_request).to_dict()
     elif is_new_project:
@@ -463,7 +562,7 @@ def _resolve_and_persist_fit(
 
     # 9. Persist baselines
     insert_kwargs = dict(
-        project_id=project_id,
+        project_id=internal_id,
         feature_types=inferred_feature_types,
         reference_data=continuous_features,
         categorical_data=categorical_features,
@@ -472,7 +571,7 @@ def _resolve_and_persist_fit(
         insert_kwargs["calibration_config"] = resolved_calibration_config
     cleaning_summary = crud.insert_baseline(**insert_kwargs)
 
-    crud.create_project(project_id, f"Project {project_id}", client["email"])
+    crud.create_project(internal_id, f"Project {project_id}", client["email"])
 
     # 10. Minimum-detectable-D + configured floor per continuous feature, at
     # this reference's size -- API response field only, shown regardless of
@@ -480,7 +579,7 @@ def _resolve_and_persist_fit(
     # cannot detect before choosing floors (see docs/PROGRESS.md HANDOFF).
     active_config = CalibrationConfig.from_dict(
         resolved_calibration_config if resolved_calibration_config != "__UNSET__"
-        else (crud.get_baseline(project_id) or {}).get("calibration_config")
+        else (crud.get_baseline(internal_id) or {}).get("calibration_config")
     )
     calibration_info = {}
     for feature, ftype in inferred_feature_types.items():
@@ -619,19 +718,20 @@ def predict_realtime_anomaly(project_id: str, request: PredictRequest, backgroun
     """
     Check a single incoming data point against the locked IQR boundaries.
     """
-    state = crud.get_baseline(project_id)
+    internal_id = client["internal_project_id"]
+    state = crud.get_baseline(internal_id)
     if not state:
         raise HTTPException(status_code=404, detail="Baseline not found. Call /fit first.")
-        
+
     adapter = TabularAdapter()
     clean_data = adapter.clean_data(request.features)
-    
+
     score, is_ood, feature_results = compute_iqr_anomalies(
-        input_data=clean_data, 
+        input_data=clean_data,
         baselines=state["iqr_fences"]
     )
-    
-    background_tasks.add_task(crud.insert_log, project_id, clean_data, score, is_ood)
+
+    background_tasks.add_task(crud.insert_log, internal_id, clean_data, score, is_ood)
     
     return PredictResponse(
         is_anomaly=bool(is_ood),
@@ -661,8 +761,11 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
                            background_tasks: BackgroundTasks) -> AnalyzeBatchResponse:
     """Shared tail of /analyze/{project_id} (JSON body) and
     /analyze/{project_id}/upload (multipart file) -- both converge on the
-    same flat {feature_name: [values...]} shape."""
-    state = crud.get_baseline(project_id)
+    same flat {feature_name: [values...]} shape. project_id is the
+    PUBLIC id (used for display/email only); storage uses
+    client["internal_project_id"] (Step 5 item 1)."""
+    internal_id = client["internal_project_id"]
+    state = crud.get_baseline(internal_id)
     if not state:
         raise HTTPException(status_code=404, detail="Baseline not found. Call /fit first.")
 
@@ -747,12 +850,12 @@ def fit_text_baseline(project_id: str, request: FitTextBaselineRequest, client: 
         raise HTTPException(status_code=400, detail=f"Could not embed reference_texts: {e}")
 
     crud.insert_embedding_baseline(
-        project_id=project_id,
+        project_id=client["internal_project_id"],
         modality="text",
         embeddings=embeddings,
         model_name=TextAdapter.model_name,
     )
-    crud.create_project(project_id, f"Project {project_id}", client["email"])
+    crud.create_project(client["internal_project_id"], f"Project {project_id}", client["email"])
 
     message = f"Text baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
     if sample_warning:
@@ -769,7 +872,7 @@ def analyze_text_batch(
     client: dict = Depends(verify_project_access)
 ):
     """Compares a production text batch against the locked text baseline via the Domain Classifier Test."""
-    state = crud.get_baseline(project_id)
+    state = crud.get_baseline(client["internal_project_id"])
     if not state:
         raise HTTPException(status_code=404, detail="Baseline not found. Call /fit/{project_id}/text first.")
     if state["modality"] != "text":
@@ -813,12 +916,12 @@ def fit_image_baseline(project_id: str, request: FitImageBaselineRequest, client
         raise HTTPException(status_code=400, detail=f"Could not decode reference_images: {e}")
 
     crud.insert_embedding_baseline(
-        project_id=project_id,
+        project_id=client["internal_project_id"],
         modality="image",
         embeddings=embeddings,
         model_name=ImageAdapter.model_name,
     )
-    crud.create_project(project_id, f"Project {project_id}", client["email"])
+    crud.create_project(client["internal_project_id"], f"Project {project_id}", client["email"])
 
     message = f"Image baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
     if sample_warning:
@@ -835,7 +938,7 @@ def analyze_image_batch(
     client: dict = Depends(verify_project_access)
 ):
     """Compares a production image batch against the locked image baseline via the Domain Classifier Test."""
-    state = crud.get_baseline(project_id)
+    state = crud.get_baseline(client["internal_project_id"])
     if not state:
         raise HTTPException(status_code=404, detail="Baseline not found. Call /fit/{project_id}/image first.")
     if state["modality"] != "image":
@@ -881,12 +984,12 @@ def fit_joint_baseline(project_id: str, request: FitJointBaselineRequest, client
         raise HTTPException(status_code=400, detail=str(e))
 
     crud.insert_joint_baseline(
-        project_id=project_id,
+        project_id=client["internal_project_id"],
         embeddings=embeddings,
         tabular_stats=tabular_stats,
         model_name="joint-v1",
     )
-    crud.create_project(project_id, f"Project {project_id}", client["email"])
+    crud.create_project(client["internal_project_id"], f"Project {project_id}", client["email"])
 
     return EmbeddingFitResponse(
         status="success",
@@ -905,7 +1008,7 @@ def analyze_joint_batch(
     client: dict = Depends(verify_project_access)
 ):
     """Compares a production batch of joint records against the locked joint baseline via the Domain Classifier Test."""
-    state = crud.get_baseline(project_id)
+    state = crud.get_baseline(client["internal_project_id"])
     if not state:
         raise HTTPException(status_code=404, detail="Baseline not found. Call /fit/{project_id}/joint first.")
     if state["modality"] != "joint":
@@ -944,11 +1047,12 @@ def check_system_health(project_id: str, client_name: str = Depends(verify_proje
     Ping this endpoint (e.g., every 60 seconds via a cron job or dashboard) 
     to see if the system is currently experiencing a wave of real-time anomalies.
     """
-    state = crud.get_baseline(project_id)
+    internal_id = client_name["internal_project_id"]
+    state = crud.get_baseline(internal_id)
     if not state:
         raise HTTPException(status_code=404, detail="Baseline not found. Call /fit first.")
-        
-    is_alert, ratio = check_drift_alert(project_id, window_size=10, threshold=0.3)
+
+    is_alert, ratio = check_drift_alert(internal_id, window_size=10, threshold=0.3)
     status_message = "Degraded" if is_alert else "Healthy"
     
     return HealthCheckResponse(
@@ -961,15 +1065,18 @@ def check_system_health(project_id: str, client_name: str = Depends(verify_proje
 @app.get("/projects", tags=["Management"])
 def list_projects(client: dict = Depends(verify_access)):
     """
-    Returns a list of project IDs for the authenticated user.
+    Returns a list of project IDs for the authenticated user. Internally
+    stored ids may be owner-namespaced (Step 5 item 1, "email::name") --
+    displayed here with that prefix stripped, so a user always sees just
+    the name they created it with, never their own email echoed back.
     """
     conn = sqlite3.connect("drift.db")
     cursor = conn.cursor()
     cursor.execute("SELECT id FROM projects WHERE owner_email = ?", (client["email"],))
     rows = cursor.fetchall()
     conn.close()
-    
-    projects = [row[0] for row in rows]
+
+    projects = [_display_project_id(row[0], client["email"]) for row in rows]
     return {"projects": projects}
 
 
@@ -1000,13 +1107,15 @@ def _delete_project_data(project_id: str) -> str:
 @app.delete("/projects/{project_id}", tags=["Management"])
 def delete_project(project_id: str, client: dict = Depends(verify_project_access)):
     """Permanently deletes a project and all its associated baseline/log data."""
-    clean_project_id = _delete_project_data(project_id)
-    return {"status": "success", "message": f"Project '{clean_project_id}' completely wiped."}
+    _require_existing_project(client["internal_project_id"])
+    _delete_project_data(client["internal_project_id"])
+    return {"status": "success", "message": f"Project '{project_id}' completely wiped."}
 
 
 @app.delete("/models/{model_id}", tags=["Management"], deprecated=True)
 def delete_model(model_id: str, client: dict = Depends(verify_model_access)):
     """Deprecated alias for DELETE /projects/{project_id} -- kept for
     backward compatibility, same behavior, not removed."""
-    clean_model_id = _delete_project_data(model_id)
-    return {"status": "success", "message": f"Model '{clean_model_id}' completely wiped."}
+    _require_existing_project(client["internal_project_id"])
+    _delete_project_data(client["internal_project_id"])
+    return {"status": "success", "message": f"Model '{model_id}' completely wiped."}

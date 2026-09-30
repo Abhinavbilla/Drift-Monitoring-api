@@ -1,12 +1,19 @@
 """
-Cross-user isolation (2026-09-30 hardening pass, highest-priority item).
+Cross-user isolation (2026-09-30 hardening pass, highest-priority item;
+project-id namespacing added 2026-10-01, Step 5 Part 1 item 1).
 
 User A creates a project. User B -- via session JWT, via an unscoped
 ("*") PAT, and via a PAT explicitly (mis)scoped to A's own project_id --
-must get 404 from EVERY project-scoped endpoint for that project: read,
-analyze, overwrite (/fit), list, delete. A PAT scoped to A's project_id
-proves scope alone cannot grant cross-account access -- ownership is a
-separate, stricter gate.
+must get 404 from EVERY read/analyze/list/delete endpoint for that
+project. A PAT scoped to A's project_id proves scope alone cannot grant
+cross-account access -- ownership is a separate, stricter gate.
+
+/fit is the deliberate exception to "404 for anything not yours": project
+ids are namespaced per owner (main.py's _resolve_project_key), so B
+POSTing /fit under A's project name never touches A's row at all -- it
+just creates B's OWN separate project under that same display name (200,
+not 404/409). See TestForeignFitCreatesOwnProject below for the coverage
+that replaces the old "must 404" expectation for /fit specifically.
 
 Also covers: PAT default expiry (never, unless set), revoked tokens
 rejected, last_used_at updates, and a repo/logs/reports grep for any
@@ -31,7 +38,7 @@ from _session_auth import mint_session_token  # noqa: E402
 
 import db.crud as crud
 from auth.tokens import generate_token
-from main import app
+from main import app, _internal_project_key
 
 client = TestClient(app)
 
@@ -97,9 +104,9 @@ def setup_and_teardown():
 
     conn = crud.get_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM baselines WHERE project_id LIKE 'test_iso_%'")
-    cur.execute("DELETE FROM projects WHERE id LIKE 'test_iso_%'")
-    cur.execute("DELETE FROM logs WHERE project_id LIKE 'test_iso_%'")
+    cur.execute("DELETE FROM baselines WHERE project_id LIKE '%test_iso_%'")
+    cur.execute("DELETE FROM projects WHERE id LIKE '%test_iso_%'")
+    cur.execute("DELETE FROM logs WHERE project_id LIKE '%test_iso_%'")
     cur.execute("DELETE FROM api_tokens WHERE id LIKE 'iso-%'")
     conn.commit()
     conn.close()
@@ -130,13 +137,13 @@ def pat_b_scoped_to_a_project():
 
 # Endpoint x expected-status table. Each entry: (method, path, kwargs).
 # All must return 404 for user B -- a stranger cannot even tell the
-# project exists.
+# project exists. /fit is deliberately NOT in this list: it's namespaced
+# per owner (see module docstring), so it always succeeds for B by
+# creating B's own separate project -- covered instead by
+# TestForeignFitCreatesOwnProject below.
 ENDPOINTS = [
     ("GET", f"/baseline/{PROJECT}", {}),
     ("GET", f"/logs/{PROJECT}", {}),
-    ("POST", f"/fit/{PROJECT}", {"json": {"reference_data": {"x": [1.0, 2.0, 3.0] * 20}}}),
-    ("POST", f"/fit/{PROJECT}/upload",
-     {"files": {"file": ("r.csv", b"x\n1.0\n2.0\n3.0\n", "text/csv")}}),
     ("POST", f"/predict/{PROJECT}", {"json": {"features": {"x": 5.0}}}),
     ("POST", f"/analyze/{PROJECT}", {"json": {"production_data": {"x": [1.0, 2.0, 3.0] * 20}}}),
     ("POST", f"/analyze/{PROJECT}/upload",
@@ -144,10 +151,7 @@ ENDPOINTS = [
     ("GET", f"/health/{PROJECT}", {}),
     ("DELETE", f"/projects/{PROJECT}", {}),
     ("DELETE", f"/models/{PROJECT}", {}),
-    ("POST", f"/fit/{PROJECT}_text/text", {"json": {"reference_texts": ["a", "b", "c", "d", "e"]}}),
     ("POST", f"/analyze/{PROJECT}_text/text", {"json": {"production_texts": ["a", "b", "c", "d", "e"]}}),
-    ("POST", f"/fit/{PROJECT}_image/image",
-     {"json": {"reference_images": [_solid_color_image_b64((10, 10, 10))] * 5}}),
     ("POST", f"/analyze/{PROJECT}_image/image",
      {"json": {"production_images": [_solid_color_image_b64((10, 10, 10))] * 5}}),
 ]
@@ -182,31 +186,66 @@ class TestScopeCannotGrantCrossAccountAccess:
         assert resp.status_code == 404, resp.text
 
 
-class TestFitDoesNotRevealExistenceViaStatusCode:
-    """2026-10-01 cleanup item 4: POST /fit is the one endpoint where
-    'project doesn't exist' and 'project exists' are NOT symmetric by
-    design -- fitting a genuinely free project_id succeeds (200, creates
-    it), which could let a caller probe whether an ID is taken by reading
-    the status code alone, even without ever seeing its contents. The
-    requirement: a foreign-owned existing project must respond exactly
-    like the project-not-found case (404), and never with a distinguishing
-    409/"already exists" style response that would itself be a tell."""
+class TestForeignFitCreatesOwnProject:
+    """2026-10-01 Step 5 item 1: project ids are namespaced per owner
+    (owner_email::public_id internally), so B's /fit under a name A
+    already owns can never reveal anything about A's project via status
+    code -- it just succeeds (200) and creates B's OWN independent row,
+    indistinguishable from fitting any other free name. Supersedes the
+    narrower 2026-10-01 cleanup-item-4 behavior (404-not-409 on /fit for a
+    foreign project), which no longer applies now that /fit never touches
+    a foreign project at all. Every OTHER endpoint is still a hard 404 for
+    a project B doesn't own -- covered by ENDPOINTS above."""
 
-    def test_foreign_existing_project_is_404_not_409(self):
-        resp = client.post(f"/fit/{PROJECT}", json={"reference_data": {"x": [1.0, 2.0, 3.0] * 20}},
+    FIT_PROBE = "test_iso_fit_probe"
+
+    @pytest.fixture(autouse=True)
+    def _a_owns_it_first(self):
+        resp = client.post(f"/fit/{self.FIT_PROBE}",
+                            json={"reference_data": {"x": [1.0, 2.0, 3.0, 4.0, 5.0] * 20}},
+                            headers=HEADERS_A_SESSION)
+        assert resp.status_code == 200, resp.text
+        yield
+
+    def test_b_fit_on_as_project_name_succeeds(self):
+        resp = client.post(f"/fit/{self.FIT_PROBE}",
+                            json={"reference_data": {"x": [100.0, 200.0, 300.0, 400.0, 500.0] * 20}},
                             headers=HEADERS_B_SESSION)
-        assert resp.status_code == 404
+        assert resp.status_code == 200, resp.text
         assert resp.status_code != 409
 
-    def test_404_detail_does_not_leak_owner_identity(self):
-        resp = client.post(f"/fit/{PROJECT}", json={"reference_data": {"x": [1.0, 2.0, 3.0] * 20}},
-                            headers=HEADERS_B_SESSION)
+    def test_b_fit_creates_a_separate_row_a_untouched(self):
+        client.post(f"/fit/{self.FIT_PROBE}",
+                    json={"reference_data": {"x": [100.0, 200.0, 300.0, 400.0, 500.0] * 20}},
+                    headers=HEADERS_B_SESSION)
+        a_state = crud.get_baseline(_internal_project_key(self.FIT_PROBE, USER_A_EMAIL))
+        b_state = crud.get_baseline(_internal_project_key(self.FIT_PROBE, USER_B_EMAIL))
+        assert a_state is not None and b_state is not None
+        assert max(a_state["reference_data"]["x"]) < 10  # still A's original small values
+        assert min(b_state["reference_data"]["x"]) >= 100  # B's own separate values
+
+    def test_b_project_appears_in_both_owners_own_listings(self):
+        """Each owns their own row under the same display name -- not a
+        leak, since /projects only ever lists the caller's own rows."""
+        client.post(f"/fit/{self.FIT_PROBE}",
+                    json={"reference_data": {"x": [100.0, 200.0, 300.0, 400.0, 500.0] * 20}},
+                    headers=HEADERS_B_SESSION)
+        assert self.FIT_PROBE in client.get("/projects", headers=HEADERS_A_SESSION).json()["projects"]
+        assert self.FIT_PROBE in client.get("/projects", headers=HEADERS_B_SESSION).json()["projects"]
+
+
+class Test404DetailDoesNotLeakOwnerIdentity:
+    """2026-10-01 cleanup item 4, still applicable to every non-/fit
+    endpoint: the 404 for 'exists, not yours' must read identically to
+    the 404 for 'nobody has ever touched this id' -- no wording
+    difference that would itself be a distinguishing tell."""
+
+    def test_detail_does_not_mention_owner_email(self):
+        resp = client.get(f"/baseline/{PROJECT}", headers=HEADERS_B_SESSION)
+        assert resp.status_code == 404
         assert USER_A_EMAIL not in resp.text
 
-    def test_404_detail_is_identical_to_a_truly_nonexistent_project(self):
-        """The 404 body for 'exists, not yours' must read the same as for
-        a project nobody has ever touched -- no wording difference that
-        would itself distinguish the two cases."""
+    def test_detail_is_identical_to_a_truly_nonexistent_project(self):
         never_existed = "test_iso_truly_never_existed_anywhere"
         resp_foreign = client.get(f"/baseline/{PROJECT}", headers=HEADERS_B_SESSION)
         resp_free = client.get(f"/baseline/{never_existed}", headers=HEADERS_B_SESSION)

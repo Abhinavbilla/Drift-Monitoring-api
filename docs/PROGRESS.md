@@ -14,15 +14,43 @@ API changes, self-healing migrations, ask before changing any default,
 commit per logical change, don't push, no new Streamlit UI, no raw rows
 or tokens in history/logs, every new endpoint gets a two-user isolation
 test. Scope, in order:
-0. Recon only, no code: `docs/step5_recon.md` (<=40 lines) -- NULL/NaN/inf
-   handling in KS/PSI/IQR for /fit and /analyze; behavior on a missing
-   column, extra column, dtype change; what `/logs` stores; `/fit`-on-
-   existing-project behavior; SQLite WAL + busy timeout status. Continue
-   unless a finding implies changing a default -- then ask first.
-1. Project IDs unique per owner (user B's "demo" and A's "demo" are
-   different projects) -- closes the residual `/fit` 200-vs-404
-   existence signal from the cleanup pass by construction; keep existing
-   data working.
+0. **DONE.** Recon only, no code: `docs/step5_recon.md` (40 lines) --
+   NULL/NaN/inf handling in KS/PSI/IQR for /fit and /analyze; behavior on
+   a missing column, extra column, dtype change; what `/logs` stores;
+   `/fit`-on-existing-project behavior; SQLite WAL + busy timeout status.
+   No proposal changed a default -- continued straight to item 1.
+1. **DONE.** Project IDs unique per owner (user B's "demo" and A's "demo"
+   are different projects) -- closes the residual `/fit` 200-vs-404
+   existence signal from the cleanup pass by construction; existing
+   (pre-migration) plain-keyed data keeps working unmigrated, including
+   truly ownerless legacy rows (no `projects` entry at all).
+   `main.py`: `PROJECT_NAMESPACE_SEP`, `_internal_project_key`,
+   `_resolve_project_key` (3-case resolution), `_display_project_id`;
+   `verify_project_access`/`verify_model_access` attach
+   `client["internal_project_id"]`, every storage call in every handler
+   now uses that instead of the raw path param. Found and fixed a real
+   regression this introduced along the way: ownership checks on the
+   *resolved* key can never distinguish "yours" from "nothing here yet"
+   (resolution always returns one or the other) -- `get_logs`,
+   `delete_project`, `delete_model` didn't independently check existence,
+   so they silently "succeeded" against a stranger's project by quietly
+   acting on the caller's own empty slot instead. Added
+   `_require_existing_project` and call it in those three handlers;
+   `get_baseline`/`/analyze`/`/predict`/`/health` were already safe since
+   they need the baseline's contents to respond at all. Live smoke-tested
+   against the running server: two different users fitting "demo" get
+   distinct fences (q1/q3 2.0/4.0 vs 200.0/400.0), each project list
+   shows only their own, deleting a truly nonexistent project now 404s
+   (previously a silent no-op 200). Full suite green (187 backend +
+   11 live-client). Rewrote `tests/test_cross_user_isolation.py`'s
+   `ENDPOINTS` table (removed the four now-stale `/fit`-expects-404
+   entries) and replaced `TestFitDoesNotRevealExistenceViaStatusCode`
+   with `TestForeignFitCreatesOwnProject` (B's /fit under A's name
+   succeeds, creates an independent row, A's data verified untouched).
+   Also fixed a latent test-hygiene bug found while doing this: every
+   test file's cleanup fixture used an anchored `LIKE 'prefix_%'` pattern
+   that silently stopped matching namespaced rows (`email::prefix_x`) --
+   changed to `LIKE '%prefix_%'` across 7 files.
 2. History: `analysis_runs` table (statistics only, never raw rows), one
    row per `/analyze` and upload-analyze call. `GET /history/{project_id}`
    with since/until/feature/alert_only filters, pagination, per-feature

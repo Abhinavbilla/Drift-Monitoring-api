@@ -15,11 +15,17 @@ sys.path.insert(0, "tests")
 from _session_auth import mint_session_token  # noqa: E402
 
 import db.crud as crud
-from main import app
+from main import app, _internal_project_key
 
 client = TestClient(app)
-TOKEN = mint_session_token("feature-types-test@example.com")
+EMAIL = "feature-types-test@example.com"
+TOKEN = mint_session_token(EMAIL)
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+
+
+def _internal(public_id):
+    """Step 5 item 1: stored project ids are owner-namespaced."""
+    return _internal_project_key(public_id, EMAIL)
 
 
 @pytest.fixture(autouse=True)
@@ -27,8 +33,8 @@ def cleanup():
     yield
     conn = crud.get_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM baselines WHERE project_id LIKE 'test_ftypes_%'")
-    cur.execute("DELETE FROM projects WHERE id LIKE 'test_ftypes_%'")
+    cur.execute("DELETE FROM baselines WHERE project_id LIKE '%test_ftypes_%'")
+    cur.execute("DELETE FROM projects WHERE id LIKE '%test_ftypes_%'")
     conn.commit()
     conn.close()
 
@@ -52,7 +58,7 @@ class TestNoSilentDrop:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["inferred_feature_types"]["cat"] == "categorical"
-        state = crud.get_baseline("test_ftypes_wrongdict")
+        state = crud.get_baseline(_internal("test_ftypes_wrongdict"))
         assert "cat" in state["reference_data"]
         assert len(state["reference_data"]["cat"]) == 60
 
@@ -64,7 +70,7 @@ class TestNoSilentDrop:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["inferred_feature_types"]["x"] == "continuous"
-        state = crud.get_baseline("test_ftypes_wrongdict2")
+        state = crud.get_baseline(_internal("test_ftypes_wrongdict2"))
         assert "x" in state["reference_data"]
         assert len(state["reference_data"]["x"]) == 60
 
