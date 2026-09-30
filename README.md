@@ -74,21 +74,22 @@ Both happen through the dashboard's UI: upload training data to lock a baseline 
 
 ## Scope and Supported Data
 
-Drift Monitoring API covers three input modalities through one shared adapter/baseline/dashboard architecture: **tabular**, **text**, and **image** data. Tabular uses statistically-grounded methods (KS-test, PSI, IQR); text and image share a single modality-agnostic method (the **Domain Classifier Test**), since both reduce to comparing two sets of embedding vectors.
+Drift Monitoring API covers four input modalities through one shared adapter/baseline/dashboard architecture: **tabular**, **text**, **image**, and **joint** (tabular+text+image combined). Tabular uses statistically-grounded methods (KS-test, PSI, IQR); text, image, and joint share a single modality-agnostic method (the **Domain Classifier Test**), since all three reduce to comparing two sets of embedding vectors.
 
 | Modality | Supported Inputs | Detection Method |
 |----------|-------------------|-------------------|
 | Tabular | CSV, TSV, Excel (.xlsx, .xls), JSON, JSON Lines, Parquet, ARFF, compressed (.gz, .zip) | Two-sample KS-test (continuous), PSI (categorical), IQR (real-time) |
 | Text | Batches of raw strings | Domain Classifier Test (AUC-based) on `all-MiniLM-L6-v2` embeddings |
 | Image | JPEG, PNG batches | Domain Classifier Test (AUC-based) on `resnet18` embeddings |
+| Joint (multimodal) | Records combining any subset of tabular fields, text, and image per record | Domain Classifier Test on a concatenated joint embedding (tabular + text + image + a bounded interaction term) |
 
-**Not supported:** audio, video, per-token/per-pixel drift localization, and real-time/streaming detection for any modality (all three are batch-based).
+**Not supported:** audio, video, per-token/per-pixel drift localization, and real-time/streaming detection for any modality (all four are batch-based). Joint additionally has no dashboard UI yet — it's API-only (see [Known Limitations](#known-limitations)).
 
 **Why this scope?**
 
-KS-test, PSI, and IQR-based methods are mathematically grounded in continuous and categorical feature distributions, and remain tabular-only. Text and image don't share that mathematical structure with each other or with tabular data, but they *do* share one with each other — both are just vectors once embedded — so a single Domain Classifier Test (train a classifier to distinguish reference vs. current embeddings; AUC well above 0.5 indicates drift) covers both without inventing two separate systems.
+KS-test, PSI, and IQR-based methods are mathematically grounded in continuous and categorical feature distributions, and remain tabular-only. Text and image don't share that mathematical structure with each other or with tabular data, but they *do* share one with each other — both are just vectors once embedded — so a single Domain Classifier Test (train a classifier to distinguish reference vs. current embeddings; AUC well above 0.5 indicates drift) covers both without inventing two separate systems. Joint extends the same idea one step further: instead of monitoring each modality in isolation, it concatenates all of them into one vector per record, so it can catch a drift pattern none of the single-modality checks can see on their own — a case where tabular metadata is individually normal, the text is individually normal, and the image is individually normal, but the *combination* has changed (e.g. records now systematically pairing metadata with the wrong image). See [How It Works](#how-it-works) for the mechanism and [Known Limitations](#known-limitations) for exactly how far that detection currently generalizes.
 
-> **Validation status:** the tabular path has the full four-part validation methodology behind it (see [Validation Results](#validation-results)) run against a 4.5M-row real-world dataset. The text/image path has been smoke-tested (adapters produce correct, deterministic embeddings; the detector correctly centers near AUC=0.5 on same-distribution data and flags clearly-separated data) and manually verified end-to-end, but has **not** yet been through that same four-part methodology — no precision/recall/F1 numbers are published for it, deliberately, until that's done. One finding from manual testing worth noting: at small batch sizes (~40 samples), two genuinely different-but-same-domain text batches produced a borderline AUC (0.69, just above the 0.65 threshold) — the AUC threshold and/or minimum recommended batch size for text may need tuning once the full validation is run.
+> **Validation status:** the tabular path has the full four-part validation methodology behind it (see [Validation Results](#validation-results)) run against a 4.5M-row real-world dataset. The text/image path has been smoke-tested (adapters produce correct, deterministic embeddings; the detector correctly centers near AUC=0.5 on same-distribution data and flags clearly-separated data) and manually verified end-to-end, but has **not** yet been through that same four-part methodology — no precision/recall/F1 numbers are published for it, deliberately, until that's done. One finding from manual testing worth noting: at small batch sizes (~40 samples), two genuinely different-but-same-domain text batches produced a borderline AUC (0.69, just above the 0.65 threshold) — the AUC threshold and/or minimum recommended batch size for text may need tuning once the full validation is run. A separate real-world (not synthetic) smoke test across all four modalities, including joint, was also run against the [PetFinder.my Adoption Prediction dataset](#real-world-multimodal-smoke-test-petfindermy) — see that section for numbers; it's still a smoke test, not the four-part methodology.
 
 ---
 
@@ -117,9 +118,17 @@ Every incoming prediction is individually scored against IQR fences computed fro
 
 Text and image batches are embedded (`all-MiniLM-L6-v2` for text, `resnet18` for images) and compared using a classifier trained to distinguish reference from current embeddings — cross-validated to avoid the overfitting-inflates-AUC failure mode. An AUC near 0.5 means the two batches are indistinguishable (no drift); an AUC well above it means they're separable (drift). Same conceptual workflow as tabular — lock a baseline, analyze a batch — just a different math under the hood.
 
+**Joint Multimodal Context Drift Detection**
+
+Beyond monitoring tabular, text, and image data independently, `/fit/{project_id}/joint` and `/analyze/{project_id}/joint` build one joint embedding per record — z-scored/frequency-encoded tabular fields, text and image embeddings, and a bounded interaction term (a fixed random projection of tabular × text/image, catching cases where a modality is absent) all concatenated together — and run the same Domain Classifier Test against it. This is a genuinely different capability from running the three single-modality checks side by side: it can catch a **correlation-break** where every modality's own marginal distribution is completely unchanged and only the *pairing* between modalities has shifted (e.g. metadata that's individually normal but now systematically attached to the wrong image). Built as a fully separate, additive capability — `adapters/joint.py` and its own detector configuration — that leaves the existing tabular/text/image pipelines byte-for-byte unmodified. Its detection currently generalizes across noise but only at roughly the effect size it was validated on — see [Known Limitations](#known-limitations) for the precise, tested boundary of what it does and doesn't catch.
+
 **Multi-format File Ingestion**
 
 The file reader (implemented in `dashboard.py`) handles encoding detection automatically (UTF-8, CP1252, Latin-1, ISO-8859-1), parses ARFF attribute headers, detects libsvm-format .dat files, reads all sheets from multi-sheet Excel files with a schema consistency warning, and handles gzip and zip compressed inputs without requiring pre-processing.
+
+**Robust Dataset Ingestion**
+
+Every `/fit` and `/analyze` endpoint validates structure (matching column lengths, non-empty payloads, minimum sample counts, at-least-one-modality-present for joint records) before any DataFrame construction or embedding compute runs, returning a specific `422` naming exactly what's wrong instead of a raw pandas/numpy traceback. Tabular ingestion coerces mixed-type columns (a stray non-numeric cell like `"N/A"` in an otherwise-numeric column) using the same threshold-based rule the profiler already uses for classification, reporting how many values were dropped per column (`cleaning_summary` in the `/fit` response) rather than silently losing them or crashing. Categorical cardinality is capped at fit time. All four modalities catch the actual exceptions their adapters can raise (`UnidentifiedImageError`, `binascii.Error`, `UnicodeDecodeError` — verified none of these are `ValueError` subclasses, so a bare `except ValueError` previously let a corrupted image reach the client as a raw 500) rather than a bare `ValueError`.
 
 **Secure Multi-tenant Architecture**
 
@@ -133,45 +142,48 @@ The entire stack — FastAPI backend, Streamlit dashboard, and supervisor proces
 
 ## How It Works
 
-All three modalities converge on one shared pipeline shape — **adapt → (embed, for text/image) → detect → store/report** — implemented behind a common `BaseAdapter` interface (`adapters/base.py`) so baseline storage, `/analyze` routing, and the dashboard treat tabular, text, and image uniformly rather than as separate bolted-together systems.
+All four modalities converge on one shared pipeline shape — **adapt → (embed, for text/image/joint) → detect → store/report** — implemented behind a common `BaseAdapter` interface (`adapters/base.py`) so baseline storage, `/analyze` routing, and the dashboard treat tabular, text, and image uniformly rather than as separate bolted-together systems. Joint reuses this same shape but as an entirely separate, additive adapter (`adapters/joint.py`) — it does not modify any of the other three.
 
 ### 1. Profiler (`utils/profiler.py`) — tabular only
 
-Takes a sample of your uploaded training data and computes a set of mathematical signals for each column: cardinality ratio, dominant value ratio, monotonicity, string length consistency, structured pattern detection, and dtype analysis after attempted coercion. These signals feed a routing decision that classifies each column as continuous, categorical, or ignored — with a reasoning string attached to every decision so it's auditable in the UI. Text and image baselines skip this step entirely — there's no per-column schema to confirm for a single embedding matrix.
+Takes a sample of your uploaded training data and computes a set of mathematical signals for each column: cardinality ratio, dominant value ratio, monotonicity, string length consistency, structured pattern detection, and dtype analysis after attempted coercion. These signals feed a routing decision that classifies each column as continuous, categorical, or ignored — with a reasoning string attached to every decision so it's auditable in the UI. Text and image baselines skip this step entirely — there's no per-column schema to confirm for a single embedding matrix. Joint reuses this same coercion logic for its tabular sub-fields (`JointAdapter.fit_tabular_schema`), just without the dashboard's human-in-the-loop confirmation step, since joint is API-only.
 
 ### 2. Adapters (`adapters/`) — modality-specific ingestion
 
 - `tabular.py`: passes columnar data through unchanged (KS/PSI/IQR consume it directly)
 - `text.py`: embeds a batch of raw strings via `all-MiniLM-L6-v2` (384-dim)
 - `image.py`: embeds a batch of JPEG/PNG images via `resnet18`'s penultimate layer (512-dim), handling mixed sizes/formats via resize + RGB conversion
+- `joint.py`: builds one vector per record by z-scoring/frequency-encoding the declared tabular fields, embedding any text/image present via the adapters above, and appending a bounded interaction term — a fixed (seeded, untrained) random projection of tabular × text and tabular × image, so the joint vector can carry the *pairing* between modalities, not just their independent presence. A record missing a modality contributes zeros for that slice rather than failing, as long as at least one modality is present.
 
 ### 3. Baseline Storage (`db/crud.py`)
 
-Once the user confirms the schema (tabular) or uploads a reference batch (text/image), the system locks a baseline in SQLite:
+Once the user confirms the schema (tabular) or uploads a reference batch (text/image/joint), the system locks a baseline in SQLite:
 
 - Tabular: IQR fences (Q1, Q3) for continuous features, frequency tables for categorical features
 - Text/Image: a capped sample of raw reference embeddings (the Domain Classifier Test needs real vectors to retrain against on every `/analyze` call, not just summary statistics)
+- Joint: the same capped raw-embedding sample as text/image, plus the fitted tabular sub-schema (per-field mean/std or category frequencies) needed to vectorize new records the same way at `/analyze` time — stored via a separate `insert_joint_baseline()` so the text/image storage path stays untouched
 
 ### 4. Drift Detection (`drift/detector.py`, `drift/embedding_detector.py`)
 
-At inference time, incoming production batches are compared against the stored baseline. Tabular: continuous features go through a two-sample KS-test, categorical through PSI, individual predictions also scored against IQR fences for real-time anomaly detection. Text/Image: current embeddings are compared against the stored reference embeddings via the Domain Classifier Test (cross-validated logistic regression, AUC-based).
+At inference time, incoming production batches are compared against the stored baseline. Tabular: continuous features go through a two-sample KS-test, categorical through PSI, individual predictions also scored against IQR fences for real-time anomaly detection. Text/Image/Joint: current embeddings are compared against the stored reference embeddings via the Domain Classifier Test (cross-validated logistic regression, AUC-based) — joint passes an L1-regularized classifier instead of the shared default (see [Key Features](#key-features) and [Known Limitations](#known-limitations) for why, and confirmation that this is opt-in and does not change the text/image default).
 
 ### The Full Flow
 
 ```
-Upload reference data (tabular / text / image)
+Upload reference data (tabular / text / image / joint)
         ↓
 Tabular: profiler classifies columns (auto + human confirmation)
 Text/Image: adapter embeds the reference batch
+Joint: tabular fields z-scored/encoded + text/image embedded + interaction term computed
         ↓
 Baseline locked in SQLite
         ↓
-Production batch sent to /analyze/{project_id}[/text|/image]
+Production batch sent to /analyze/{project_id}[/text|/image|/joint]
         ↓
 Tabular: KS-test + PSI + IQR scoring (real-time)
-Text/Image: Domain Classifier Test (AUC-based)
+Text/Image/Joint: Domain Classifier Test (AUC-based)
         ↓
-Results surfaced in Streamlit dashboard
+Results surfaced in Streamlit dashboard (tabular/text/image) or via the API directly (joint)
 ```
 
 ---
@@ -264,7 +276,7 @@ The validation suite caught two real bugs, both fixed before the final numbers a
 | Database | SQLite |
 | Authentication | Google OAuth 2.0 (session tokens signed with PyJWT) |
 | Tabular Drift Detection | scipy (KS-test), custom PSI, IQR |
-| Text/Image Drift Detection | Domain Classifier Test — scikit-learn (`drift/embedding_detector.py`) |
+| Text/Image/Joint Drift Detection | Domain Classifier Test — scikit-learn (`drift/embedding_detector.py`); joint uses an L1-regularized `LogisticRegression` (`adapters/joint.py`), text/image use the shared default |
 | Embeddings | sentence-transformers (`all-MiniLM-L6-v2`), torchvision (`resnet18`) |
 | Visualizations | Plotly |
 | Data Processing | pandas, numpy |
@@ -295,7 +307,8 @@ drift-monitoring-api/
 ├── .gitignore
 │
 ├── utils/
-│   └── profiler.py            # Automatic column classification engine
+│   ├── profiler.py            # Automatic column classification engine
+│   └── validation.py          # Structural request validation (shared across all /fit and /analyze endpoints)
 │
 ├── drift/
 │   ├── detector.py            # KS-test, PSI, and IQR detection engines (tabular)
@@ -553,11 +566,45 @@ python tests/test_embedding_validation.py
 
 > This script's logic has been verified end-to-end (correct API calls, zero false positives on same-category batches, monotonically increasing detection with severity), but as of this writing it has not yet been run to completion against the real datasets to produce publishable numbers — CIFAR-10's ~170MB download was too unreliable on the network available at the time. **No precision/recall/F1/latency numbers for text/image should be treated as final until this script has actually been run to completion and its output reviewed.** Also worth remembering: this validates the *mechanism* using a topic/class-shift proxy, not genuine real-world drift observed over time the way the tabular Citi Bike split was.
 
+**Ingestion robustness tests** (`tests/test_ingestion_robustness.py`) — reproduces each ingestion failure mode against the pre-fix behavior first, then proves the fix: the mixed-type tabular column crash and its order-dependent miscategorization variant, the profiler's cleaned values being discarded before storage, missing/mis-scoped/mis-typed exception handling across all four modalities' fit/analyze endpoints, absent structural validation at the API boundary, and unbounded categorical cardinality. 19 tests, run with:
+
+```bash
+python -m pytest tests/test_ingestion_robustness.py -v
+```
+
+### Real-World Multimodal Smoke Test (PetFinder.my)
+
+To exercise all four modalities — including joint, which has no dedicated public benchmark dataset — against real, non-synthetic data rather than only synthetic injections or topic-shift proxies, an ad-hoc smoke test was run locally against the [PetFinder.my Adoption Prediction dataset](https://www.kaggle.com/competitions/petfinder-adoption-prediction) (14,993 pets; tabular attributes, free-text descriptions, and photos for each). This script isn't committed (the dataset itself is gitignored, matching this project's practice of keeping large data local-only), so treat this as a documented manual run, not a reproducible CI artifact.
+
+**Method:** for each modality, fit a baseline on a sample of dogs (N=100), then `/analyze` two batches — a disjoint dog sample ("same", drift *not* expected) and a cat sample ("drift", expected, since dog/cat tabular attributes, description vocabulary, and photo appearance are all genuinely different distributions).
+
+| Modality | Scenario | Result | AUC / Alert |
+|----------|----------|--------|--------------|
+| Tabular | same (dog vs dog) | ❌ false positive | `Color1`, `State` flagged (PSI 0.06 / **0.39**) |
+| Tabular | drift (dog vs cat) | ✅ correct | drift correctly flagged |
+| Text | same | ✅ correct | AUC 0.607, no drift |
+| Text | drift | ✅ correct | AUC 0.970, drift detected |
+| Image | same | ✅ correct | AUC 0.373, no drift |
+| Image | drift | ✅ correct | AUC 0.990, drift detected |
+| Joint | same | ✅ correct | AUC 0.489, no drift |
+| Joint | drift | ✅ correct | AUC 0.992, drift detected |
+
+Text, image, and joint all behaved exactly as expected on real (not synthetic) multimodal data. The one failure was root-caused, not dismissed: it's PSI's known sensitivity to low-frequency categories at small N, not a bug. A follow-up sweep on the same dog-vs-dog "same" scenario at increasing sample size confirmed it:
+
+| N | Alert | `Color1` PSI | `State` PSI |
+|---|-------|--------------|-------------|
+| 100 | **True (false positive)** | 0.059 | **0.391** |
+| 300 | False (correct) | 0.042 | 0.079 |
+| 500 | False (correct) | 0.016 | 0.019 |
+| 1,000 | False (correct) | 0.029 | 0.011 |
+
+`State` (14 categories, several with very few samples) is where PSI's log-ratio term is most sensitive to sampling noise at small N — it resolves cleanly by N=300. See [Known Limitations](#known-limitations) for what this means in practice.
+
 ---
 
 ## Known Limitations
 
-**Categorical drift sensitivity depends on PSI threshold:** The current threshold (PSI > 0.2) is the industry-standard cutoff for "significant population shift." Features with genuine but small proportional shifts (like `gender_id` in the Citi Bike validation, PSI=0.043) will correctly not trigger alerts, even if chi-square would flag them as statistically significant at large sample sizes. Whether this is a limitation or correct behavior depends on your use case.
+**Categorical drift sensitivity depends on PSI threshold — and on sample size for moderate-cardinality fields:** The current threshold (PSI > 0.2) is the industry-standard cutoff for "significant population shift." Features with genuine but small proportional shifts (like `gender_id` in the Citi Bike validation, PSI=0.043) will correctly not trigger alerts, even if chi-square would flag them as statistically significant at large sample sizes. Whether this is a limitation or correct behavior depends on your use case. Separately, verified during the [PetFinder smoke test](#real-world-multimodal-smoke-test-petfindermy): at N=100 with a 14-category field, two samples drawn from the *same* population produced a false positive (PSI=0.39) purely from low-frequency-category sampling noise; the same comparison at N=300 settled to PSI=0.08. This project's own recommended minimum (40 rows) does not fully protect against false positives on higher-cardinality categorical fields — prefer 300+ rows per batch when a categorical field has more than a handful of categories.
 
 **Batch-based detection only:** The system compares distributions over a batch of incoming data. It does not currently support online/streaming drift detection where each individual data point updates a running estimate. Point anomalies are caught via IQR scoring, but distributional drift requires a batch.
 
@@ -567,11 +614,13 @@ python tests/test_embedding_validation.py
 
 **No self-serve credential flow for programmatic API access:** Backend authentication is derived directly from Google login (the dashboard mints a short-lived session token after you sign in) rather than a static, separately-provisioned API key. This removes a class of "forgotten API key sitting in a script" risk, but it also means there's currently no way to obtain a valid credential for calling `/fit` or `/analyze` from your own external script without going through the dashboard's own login flow. A proper service-account/personal-access-token feature would be needed to support that use case again.
 
-**Text/image validation is smoke-tested, not yet fully validated:** Unlike the tabular path's four-part methodology against a 4.5M-row real dataset, the text/image Domain Classifier Test has only been verified with unit-level smoke tests and manual end-to-end checks — no formal precision/recall/F1 numbers exist for it yet (see [Scope and Supported Data](#scope-and-supported-data)). Treat text/image drift verdicts as directionally useful, not benchmarked.
+**Text/image/joint validation is smoke-tested, not yet fully validated:** Unlike the tabular path's four-part methodology against a 4.5M-row real dataset, the text/image/joint Domain Classifier Test has only been verified with unit-level smoke tests, manual end-to-end checks, and a real-data (dog vs. cat) smoke test across all four modalities via the [PetFinder.my dataset](#real-world-multimodal-smoke-test-petfindermy) — no formal precision/recall/F1 numbers exist for any of them yet (see [Scope and Supported Data](#scope-and-supported-data)). Treat text/image/joint drift verdicts as directionally useful, not benchmarked.
 
 **Embedding model choice is fixed, not tunable:** `all-MiniLM-L6-v2` (text) and `resnet18` (image) were chosen for their small footprint on a free-tier deployment. There's no per-use-case model selection yet — a domain with very different characteristics (e.g. highly technical text, medical imaging) may see worse separability than these general-purpose embeddings provide.
 
 **Heavier container images for text/image support:** `torch`, `torchvision`, and `sentence-transformers` meaningfully increase image size and cold-start time versus the previous tabular-only stack, on top of Render's existing free-tier spin-down behavior.
+
+> **UNVERIFIED (2026-10-01): every AUC number in the next two paragraphs was measured on a mis-specified classifier.** `build_joint_classifier()` was found to never actually apply `penalty="l1"` (it silently ran as L2 the whole time the numbers below were measured), fixed in the 2026-09-30 hardening pass (`docs/PROGRESS.md`). These numbers have NOT been re-measured against the corrected L1 classifier — treat every AUC figure below as provisional until Step 4 re-evaluates.
 
 **Joint multimodal drift detects correlation inversions only at roughly the effect size it was tuned on — this is narrower than "closes the gap":** `/fit/{project_id}/joint` and `/analyze/{project_id}/joint` detect drift in the *combination* of tabular/text/image fields (e.g. metadata that's individually normal but paired with the wrong image), by concatenating per-modality embeddings plus a bounded interaction feature into one vector and running the Domain Classifier Test with an L1-regularized classifier (`adapters/joint.py`'s `build_joint_classifier()` — still a *linear* model, just L1-penalized rather than L2; not a nonlinear classifier, and used only for joint analysis — the shared `drift/embedding_detector.py` default used by text/image is untouched). This closes the originally-documented blind spot for tabular↔text and tabular↔image correlation inversions — cases where each modality's own marginal is completely unchanged and only the *pairing* flips — **for inversions of roughly the tuned magnitude**. Verified across 8 independent data seeds, but all 8 shared the same cluster separation and image classes, varying only random noise — that's validation of one fixed effect size, not general robustness. Tested separately against a smaller, different correlation-inversion scenario: **not detected** (AUC=0.39, below chance-adjacent) at the same fixed `C=2.0`. A noisier-but-same-magnitude pairing (80/20, not perfectly deterministic) *is* still detected (AUC=0.78) — so the fix generalizes along the noise axis but not the effect-size axis. Both the passing and failing cases are encoded as actual tests in `tests/test_joint_adapter.py` (`test_correlation_inversion_generalizes_to_noisy_pairing`, `test_correlation_inversion_not_detected_at_smaller_separation`), not just described here. Separately, and unaffected by this: a **pure text↔image correlation inversion on a project with zero tabular fields declared** remains undetected regardless of effect size — there's no tabular vector for the interaction term to anchor against. Dashboard UI for this modality doesn't exist yet either — it's currently API-only.
 
@@ -605,8 +654,16 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 Built by **Abhinav Billa**, B.Tech Mathematics and Computing, Indian Institute of Science (IISc), Bangalore.
 
-This project started from a paper on out-of-distribution detection and statistical process control, and evolved into a general-purpose drift monitoring platform over several days of iterative development and debugging.
+This project started from a paper on out-of-distribution detection and statistical process control, and evolved into a general-purpose, four-modality drift monitoring platform over several rounds of iterative development, each one following the same discipline: verify the current code before changing it, write the plan before writing code, and correct the documentation the moment a finding turns out narrower than first assumed.
 
-The validation methodology, particularly the decision to use PSI rather than chi-square for categorical ground truth, and the per-case confusion matrix breakdown that isolated a silent key-type bug, came from treating the validation suite as a first-class engineering artifact rather than an afterthought.
+**How it got here, roughly in order:**
+1. A tabular-only engine (KS-test, PSI, IQR) validated against a real 4.5M-row dataset, with the four-part methodology in [Validation Results](#validation-results).
+2. Text and image support added behind the same `BaseAdapter` interface, both reducing to the Domain Classifier Test rather than inventing separate detection logic per modality.
+3. Authentication migrated from a static, self-issued API key to session tokens derived directly from Google login — removing a whole class of "forgotten API key in a script" risk, at the cost of the self-serve programmatic-access flow noted in [Known Limitations](#known-limitations).
+4. Joint multimodal detection added as a fourth, fully separate capability — closing a real blind spot (a correlation break between modalities that no single-modality check can see) without touching the existing tabular/text/image pipelines. When the first version of the fix turned out to only generalize along one axis (noise) and not another (effect size), that got documented as a real, tested limitation rather than smoothed over.
+5. Dataset ingestion hardened end-to-end after deliberately trying to break it: a mixed-type tabular column that could crash or silently miscategorize depending on cell order, an exception type that a bare `except ValueError` didn't actually catch, and no structural validation at the API boundary — all reproduced first, then fixed, then covered by tests that check the fix, not just the absence of a crash.
+6. Validated further against real (not synthetic) multimodal data — the PetFinder.my Adoption Prediction dataset — which surfaced a genuine, previously-undocumented sample-size sensitivity in the categorical PSI test, root-caused rather than dismissed (see [Real-World Multimodal Smoke Test](#real-world-multimodal-smoke-test-petfindermy)).
+
+The validation methodology throughout — particularly the decision to use PSI rather than chi-square for categorical ground truth, the per-case confusion matrix breakdown that isolated a silent key-type bug, and treating every "does this generalize?" question as something to actually test rather than assume — came from treating validation as a first-class engineering artifact, not an afterthought.
 
 **GitHub:** [Abhinavbilla](https://github.com/Abhinavbilla)

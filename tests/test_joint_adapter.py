@@ -188,6 +188,19 @@ class TestBuildJointClassifierConfig:
         params = build_joint_classifier().get_params()
         assert params["penalty"] == "l1"
 
+    def test_fitted_model_penalty_and_solver(self):
+        """2026-10-01 cleanup: check the FITTED estimator's own attributes,
+        not just the constructor's params -- a constructor-only check
+        would miss a future bug where something calls set_params() or
+        re-fits with different config after construction, since
+        get_params() on the unfitted object would still look right."""
+        rng = np.random.default_rng(0)
+        X = rng.normal(size=(40, 5))
+        y = (rng.random(40) > 0.5).astype(int)
+        model = build_joint_classifier().fit(X, y)
+        assert model.penalty == "l1"
+        assert model.solver == "liblinear"
+
 
 class TestJointEmbeddingDriftDetector:
     def test_same_distribution_centers_near_point_five(self):
