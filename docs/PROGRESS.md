@@ -8,6 +8,56 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Step 5 Part 1 (user, 2026-10-01) — IN PROGRESS.** Ground rules
+(unchanged, reaffirmed): no fabricated numbers, no regressions, additive
+API changes, self-healing migrations, ask before changing any default,
+commit per logical change, don't push, no new Streamlit UI, no raw rows
+or tokens in history/logs, every new endpoint gets a two-user isolation
+test. Scope, in order:
+0. Recon only, no code: `docs/step5_recon.md` (<=40 lines) -- NULL/NaN/inf
+   handling in KS/PSI/IQR for /fit and /analyze; behavior on a missing
+   column, extra column, dtype change; what `/logs` stores; `/fit`-on-
+   existing-project behavior; SQLite WAL + busy timeout status. Continue
+   unless a finding implies changing a default -- then ask first.
+1. Project IDs unique per owner (user B's "demo" and A's "demo" are
+   different projects) -- closes the residual `/fit` 200-vs-404
+   existence signal from the cleanup pass by construction; keep existing
+   data working.
+2. History: `analysis_runs` table (statistics only, never raw rows), one
+   row per `/analyze` and upload-analyze call. `GET /history/{project_id}`
+   with since/until/feature/alert_only filters, pagination, per-feature
+   time series.
+3. Idempotency: optional `Idempotency-Key` header on both analyze
+   endpoints, same-key-same-payload returns the stored result (no new
+   row), same-key-different-payload is 409, 7-day expiry, scoped per
+   project. Client gets `idempotency_key=`.
+4. `schema_report` on every `/analyze` response (missing/unexpected
+   columns, dtype changes, null rate vs. baseline, unseen categories,
+   constant columns, severity per item) -- analyze valid columns, never a
+   500, never silently drop. Per-project alert|warn|ignore policy
+   (default: alert on missing, warn on the rest). Document the NULL
+   policy; if current handling is inconsistent, propose one and ask
+   first.
+5. Baseline versioning: `/fit` creates version n+1 (old versions kept,
+   optional `model_version` label), `GET /baselines/{project_id}`,
+   `POST /baselines/{project_id}/activate`, `/analyze`'s optional
+   `baseline_version` (default active), history records the version
+   used. Propose a version-retention cap and ask before enforcing.
+6. Alert policy: per-project `{k, m}` (default 1,1 = today's behavior).
+   `sustained_alert` = >=k of the last m analyses on the SAME baseline
+   version alerted. Alert state (ok/open) with transitions (opened,
+   resolved, still_open) in an `alert_events` table. New response fields:
+   alert, sustained_alert, windows_considered, alert_state, transition.
+7. `/fit` warns when the configured KS floor is below the DKW bound
+   `sqrt(ln(2/0.05)/(2m))`, and reports the minimum reference size that
+   would support the configured floor.
+
+Tests required: alert state machine (incl. version boundaries),
+idempotency (all three cases), schema-report cases, history filters,
+version activate/rollback, isolation on every new endpoint. **Stop after
+Part 1 and report** -- do not start Part 2 (webhooks etc., if any)
+without a further go-ahead.
+
 **Short cleanup pass (user, 2026-10-01) — DONE, four items:**
 1. **DONE.** `build_joint_classifier` ran as L2 while docs described L1
    (found and fixed in the hardening pass, commit `bac6f1d`). Added
