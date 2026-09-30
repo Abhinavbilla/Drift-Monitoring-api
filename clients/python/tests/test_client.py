@@ -105,6 +105,22 @@ class TestFitAndAnalyze:
         assert "system_alert_triggered" in result
         assert "x" in result["feature_metrics"]
 
+    def test_idempotency_key_replays_stored_result(self, token):
+        client = DriftClient(BASE_URL, token)
+        client.fit("test_client_idem", _reference_df(80))
+        batch = _reference_df(30)
+        r1 = client.analyze("test_client_idem", batch, idempotency_key="client-test-key")
+        r2 = client.analyze("test_client_idem", batch, idempotency_key="client-test-key")
+        assert r1 == r2
+
+    def test_idempotency_key_reused_with_different_payload_raises_409(self, token):
+        client = DriftClient(BASE_URL, token)
+        client.fit("test_client_idem_conflict", _reference_df(80))
+        client.analyze("test_client_idem_conflict", _reference_df(30), idempotency_key="conflict-key")
+        with pytest.raises(DriftClientError) as exc_info:
+            client.analyze("test_client_idem_conflict", _reference_df(31), idempotency_key="conflict-key")
+        assert exc_info.value.status_code == 409
+
     def test_calibration_config_passed_through(self, token):
         client = DriftClient(BASE_URL, token)
         client.fit("test_client_calib", _reference_df(80), calibration_config={"decision_mode": "legacy"})

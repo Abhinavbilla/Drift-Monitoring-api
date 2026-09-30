@@ -3,9 +3,9 @@ import jwt
 import binascii
 import hashlib
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status, UploadFile, File, Form, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import json
 import ingest.readers as ingest_readers
@@ -818,22 +818,27 @@ def predict_realtime_anomaly(project_id: str, request: PredictRequest, backgroun
 # ---------------------------------------------------------
 # ENDPOINT 3: BATCH DRIFT DETECTION
 # ---------------------------------------------------------
+IDEMPOTENCY_KEY_TTL_DAYS = 7
+
+
 @app.post("/analyze/{project_id}", response_model=AnalyzeBatchResponse, tags=["Analytics"])
 def analyze_production_batch(
-    project_id: str, 
-    request: AnalyzeBatchRequest, 
+    project_id: str,
+    request: AnalyzeBatchRequest,
     background_tasks: BackgroundTasks, # <-- 1. Inject BackgroundTasks
-    client: dict = Depends(verify_project_access) # <-- 2. Fixed dependency
+    client: dict = Depends(verify_project_access), # <-- 2. Fixed dependency
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     """
     Analyze a large batch of recent production data using KS Tests and TVD
     to detect long-term mathematical drift.
     """
-    return _run_tabular_analysis(project_id, request.production_data, client, background_tasks)
+    return _run_tabular_analysis(project_id, request.production_data, client, background_tasks, idempotency_key)
 
 
 def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
-                           background_tasks: BackgroundTasks) -> AnalyzeBatchResponse:
+                           background_tasks: BackgroundTasks,
+                           idempotency_key: Optional[str] = None) -> AnalyzeBatchResponse:
     """Shared tail of /analyze/{project_id} (JSON body) and
     /analyze/{project_id}/upload (multipart file) -- both converge on the
     same flat {feature_name: [values...]} shape. project_id is the
@@ -843,6 +848,30 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     state = crud.get_baseline(internal_id)
     if not state:
         raise HTTPException(status_code=404, detail="Baseline not found. Call /fit first.")
+
+    # Step 5 item 3: idempotency, scoped per (internal, i.e. owner-
+    # namespaced) project. Checked BEFORE running the detector, so a
+    # replay costs nothing beyond the lookup. Same key + same payload ->
+    # return the stored result, no new row. Same key + different payload
+    # -> 409 (a caller reusing a key for new data is almost certainly a
+    # bug, not an intentional replay). An expired (>7 day old) key is
+    # treated as never having been used.
+    payload_hash = hashlib.sha256(
+        json.dumps(production_data, sort_keys=True, default=str).encode()
+    ).hexdigest()
+    if idempotency_key:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=IDEMPOTENCY_KEY_TTL_DAYS)).isoformat()
+        existing = crud.find_analysis_run_by_idempotency_key(internal_id, idempotency_key, cutoff)
+        if existing:
+            if existing["payload_hash"] != payload_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Idempotency-Key was already used with a different payload.",
+                )
+            return AnalyzeBatchResponse(
+                system_alert_triggered=existing["system_alert"],
+                feature_metrics=existing["feature_results"],
+            )
 
     # None (every project fit before Step 2, or never given a config) ->
     # CalibrationConfig.from_dict(None) -> legacy -> DistributionDetector's
@@ -859,20 +888,17 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
 
     # Step 5 item 2: one history row per /analyze call, statistics only
     # (never the raw production_data itself -- payload_hash is a one-way
-    # digest of it, kept for item 3's idempotency replay-detection, not
-    # for recovering the data). baseline_version is hardcoded to 1 until
-    # item 5 adds real versioning; idempotency_key/schema_report/
-    # sustained_alert are NULL until items 3/4/6 populate them for real.
+    # digest of it, used above for item 3's idempotency replay detection,
+    # not for recovering the data). baseline_version is hardcoded to 1
+    # until item 5 adds real versioning; schema_report/sustained_alert
+    # are NULL until items 4/6 populate them for real.
     batch_size = len(next(iter(production_data.values()), []))
-    payload_hash = hashlib.sha256(
-        json.dumps(production_data, sort_keys=True, default=str).encode()
-    ).hexdigest()
     crud.insert_analysis_run(
         project=internal_id,
         baseline_version=1,
         ts=datetime.now(timezone.utc).isoformat(),
         batch_size=batch_size,
-        idempotency_key=None,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         decision_mode=calibration_config.decision_mode,
         system_alert=report["system_alert_triggered"],
@@ -909,6 +935,7 @@ async def analyze_production_batch_upload(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="CSV or Parquet file of production data."),
     client: dict = Depends(verify_project_access),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     """Multipart-upload counterpart to /analyze/{project_id} -- CSV or
     Parquet, up to MAX_UPLOAD_SIZE_BYTES."""
@@ -930,7 +957,7 @@ async def analyze_production_batch_upload(
         raise ValidationError("Uploaded file parsed to zero rows.")
 
     production_data = {col: df[col].tolist() for col in df.columns}
-    return _run_tabular_analysis(project_id, production_data, client, background_tasks)
+    return _run_tabular_analysis(project_id, production_data, client, background_tasks, idempotency_key)
 
 
 # ---------------------------------------------------------

@@ -74,10 +74,21 @@ test. Scope, in order:
    Live-verified against the running server: a real `/analyze` +
    `/history` response pair (see chat transcript; the full <=25-line
    report comes after item 7, per instruction).
-3. Idempotency: optional `Idempotency-Key` header on both analyze
-   endpoints, same-key-same-payload returns the stored result (no new
-   row), same-key-different-payload is 409, 7-day expiry, scoped per
-   project. Client gets `idempotency_key=`.
+3. **DONE.** Idempotency: optional `Idempotency-Key` header on both
+   analyze endpoints (JSON + upload). Checked before the detector runs,
+   against `payload_hash` (already stored by item 2): same key + same
+   payload returns the stored result verbatim, no new row, no re-sent
+   drift email; same key + different payload is 409; a key last used
+   >7 days ago (`IDEMPOTENCY_KEY_TTL_DAYS`) is treated as unused.
+   Naturally scoped per (owner-namespaced) project, since the lookup is
+   keyed on `client["internal_project_id"]`. `crud.
+   find_analysis_run_by_idempotency_key`. Python client's `.analyze()`
+   gained `idempotency_key=`, threaded through both the JSON and upload
+   paths. New `tests/test_idempotency.py` (8 tests: replay, 409,
+   no-key-always-new-row, per-project key scoping, 7-day expiry via a
+   backdated row, and the required two-user isolation case) plus two
+   live-server client tests. Full suite green (206 backend + 13
+   live-client).
 4. `schema_report` on every `/analyze` response (missing/unexpected
    columns, dtype changes, null rate vs. baseline, unseen categories,
    constant columns, severity per item) -- analyze valid columns, never a

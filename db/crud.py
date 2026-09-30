@@ -588,3 +588,23 @@ def get_analysis_runs(
     rows = cursor.fetchall()
     conn.close()
     return [_row_to_analysis_run(r) for r in rows]
+
+
+def find_analysis_run_by_idempotency_key(
+    project: str, idempotency_key: str, not_before_ts: str
+) -> Optional[Dict[str, Any]]:
+    """Step 5 item 3: the most recent run stored under this project+key,
+    if any, and not older than not_before_ts (the 7-day expiry cutoff --
+    an expired key is treated the same as one that was never used)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, project, baseline_version, ts, batch_size, idempotency_key, payload_hash, "
+        "decision_mode, system_alert, sustained_alert, feature_results, schema_report "
+        "FROM analysis_runs WHERE project = ? AND idempotency_key = ? AND ts >= ? "
+        "ORDER BY ts DESC, id DESC LIMIT 1",
+        (project, idempotency_key, not_before_ts),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _row_to_analysis_run(row) if row else None

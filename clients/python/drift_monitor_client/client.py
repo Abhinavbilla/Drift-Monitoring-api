@@ -144,21 +144,32 @@ class DriftClient:
     # ---------------------------------------------------------
     # analyze
     # ---------------------------------------------------------
-    def analyze(self, project_id: str, df: pd.DataFrame) -> Dict[str, Any]:
-        """Analyzes a production batch against project_id's baseline."""
-        if len(df) > self.large_frame_row_threshold:
-            return self._analyze_via_upload(project_id, df)
-        return self._analyze_via_json(project_id, df)
+    def analyze(self, project_id: str, df: pd.DataFrame, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+        """Analyzes a production batch against project_id's baseline.
 
-    def _analyze_via_json(self, project_id, df):
+        idempotency_key (optional): resending the same key with the same
+        data returns the previously stored result instead of re-analyzing
+        (and doesn't create a new history row); resending it with
+        different data raises DriftClientError(409). Keys expire after 7
+        days server-side."""
+        if len(df) > self.large_frame_row_threshold:
+            return self._analyze_via_upload(project_id, df, idempotency_key)
+        return self._analyze_via_json(project_id, df, idempotency_key)
+
+    def _idempotency_headers(self, idempotency_key):
+        return {"Idempotency-Key": idempotency_key} if idempotency_key else {}
+
+    def _analyze_via_json(self, project_id, df, idempotency_key=None):
         payload = {"production_data": self._to_column_dict(df)}
-        resp = self.session.post(f"{self.base_url}/analyze/{project_id}", json=payload, timeout=self.timeout)
+        resp = self.session.post(f"{self.base_url}/analyze/{project_id}", json=payload, timeout=self.timeout,
+                                  headers=self._idempotency_headers(idempotency_key))
         self._raise_for_status(resp)
         return resp.json()
 
-    def _analyze_via_upload(self, project_id, df):
+    def _analyze_via_upload(self, project_id, df, idempotency_key=None):
         files = {"file": (f"{project_id}_batch.parquet", self._to_parquet_bytes(df), "application/octet-stream")}
-        resp = self.session.post(f"{self.base_url}/analyze/{project_id}/upload", files=files, timeout=self.timeout)
+        resp = self.session.post(f"{self.base_url}/analyze/{project_id}/upload", files=files, timeout=self.timeout,
+                                  headers=self._idempotency_headers(idempotency_key))
         self._raise_for_status(resp)
         return resp.json()
 
