@@ -113,18 +113,49 @@ treated as final:**
    in all four cells (`trip_duration`'s D=0.092 is far too large for
    either gate to cost recall). All three items in commit `04e3ffe`; full
    suite 99/99 passing.
-4. NEW RUN: near-floor power curve + reference-draw variability. Normal-
-   score-tilted D_pop in {0.02,0.03,0.04,0.05,0.06,0.08,0.10}, every
-   continuous feature, >=10 independent reference draws per reference size,
-   >=20 disjoint batches per draw at n in {1000,5000,20000}. Report
-   detection(material) rate vs. D_pop with 95% CIs and between-draw
-   variance. Expect a soft ramp around 0.05, report what actually happens.
-5. Redo the data-collapse analysis as a binomial GLM (probit/logit) of
-   detection on x=sqrt(nm/(n+m))*D_pop, then add feature and m as
-   covariates with likelihood-ratio tests — the earlier within-bin-std
-   check conflated curve slope with noise; theory only guarantees
-   *approximate* collapse (power depends on the shape of F-G, not just
-   sup|F-G|). Use item 4's multi-reference-draw data if possible.
+4. **DONE (2026-09-30)**: NEW RUN — near-floor power curve + reference-draw
+   variability. `scripts/step2_item4_power_curve.py`: 42,000 trials — 2
+   reference sizes (5000, 50000) x 10 independent, mutually disjoint
+   reference draws per size x 5 continuous features x 7 normal-score-tilted
+   D_pop targets (achieved D verified via exact weighted-KS, no resampling
+   noise) x 3 batch sizes (1000/5000/20000) x 20 independent trials each.
+   Report + between-draw variance in `scripts/step2_item4_report.py` ->
+   `results/step2_item4_power_curve_report.md`. Finding: 26/30
+   (ref_size, feature, batch_size) power curves show a genuine soft ramp
+   (>=2 D_pop points with 0.05<rate<0.95); the curve compresses toward a
+   step at n=20000 because the transition band narrows relative to the
+   fixed D_pop grid tested, not because detection is actually
+   discontinuous. Between-draw variance is EXACTLY zero for 41.4% of
+   cells (the extremes — every draw agrees when D_pop is far from the
+   floor) and concentrates entirely in the transition region (top cell:
+   ref=5000, pickup_latitude, n=20000, D=0.04 — mean rate 0.465, std=0.466
+   across the 10 draws). Raw data (42,000 records) in
+   `results/tabular_validation_item4_power_curve_raw.json`.
+   Implementation notes: `mint_session_token`'s fixed 1-hour expiry is too
+   short for this multi-hour run — fixed locally in the new script (401 ->
+   remint -> retry) rather than touching the shared
+   `tests/_session_auth.py` helper. Concurrent requests destabilized the
+   dev uvicorn server on Windows (connection resets) — script runs
+   sequentially with retries. Checkpointed to a JSONL file (not committed,
+   redundant with the aggregated raw JSON) so the run survived one restart
+   (a host memory-pressure kill mid-run) with zero data loss.
+5. **DONE (2026-09-30)**: Redo the data-collapse analysis as a binomial
+   GLM. `scripts/step2_item5_glm.py`, using item 4's data: logit link
+   (scikit-learn `LogisticRegression`, weak L2 in place of unpenalized MLE
+   — the power curve is near-deterministic away from its transition
+   region, which causes quasi-separation/unbounded coefficients under true
+   MLE; statsmodels is not installed and this project doesn't add
+   dependencies without sign-off, so this is a documented practical
+   substitute, not silent). M0: `material ~ x`. M1: `+ feature`. M2:
+   `+ reference_size`. At n=42,000, BOTH nested LRTs are highly
+   significant (feature: chi2=560.0, df=4, p<0.0001; reference size:
+   chi2=1294.0, df=1, p<0.0001) — real, non-noise deviations from a
+   single-curve collapse, exactly as the instruction anticipated ("theory
+   only guarantees approximate collapse"). The reference-size effect has a
+   clear, reported direction: at matched x, m=50000 batches have LOWER
+   detection probability than m=5000 (coefficient -0.849) — a residual
+   finite-sample effect the leading-order `sqrt(nm/(n+m))` scaling doesn't
+   fully absorb. Both commits: `c3e63df`. Full suite: 99/99 passing.
 6. Verify `/fit` returns, per KS feature: the floor, `minimum_detectable_d`,
    and a new `recommended_batch_size` (smallest n with
    `c(alpha)*sqrt((n+m)/(nm)) <= floor`) — add if missing (additive field).
@@ -143,11 +174,9 @@ treated as final:**
    "reference_too_small_for_floor": false, "recommended_batch_size": 869}`
    for a 5,000-row reference. Full suite: 99/99 passing.
 
-Items 1-3 (offline) and item 6 are DONE (2026-09-30). Items 4-5 need new
-work/runs — NOT started as of this writing. Commit per logical change;
-don't push. Stop after these checks and report the numbers — don't
-proceed to (d)/(e) or the programmatic-integration work without a further
-go-ahead.
+**All six items DONE (2026-09-30).** Commit per logical change; don't
+push. Stop after these checks and report the numbers — don't proceed to
+(d)/(e) or the programmatic-integration work without a further go-ahead.
 
 ---
 
