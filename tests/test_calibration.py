@@ -21,6 +21,7 @@ from drift.calibration import (
     compute_psi,
     holm_adjust,
     ks_c_alpha,
+    min_batch_size_at_floor,
     minimum_detectable_d,
     psi_bootstrap_pvalue,
     recommended_batch_size,
@@ -131,12 +132,16 @@ class TestMinimumDetectableD:
         assert ks_c_alpha(0.10) == 1.22
 
 
-class TestRecommendedBatchSize:
+class TestMinBatchSizeAtFloor:
+    """min_batch_size_at_floor is the function that used to be named
+    recommended_batch_size (renamed 2026-09-30, same logic, unchanged) --
+    smallest n with the asymptotic critical value <= floor exactly."""
+
     def test_boundary_crosses_exactly_at_recommended_n(self):
         """The whole point of the formula: min_detectable_d at the
-        recommended n must be <= floor, and at n-1 it must be > floor."""
+        computed n must be <= floor, and at n-1 it must be > floor."""
         for m, floor in [(5000, 0.05), (50000, 0.05), (5000, 0.02), (1000, 0.1)]:
-            n_rec = recommended_batch_size(m, floor)
+            n_rec = min_batch_size_at_floor(m, floor)
             assert n_rec is not None
             assert minimum_detectable_d(n_rec, m) <= floor
             assert minimum_detectable_d(n_rec - 1, m) > floor
@@ -144,11 +149,56 @@ class TestRecommendedBatchSize:
     def test_matches_hand_computed_example(self):
         """m=5000, floor=0.05, alpha=0.05 -- hand-solved n >= c^2*m/(floor^2*m-c^2)
         = 1.8496*5000/(0.0025*5000-1.8496) = 9248/10.6504 ~= 868.4 -> 869."""
-        assert recommended_batch_size(5000, 0.05) == 869
+        assert min_batch_size_at_floor(5000, 0.05) == 869
 
     def test_infeasible_returns_none(self):
         """A reference too small to ever reach the floor (floor below the
         fit-time n->infinity floor) has no finite recommended batch size."""
+        assert min_batch_size_at_floor(100, 0.01) is None
+
+    def test_larger_reference_needs_smaller_batch(self):
+        n_small_ref = min_batch_size_at_floor(5000, 0.05)
+        n_large_ref = min_batch_size_at_floor(50000, 0.05)
+        assert n_large_ref < n_small_ref
+
+    def test_tighter_floor_needs_larger_batch(self):
+        n_loose = min_batch_size_at_floor(5000, 0.05)
+        n_tight = min_batch_size_at_floor(5000, 0.02)
+        assert n_tight > n_loose
+
+    def test_rejects_nonpositive_inputs(self):
+        with pytest.raises(ValueError):
+            min_batch_size_at_floor(0, 0.05)
+        with pytest.raises(ValueError):
+            min_batch_size_at_floor(5000, 0)
+
+
+class TestRecommendedBatchSize:
+    """recommended_batch_size (REDEFINED 2026-09-30): now targets floor/2,
+    not floor -- delegates to min_batch_size_at_floor(m, floor/2, alpha)."""
+
+    def test_equals_min_batch_size_at_floor_with_halved_floor(self):
+        for m, floor in [(5000, 0.05), (50000, 0.05), (5000, 0.02)]:
+            assert recommended_batch_size(m, floor) == min_batch_size_at_floor(m, floor / 2)
+
+    def test_is_larger_than_old_definition(self):
+        """The new (more conservative) n must be >= the old one, for the
+        same (m, floor) -- targeting a lower critical value needs more
+        data, never less."""
+        for m, floor in [(5000, 0.05), (50000, 0.05), (5000, 0.02), (1000, 0.1)]:
+            n_new = recommended_batch_size(m, floor)
+            n_old = min_batch_size_at_floor(m, floor)
+            if n_new is not None and n_old is not None:
+                assert n_new >= n_old
+
+    def test_boundary_crosses_exactly_at_half_floor(self):
+        for m, floor in [(5000, 0.05), (50000, 0.05)]:
+            n_rec = recommended_batch_size(m, floor)
+            assert n_rec is not None
+            assert minimum_detectable_d(n_rec, m) <= floor / 2
+            assert minimum_detectable_d(n_rec - 1, m) > floor / 2
+
+    def test_infeasible_returns_none(self):
         assert recommended_batch_size(100, 0.01) is None
 
     def test_larger_reference_needs_smaller_batch(self):
@@ -157,9 +207,23 @@ class TestRecommendedBatchSize:
         assert n_large_ref < n_small_ref
 
     def test_tighter_floor_needs_larger_batch(self):
-        n_loose = recommended_batch_size(5000, 0.05)
-        n_tight = recommended_batch_size(5000, 0.02)
+        # 0.02 (used in the old-definition test above) is now infeasible
+        # here: floor/2=0.01 is below m=5000's fit-time floor (~0.0192),
+        # so recommended_batch_size(5000, 0.02) is correctly None -- pick
+        # floor values that stay feasible under BOTH old and new
+        # definitions to isolate just the "tighter floor -> larger n"
+        # relationship.
+        n_loose = recommended_batch_size(5000, 0.08)
+        n_tight = recommended_batch_size(5000, 0.05)
         assert n_tight > n_loose
+
+    def test_floor_too_tight_for_new_definition_returns_none(self):
+        """0.02 is feasible for the OLD definition (min_batch_size_at_floor)
+        but not the new one, since floor/2=0.01 is below m=5000's
+        fit-time floor -- confirms the new definition is more demanding,
+        not just a different constant."""
+        assert min_batch_size_at_floor(5000, 0.02) is not None
+        assert recommended_batch_size(5000, 0.02) is None
 
     def test_rejects_nonpositive_inputs(self):
         with pytest.raises(ValueError):

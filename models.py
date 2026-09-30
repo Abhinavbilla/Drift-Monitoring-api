@@ -42,11 +42,28 @@ class FeatureCalibrationInfo(BaseModel):
     )
     recommended_batch_size: Optional[int] = Field(
         default=None,
-        description="The smallest /analyze batch size (n) at which this reference could, in principle, "
-                    "resolve an effect as small as the configured floor: the smallest n with "
-                    "c(alpha)*sqrt((n+m)/(n*m)) <= floor. None if reference_too_small_for_floor is True "
-                    "(no finite batch size would help -- enlarge the reference or raise the floor "
-                    "instead). Continuous features only."
+        description="REDEFINED 2026-09-30: the smallest /analyze batch size (n) at which this "
+                    "reference's asymptotic KS critical value reaches HALF the configured floor: the "
+                    "smallest n with c(alpha)*sqrt((n+m)/(n*m)) <= floor/2. Simulation-verified effect "
+                    "(results/step2_hardening_batch_size_simulation.md): this does NOT meaningfully "
+                    "improve power at true D=floor (already ~99% at the smaller min_batch_size_at_floor "
+                    "n, for both reference sizes tested) -- its real benefit is a much lower "
+                    "false-material rate for a batch at or below the floor (simulated null, m=5,000: "
+                    "5.45%->0%; true D=0.02, m=5,000: 26.15%->0.60%), at the cost of substantially more "
+                    "data. None if reference_too_small_for_floor is True. Continuous features only. "
+                    "Asymptotic approximation for continuous data -- not exact for small n or "
+                    "discrete/near-discrete features."
+    )
+    min_batch_size_at_floor: Optional[int] = Field(
+        default=None,
+        description="The OLD recommended_batch_size definition (kept, unchanged, under this name): "
+                    "the smallest n with c(alpha)*sqrt((n+m)/(n*m)) <= floor (not floor/2). At exactly "
+                    "this n, the critical value equals the floor -- since that critical value is an "
+                    "alpha-level null-rejection threshold, a batch with NO true drift still has "
+                    "~alpha (5%) probability of exceeding the floor from sampling noise alone "
+                    "(simulation-confirmed: 5.45%/4.65% for m=5,000/50,000). See recommended_batch_size "
+                    "for the more conservative figure. None if reference_too_small_for_floor is True. "
+                    "Continuous features only. Also an asymptotic approximation for continuous data."
     )
 
 class FitBaselineResponse(BaseModel):

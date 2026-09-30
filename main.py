@@ -28,7 +28,8 @@ from db import crud
 from drift.detector import compute_iqr_anomalies, DistributionDetector
 from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES
 from drift.calibration import (
-    CalibrationConfig, minimum_detectable_d_at_fit_time, recommended_batch_size, NEW_PROJECT_DEFAULT_DECISION_MODE,
+    CalibrationConfig, minimum_detectable_d_at_fit_time, recommended_batch_size,
+    min_batch_size_at_floor, NEW_PROJECT_DEFAULT_DECISION_MODE,
 )
 from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
@@ -482,6 +483,7 @@ def _resolve_and_persist_fit(
                     effect_floor=floor,
                     reference_too_small_for_floor=too_small,
                     recommended_batch_size=None if too_small else recommended_batch_size(m, floor, active_config.alpha),
+                    min_batch_size_at_floor=None if too_small else min_batch_size_at_floor(m, floor, active_config.alpha),
                 )
         else:
             floor = active_config.effect_floor_for(feature, "psi")

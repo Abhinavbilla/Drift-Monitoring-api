@@ -96,15 +96,31 @@ def minimum_detectable_d_at_fit_time(m: int, alpha: float = DEFAULT_ALPHA) -> fl
     return ks_c_alpha(alpha) / math.sqrt(m)
 
 
-def recommended_batch_size(m: int, floor: float, alpha: float = DEFAULT_ALPHA) -> Optional[int]:
+def min_batch_size_at_floor(m: int, floor: float, alpha: float = DEFAULT_ALPHA) -> Optional[int]:
     """Smallest integer n such that c(alpha)*sqrt((n+m)/(n*m)) <= floor --
-    i.e. the smallest future /analyze batch size at which this reference
-    could, in principle, resolve an effect as small as the configured
-    floor. Solving c^2*(n+m) <= floor^2*n*m for n gives
-    n >= c^2*m / (floor^2*m - c^2), valid only when floor^2*m > c^2 (i.e.
-    floor > minimum_detectable_d_at_fit_time(m, alpha) -- otherwise no
-    finite batch size can ever reach this floor with this reference, and
-    this returns None rather than a misleading number."""
+    i.e. the smallest future /analyze batch size at which the asymptotic
+    KS critical value itself reaches the configured floor. Solving
+    c^2*(n+m) <= floor^2*n*m for n gives n >= c^2*m / (floor^2*m - c^2),
+    valid only when floor^2*m > c^2 (i.e. floor >
+    minimum_detectable_d_at_fit_time(m, alpha) -- otherwise no finite
+    batch size can ever reach this floor with this reference, and this
+    returns None rather than a misleading number.
+
+    NOTE (2026-09-30): this was named `recommended_batch_size` before the
+    hardening-pass redefinition below. At exactly this n, the asymptotic
+    critical value EQUALS the floor -- since that critical value is
+    itself an alpha-level null-rejection threshold, this means a batch
+    with NO true drift at all (true D=0) still has approximately alpha
+    (5%) probability of its OBSERVED effect size alone exceeding the
+    floor from sampling noise -- confirmed by simulation at 5.45% (m=5,000)
+    and 4.65% (m=50,000), both close to the nominal 5%. See
+    recommended_batch_size for the more conservative alternative, and
+    results/step2_hardening_batch_size_simulation.md for the full
+    numbers, including that this NOT the same as "50% power at the
+    floor" -- power at true D=floor is already ~99% at this n for both
+    reference sizes tested; the real difference from the new definition
+    is in the false-positive rate for a batch at or below the floor, not
+    in power at the floor itself."""
     if m <= 0:
         raise ValueError("m must be positive.")
     if floor <= 0:
@@ -115,6 +131,36 @@ def recommended_batch_size(m: int, floor: float, alpha: float = DEFAULT_ALPHA) -
         return None  # unreachable at any batch size with this reference
     n_min = (c ** 2 * m) / denom
     return math.ceil(n_min)
+
+
+def recommended_batch_size(m: int, floor: float, alpha: float = DEFAULT_ALPHA) -> Optional[int]:
+    """Smallest integer n such that c(alpha)*sqrt((n+m)/(n*m)) <= floor/2
+    (2026-09-30 redefinition -- was <= floor; the old definition is kept,
+    unchanged, as min_batch_size_at_floor above).
+
+    Why floor/2, and what it actually buys (verified by simulation, see
+    results/step2_hardening_batch_size_simulation.md -- an earlier
+    version of this docstring guessed at "higher power at true D=floor"
+    before running the simulation, which turned out to be the wrong
+    mechanism; corrected here): min_batch_size_at_floor(m, floor) sets n
+    so the critical value equals the floor, which means a batch with NO
+    true drift (true D=0) still has ~alpha (5%) probability of exceeding
+    the floor from sampling noise alone -- confirmed at 5.45%/4.65% for
+    m=5,000/50,000. Targeting floor/2 instead pushes that null
+    exceedance probability down to 0% in both simulated cases (0/2000
+    trials each), since the floor now sits roughly 2 standard deviations
+    further into the null distribution's tail. Power AT true D=floor
+    itself was NOT the bottleneck -- it was already ~99% at the OLD n for
+    both reference sizes, so this redefinition does not meaningfully
+    improve detection of an effect right at the floor; its real benefit
+    is a much lower false-material rate for batches at or below the
+    floor, at the cost of needing substantially more data (m=5,000:
+    869->7,252; m=50,000: 751->3,146).
+
+    Both this and min_batch_size_at_floor are asymptotic approximations
+    for CONTINUOUS data (the two-sample KS asymptotic distribution);
+    neither is exact for small n, discrete/near-discrete data, or ties."""
+    return min_batch_size_at_floor(m, floor / 2, alpha)
 
 
 # ---------------------------------------------------------------------------
