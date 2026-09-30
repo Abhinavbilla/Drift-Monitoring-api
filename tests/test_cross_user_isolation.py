@@ -182,6 +182,38 @@ class TestScopeCannotGrantCrossAccountAccess:
         assert resp.status_code == 404, resp.text
 
 
+class TestFitDoesNotRevealExistenceViaStatusCode:
+    """2026-10-01 cleanup item 4: POST /fit is the one endpoint where
+    'project doesn't exist' and 'project exists' are NOT symmetric by
+    design -- fitting a genuinely free project_id succeeds (200, creates
+    it), which could let a caller probe whether an ID is taken by reading
+    the status code alone, even without ever seeing its contents. The
+    requirement: a foreign-owned existing project must respond exactly
+    like the project-not-found case (404), and never with a distinguishing
+    409/"already exists" style response that would itself be a tell."""
+
+    def test_foreign_existing_project_is_404_not_409(self):
+        resp = client.post(f"/fit/{PROJECT}", json={"reference_data": {"x": [1.0, 2.0, 3.0] * 20}},
+                            headers=HEADERS_B_SESSION)
+        assert resp.status_code == 404
+        assert resp.status_code != 409
+
+    def test_404_detail_does_not_leak_owner_identity(self):
+        resp = client.post(f"/fit/{PROJECT}", json={"reference_data": {"x": [1.0, 2.0, 3.0] * 20}},
+                            headers=HEADERS_B_SESSION)
+        assert USER_A_EMAIL not in resp.text
+
+    def test_404_detail_is_identical_to_a_truly_nonexistent_project(self):
+        """The 404 body for 'exists, not yours' must read the same as for
+        a project nobody has ever touched -- no wording difference that
+        would itself distinguish the two cases."""
+        never_existed = "test_iso_truly_never_existed_anywhere"
+        resp_foreign = client.get(f"/baseline/{PROJECT}", headers=HEADERS_B_SESSION)
+        resp_free = client.get(f"/baseline/{never_existed}", headers=HEADERS_B_SESSION)
+        assert resp_foreign.status_code == resp_free.status_code == 404
+        assert resp_foreign.json()["detail"] == resp_free.json()["detail"]
+
+
 class TestUserAStillWorks:
     """Confirms the isolation fix didn't collaterally break the owner's
     own access."""

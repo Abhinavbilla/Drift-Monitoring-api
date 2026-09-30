@@ -158,11 +158,23 @@ def _enforce_ownership(project_id: str, client: dict) -> None:
     left as a known, undocumented gap; the 2026-09-30 hardening pass
     closes it as the highest-priority item (an explicit, approved
     exception to "additive only" -- this changes existing behavior for
-    session-JWT auth, deliberately)."""
+    session-JWT auth, deliberately).
+
+    2026-10-01 cleanup: the detail message is the bare, generic "Baseline
+    not found" -- NOT an f-string echoing project_id back (as it
+    originally did here) -- because most downstream "genuinely doesn't
+    exist yet" checks across these same endpoints use that exact generic
+    wording (see get_baseline, get_logs, etc.), and a caller comparing
+    THIS message against THAT one for the same endpoint must not be able
+    to tell a foreign-owned project apart from one that was never
+    created. (POST /fit is a known, accepted exception: a genuinely free
+    project_id succeeds there (200, creates it) rather than 404ing, so
+    the status code alone still distinguishes "taken" from "free" for
+    that one endpoint -- inherent to its create-or-overwrite semantics,
+    not a wording leak, and not fixed here.)"""
     owner = _project_owner(project_id)
     if owner is not None and owner != client["email"]:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                             detail=f"Project '{project_id}' not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Baseline not found")
 
 
 def verify_project_access(project_id: str, client: dict = Depends(verify_access)) -> dict:
