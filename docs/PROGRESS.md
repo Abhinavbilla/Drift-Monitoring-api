@@ -16,21 +16,117 @@ kind. Every design choice (batch-based, not streaming; statistical
 significance + materiality, not accuracy metrics; per-feature not
 per-prediction) should be read against that scope.
 
-**Next priority AFTER the checks below (2026-09-30): programmatic
-integration** — personal access tokens, upload endpoints, a Python client,
-and an end-to-end model-serving example, so a team can wire this into a
-real pipeline without the dashboard. **Do NOT start this in this pass** —
-it will be requested separately. This supersedes/absorbs what was
-previously sketched as "Step 3" in `docs/step2_proposal.md`'s references;
-treat that as directionally right but not yet scoped in detail.
+**Project goal (reaffirmed 2026-09-30, second time): ML teams integrate
+this API into their model pipelines to monitor DATA drift of model
+inputs — input distribution shift only, no labels or accuracy tracking.**
 
-**Where things stand (2026-09-30)**: Step 0, Step 1, and Step 2 (a)/(b)/(c)
-are DONE — see their sections below for full detail. The user is now
-running a rigorous methodological review of (c)'s side-by-side before
-treating it as final (see "Step 2 (c) review checks" below for that work,
-in progress). **(d) DCT calibration and (e) text/image smoke tests are not
-started and should not be started until the review checks below are done
-and reviewed.**
+**Programmatic integration is now the critical path (2026-09-30): today
+no script can call the API without the dashboard's browser login.** This
+supersedes/absorbs what was previously sketched as "Step 3" in
+`docs/step2_proposal.md`'s references — that sketch is directionally
+right but the scope below (from the user directly) is authoritative.
+
+**New step order (user, 2026-09-30), from here:**
+1. **Step 3 — programmatic access** (PATs, file-parsing refactor +
+   multipart upload endpoints, `DELETE /projects/{project_id}`, Python
+   client, end-to-end model-serving example). Full scope below. **IN
+   PROGRESS.**
+2. **Step 5 — history, k-of-m sustained alerts, baseline versioning**,
+   with **webhooks now newly in scope**: HMAC-SHA256 signed payloads,
+   retries with backoff, delivered in the background (never blocking the
+   request that triggered them).
+3. **Step 2 (d)/(e)** — DCT calibration + text/image validation, run
+   under calibrated mode.
+4. **React + TypeScript frontend** (replaces Streamlit — build no new
+   Streamlit UI in the meantime, per the standing UI decision below),
+   **then** deployment to the Azure VM.
+
+**Backlog (record only — do not start):**
+- Per-input OOD scoring: kNN / Mahalanobis distance with conformal
+  calibration, `POST /score/{project_id}`.
+- An "LLM prompt drift" scenario for Step 8's text validation.
+- (added 2026-09-30, evidence-fix caveat #4 below) `/fit` should warn
+  when the configured KS floor is below the DKW bound
+  `sqrt(ln(2/0.05)/(2m))` for the reference size, and report the minimum
+  reference size that would support the configured floor.
+
+**Ground rules, reaffirmed unchanged**: no fabricated numbers (every
+figure from an actual run), no regressions, additive API changes only,
+**ask before**: changing defaults, deleting files, touching Docker or
+auth config, or adding a heavy new dependency. Commit per logical
+change; don't push.
+
+**Step 3 scope (user, 2026-09-30):**
+- **(a) Personal access tokens.** `api_tokens` table: id, user_id, name,
+  prefix, SHA-256 hash of the full token, project scope, created/expires/
+  last_used/revoked. Token format `dm_<prefix>_<secrets.token_urlsafe(32)>`
+  — store only the hash, look up by prefix, compare with
+  `hmac.compare_digest`. Backend auth accepts EITHER the existing session
+  JWT or a PAT; project scope enforced on every project endpoint; tokens
+  never logged. No UI — `scripts/create_token.py` (create/list/revoke, by
+  user email) is the way to mint tokens until the React frontend exists.
+  Tests: valid, expired, revoked, wrong scope, no plaintext persisted
+  anywhere.
+- **(b) File parsing.** Move dashboard.py's file-parsing logic into
+  `ingest/readers.py` with IDENTICAL behavior (dashboard imports it, not
+  duplicates it). Add multipart upload endpoints for tabular fit/analyze
+  (Parquet + CSV), with a size limit. Fixture tests per format asserting
+  identical parsed frames.
+- **(c)** Add `DELETE /projects/{project_id}`; keep
+  `DELETE /models/{model_id}` as a deprecated alias (same behavior, not
+  removed).
+- **(d) Python client** at `clients/python/` (package
+  `drift_monitor_client`): `DriftClient(base_url, token)` with
+  `fit(project_id, df)` / `analyze(project_id, df)`; auth header,
+  timeouts, retries with backoff, Parquet upload for large frames. Tests
+  against a locally running server.
+- **(e) End-to-end example** at `examples/model_serving/`: train a small
+  scikit-learn model on the Jan-Mar Citi Bike split (monitored features =
+  the model's own input features only); serve it with FastAPI, logging
+  post-preprocessing input features asynchronously (never blocking the
+  prediction path); a scheduled-job script that reads each window's
+  logged features and calls `analyze()` via the client; replay the
+  Apr-Jun production data through the server in fixed windows; save
+  per-window drift reports. Use `decision_mode="calibrated"` and a window
+  size at or above `/fit`'s `recommended_batch_size`.
+
+**Stop after (e) and show**: the auth design, the client API, and the
+example's per-window drift output (actual numbers, not illustrative
+ones).
+
+**Evidence-fix caveats (user, 2026-09-30 — record only, do NOT rerun
+anything now; revisit if/when this matters for a real decision):**
+1. **A/A multi-draw design caveat**: clean batches were drawn from the
+   fixed 25,000-row holdout pool, so at n=20,000 the "independent"
+   batches overlap heavily and all reference draws share the pool's own
+   sampling error. The per-draw Gate-1 rates of 0.000-1.000 (mean 0.575)
+   in `results/step2_aa_multidraw_report.md` should NOT be quoted as a
+   property of Holm's correction itself. A proper follow-up needs two
+   variants: a marginal A/A drawing BOTH reference and batch fresh from
+   the full baseline pool each trial, and a fixed-reference conditional
+   version (closer to what a real deployed project actually experiences).
+2. **GLM cluster caveat**: only 20 clusters (10 draws x 2 reference
+   sizes) — read `results/step2_item5_glm.md`'s cluster-robust results as
+   descriptive, not a rigorously powered inference. The feature gaps at
+   matched x (up to 33 points) mean any batch-size guidance derived from
+   this GLM is approximate, not exact.
+3. **Materiality floor applies to the OBSERVED D, not the true D.**
+   Effective true-D thresholds (where 50% detection power is actually
+   reached) are about 0.035-0.049 depending on n (see
+   `results/step2_item4_power_curve_report.md`'s D50 table) — noticeably
+   below the nominal 0.05 floor at small n, converging toward it as n
+   grows. **This needs to be documented in the API docs** (not done yet)
+   so a user configuring a 0.05 floor understands the floor is on the
+   noisy observed statistic, not a guarantee about the true population D.
+4. Backlog item added above: `/fit` DKW-bound floor warning +
+   minimum-reference-size report.
+
+**Where things stand (2026-09-30)**: Step 0, Step 1, Step 2 (a)/(b)/(c)
+(plus its six-item review and the evidence fixes above) are DONE — see
+their sections below for full detail. **Step 3 is now in progress** (see
+above). **(d) DCT calibration and (e) text/image smoke tests are not
+started** — they are now ordered AFTER Step 3 and Step 5 per the new step
+order above, not next.
 
 **Decisions locked (user, 2026-09-29/30 — do not re-litigate, do not
 re-derive from data, just implement):**
