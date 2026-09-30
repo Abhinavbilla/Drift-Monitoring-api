@@ -95,12 +95,25 @@ the synthetic generator for this pass. Report:
     floor), legacy vs. calibrated.
   - The floor-sensitivity table across 0.015/0.02/0.03/0.05 (already
     partially done in Step 1's notes — extend it to calibrated mode).
-  - **New, specifically requested (user, 2026-09-30): a data-collapse
-    plot/table.** Compute, pooled across every feature and every `(n, m)`
-    combination already run in Step 1: x = `sqrt(n*m/(n+m)) * D_achieved`
-    (D_achieved = the per-batch KS statistic actually observed, not the
-    population value), y = empirical detection rate at that `(n, m, D)`
-    cell. If asymptotic two-sample KS theory holds, every point should
+  - **New, specifically requested (user, 2026-09-30, CORRECTED 2026-09-30):
+    a data-collapse plot/table.** **Correction, applied before this was
+    ever implemented**: the x-axis must use POPULATION D, not the per-batch
+    observed KS statistic. Detection is a deterministic function of the
+    observed statistic (reject iff `sqrt(nm/(n+m))*D_observed` exceeds the
+    critical value), so plotting against `D_observed` collapses onto a step
+    function by construction and tests nothing. Use:
+    - x = `sqrt(n*m/(n+m)) * D_pop`, where `D_pop` is the TRUE distance
+      between the two generating distributions: for real batches, the
+      population D between the full baseline CSV and that month's full
+      production data (already computed in Step 1's ground-truth fix); for
+      synthetic batches, the achieved population D of the tilted
+      distribution (as in `results/tabular_validation_severity_v3.json`).
+    - y = empirical detection rate over the repeated batches in that
+      `(feature, n, m, D_pop)` cell.
+    - Keep the per-batch observed D only as a diagnostic column, never as
+      the x-axis for the collapse claim itself.
+    Pooled across every feature and every `(n, m)` combination already run
+    in Step 1. If asymptotic two-sample KS theory holds, every point should
     collapse onto one curve regardless of which feature or which `(n, m)`
     produced it — that's the whole content of the asymptotic
     distribution-free claim. **Report plainly whether the points actually
