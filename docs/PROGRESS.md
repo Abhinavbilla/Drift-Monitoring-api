@@ -14,41 +14,68 @@ had NOT actually been done (no matching commits, no cross-user isolation
 tests, no clean-venv run, no client contract changes) despite being
 described as a precondition -- confirmed by grepping the repo and git log
 before starting anything. Scope, in priority order:
-1. **Security — cross-user isolation (highest priority; may justify an
-   exception to "additive only").** Two-user (A/B) tests on EVERY
-   project-scoped endpoint (JSON + upload variants, `/baseline`, `/logs`,
-   `/projects`, DELETE endpoints), via both session JWT and PAT: can B
-   read/analyze/overwrite/list/delete A's data? Report an endpoint x
-   result table. Fix any cross-user access that succeeds (a project must
-   belong to the authenticated user; 404 for other users' projects).
-   Also: PAT default expiry, revoked-token rejection, last_used updates,
-   and a grep of the repo/logs/reports for leaked `dm_` token strings.
-2. **Reproducible environment.** Installed versions (pandas 3.0.3,
-   scikit-learn 1.9.0) don't match `requirements.txt` (2.2.2 / 1.5.2) --
-   environment drift already implicated in two client bugs (Step 3d/3e).
-   Clean venv from `requirements.txt` on Python 3.12 (proposed, pending
-   approval), full suite run, fix failures, OR propose new pins if moving
-   to the newer versions is preferable. Either way, tests must pass on
-   exactly what the Docker image will install.
-3. **Client/server contract.** Replace the client's duplicated
-   categorical-classification heuristic with an explicit optional
-   `feature_types={col: "continuous"|"categorical"}` argument the server
-   honors (falling back to server-side profiling when omitted); the
-   server must never silently drop a column -- return 422 naming the
-   offending columns instead.
-4. **`recommended_batch_size` redefinition.** Smallest n with
-   `c(alpha)*sqrt((n+m)/(n*m)) <= floor/2` (was `<= floor`, kept as
-   `min_batch_size_at_floor`). Verify by simulation (m=5,000 and 50,000):
-   null D_obs distribution and P(D_obs > floor) at true D in {0, 0.02,
-   0.05}, at both the new and old n. Results saved under `results/`.
-5. **Fix the model-serving example.** The Apr-Jun replay's monitored
-   coordinate features sit at population D ~0.02, BELOW the 0.05 floor --
-   the two "flagged" windows in the Step 3e README were noise at n=869,
-   not real drift; that wording must be corrected. Add a labeled
-   synthetic scenario (D~0.10 on one feature, alerts every window) for
-   contrast. Re-run using the 50,000-row reference and the new
-   recommended_batch_size. README tables generated from `reports/*.json`
-   by script, not typed by hand.
+1. **DONE.** Security — cross-user isolation. Every project-scoped
+   endpoint had NO ownership check at all -- any authenticated user
+   (session JWT or unrestricted PAT) could read/overwrite/analyze/delete
+   ANY other user's project just by knowing the project_id. Fixed:
+   `verify_project_access`/`verify_model_access` (main.py) now check
+   project ownership for both auth types; a project owned by someone else
+   is 404, not 403 (a stranger can't even confirm it exists). Scope
+   (what a PAT's own account can reach) and ownership (which account can
+   reach it at all) are independent gates, verified explicitly. 36 tests,
+   `tests/test_cross_user_isolation.py`. Also confirmed: PAT default
+   expiry is never (unless set), revoked tokens rejected, last_used_at
+   tracked, zero leaked `dm_` tokens anywhere in the repo. Commit
+   `0cc4967`.
+2. **PENDING APPROVAL — not started.** Reproducible environment.
+   Installed versions (pandas 3.0.3, scikit-learn 1.9.0) don't match
+   `requirements.txt` (2.2.2 / 1.5.2) -- environment drift already
+   implicated in two client bugs (Step 3d/3e). Proposed: clean venv from
+   `requirements.txt` on Python 3.12 (confirmed installed on this
+   machine, alongside 3.10/3.14), full suite run, fix failures, OR
+   propose new pins if moving to the newer already-installed versions is
+   preferable. Waiting on user go-ahead before creating the venv.
+3. **DONE.** Client/server contract. `FitBaselineRequest` gained an
+   optional `feature_types={col: "continuous"|"categorical"}` override,
+   server-honored (422 for an unknown column or invalid value). More
+   importantly, fixed the actual root cause the client was working around:
+   `/fit`'s column retention now looks up values from BOTH reference_data
+   and categorical_data merged, not from whichever dict the caller
+   happened to submit a column under -- no more silent drop regardless of
+   feature_types. A second, more severe pre-existing bug found while
+   testing the first fix: a fit with `reference_data={}` (all-categorical,
+   no continuous columns) silently lost EVERY row, not just a column
+   (`min(0, N)=0` truncated the present side to zero) -- fixed. Client's
+   `_guess_categorical_columns` heuristic removed entirely (no longer
+   needed); `fit()` gained `feature_types=` passthrough. 6 new server
+   tests (`tests/test_fit_feature_types.py`) + 3 new client tests.
+   Commit `738bdca`.
+4. **DONE.** `recommended_batch_size` redefinition: now targets floor/2,
+   not floor (kept as `min_batch_size_at_floor`, unchanged). Verified by
+   simulation (`scripts/step2_hardening_batch_size_simulation.py`,
+   `results/step2_hardening_batch_size_simulation.md`): Uniform(0,1) vs
+   Uniform(D,1+D) gives an exact closed-form population D. Real finding
+   (corrected from an initial wrong guess about "50% power at the floor,"
+   caught before it shipped): the critical value is an alpha-level
+   null-rejection threshold, not a power-at-floor point -- at the OLD n
+   (m=5,000: 869), a batch with NO true drift already has ~alpha (5%)
+   chance of exceeding the floor from noise alone (confirmed 5.45%/4.65%
+   for m=5,000/50,000); the NEW n drives this to 0% in both cases. Power
+   AT true D=floor was already ~99% at the OLD n -- not the bottleneck.
+   Real benefit: much lower false-material rate at/below the floor, for
+   substantially more required data (m=5,000: 869->7,252; m=50,000:
+   751->3,146). Commit `ab5f94c`.
+5. **DONE.** Fixed the model-serving example. The Apr-Jun replay's
+   monitored coordinate features sit at population D 0.019-0.022, BELOW
+   the 0.05 floor (verified from stored population truth, not assumed) --
+   the "real drift" wording for two flagged windows was wrong and is
+   corrected; framed as floor-adjacent noise instead. Rebuilt on the
+   50,000-row reference at the new `recommended_batch_size` (3,146). Added
+   a labeled synthetic scenario (`replay_synthetic.py`, D=0.10 on
+   `pickup_longitude` via the same verified tilting method as
+   `step2_item4_power_curve.py`) -- 4/4 windows alerted. README tables now
+   generated from `reports/real|synthetic/*.json` by script
+   (`generate_readme_tables.py`), never typed by hand. Commit `30e801b`.
 
 Tests + isolation checks required on every new/changed endpoint. Commit
 per logical change; don't push. **Do not start Step 5 until this is
