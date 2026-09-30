@@ -137,12 +137,40 @@ def verify_access(credentials: HTTPAuthorizationCredentials = Security(bearer_sc
     return {"name": payload.get("name", "User"), "email": email, "auth_type": "session", "pat_scope": None}
 
 
+def _project_owner(project_id: str) -> Optional[str]:
+    conn = sqlite3.connect("drift.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT owner_email FROM projects WHERE id = ?", (project_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def _enforce_ownership(project_id: str, client: dict) -> None:
+    """Cross-user isolation (2026-09-30 hardening pass): a project that
+    ALREADY EXISTS with a different owner_email is invisible to every
+    other user, on both session-JWT and PAT auth -- 404, not 403, so a
+    stranger cannot even tell the project exists. A project_id with no
+    existing owner (brand new, or a legacy row from before ownership was
+    tracked) is unaffected -- creation-on-first-/fit and pre-existing
+    ownerless rows both still work exactly as before. This was previously
+    left as a known, undocumented gap; the 2026-09-30 hardening pass
+    closes it as the highest-priority item (an explicit, approved
+    exception to "additive only" -- this changes existing behavior for
+    session-JWT auth, deliberately)."""
+    owner = _project_owner(project_id)
+    if owner is not None and owner != client["email"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                             detail=f"Project '{project_id}' not found.")
+
+
 def verify_project_access(project_id: str, client: dict = Depends(verify_access)) -> dict:
-    """Wraps verify_access with PAT project-scope enforcement. Session-JWT
-    auth is unchanged (its existing, pre-existing lack of a cross-user
-    ownership check is a separate, known gap -- not touched here; see
-    HANDOFF). A PAT's project_scope is a JSON list of project_ids it may
-    access, or ["*"] for unrestricted-but-still-this-user's-tokens."""
+    """Wraps verify_access with PAT project-scope enforcement AND
+    cross-user ownership isolation (both session-JWT and PAT). A PAT's
+    project_scope is a JSON list of project_ids it may access, or ["*"]
+    for unrestricted-but-still-this-user's-tokens -- scope narrows what
+    THIS user's own token can reach, ownership stops it reaching anyone
+    else's project regardless of scope."""
     if client.get("auth_type") == "pat":
         scope = client.get("pat_scope")
         if scope is not None and "*" not in scope and project_id not in scope:
@@ -150,6 +178,7 @@ def verify_project_access(project_id: str, client: dict = Depends(verify_access)
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This access token is not scoped to project '{project_id}'."
             )
+    _enforce_ownership(project_id, client)
     return client
 
 
@@ -163,6 +192,7 @@ def verify_model_access(model_id: str, client: dict = Depends(verify_access)) ->
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This access token is not scoped to project '{model_id}'."
             )
+    _enforce_ownership(model_id, client)
     return client
 
 
