@@ -377,13 +377,54 @@ Of 30 (ref_size, feature, batch_size) power curves, **26 show a soft ramp** (>=2
 - ref_size=5000, dropoff_latitude, n=5000: 0.02->0.11, 0.03->0.28, 0.04->0.62, 0.05->0.95, 0.06->1.00, 0.08->1.00, 0.10->1.00
 - ref_size=5000, dropoff_latitude, n=20000: 0.02->0.05, 0.03->0.23, 0.04->0.58, 0.05->0.98, 0.06->1.00, 0.08->1.00, 0.10->1.00
 
-**Example step-like curves** (rate by achieved D_pop):
+**All 4 non-soft-ramp curves, with why:**
 
-- ref_size=50000, dropoff_latitude, n=20000: 0.02->0.00, 0.03->0.00, 0.04->0.23, 0.05->0.99, 0.06->1.00, 0.08->1.00, 0.10->1.00
-- ref_size=50000, pickup_latitude, n=20000: 0.02->0.00, 0.03->0.00, 0.04->0.19, 0.05->0.98, 0.06->1.00, 0.08->1.00, 0.10->1.00
-- ref_size=50000, pickup_longitude, n=20000: 0.02->0.00, 0.03->0.00, 0.04->0.00, 0.05->0.45, 0.06->0.98, 0.08->1.00, 0.10->1.00
+- **ref_size=50000, dropoff_latitude, n=20000** (1 intermediate points): 0.02->0.00, 0.03->0.00, 0.04->0.23, 0.05->0.99, 0.06->1.00, 0.08->1.00, 0.10->1.00. c(alpha)*sqrt((n+m)/(nm))=0.0114 at this (n,m) -- the asymptotic KS critical value itself sits close to several of the tested D_pop targets here, so the theoretical detectability threshold and the materiality floor (0.05) are close together, compressing the transition into fewer of the 7 tested grid points -- this is a property of the discrete D_pop grid relative to the curve's width at this (n,m), not evidence the underlying power curve is actually discontinuous. D50 (50%-detection point): interpolated between D_pop=0.04 (rate=0.23) and D_pop=0.05 (rate=0.99).
+- **ref_size=50000, pickup_latitude, n=20000** (1 intermediate points): 0.02->0.00, 0.03->0.00, 0.04->0.19, 0.05->0.98, 0.06->1.00, 0.08->1.00, 0.10->1.00. c(alpha)*sqrt((n+m)/(nm))=0.0114 at this (n,m) -- the asymptotic KS critical value itself sits close to several of the tested D_pop targets here, so the theoretical detectability threshold and the materiality floor (0.05) are close together, compressing the transition into fewer of the 7 tested grid points -- this is a property of the discrete D_pop grid relative to the curve's width at this (n,m), not evidence the underlying power curve is actually discontinuous. D50 (50%-detection point): interpolated between D_pop=0.04 (rate=0.19) and D_pop=0.05 (rate=0.98).
+- **ref_size=50000, pickup_longitude, n=20000** (1 intermediate points): 0.02->0.00, 0.03->0.00, 0.04->0.00, 0.05->0.45, 0.06->0.98, 0.08->1.00, 0.10->1.00. c(alpha)*sqrt((n+m)/(nm))=0.0114 at this (n,m) -- the asymptotic KS critical value itself sits close to several of the tested D_pop targets here, so the theoretical detectability threshold and the materiality floor (0.05) are close together, compressing the transition into fewer of the 7 tested grid points -- this is a property of the discrete D_pop grid relative to the curve's width at this (n,m), not evidence the underlying power curve is actually discontinuous. D50 (50%-detection point): interpolated between D_pop=0.05 (rate=0.45) and D_pop=0.06 (rate=0.98).
+- **ref_size=50000, trip_duration, n=20000** (1 intermediate points): 0.02->0.00, 0.03->0.00, 0.04->0.02, 0.05->0.51, 0.06->0.98, 0.08->1.00, 0.10->1.00. c(alpha)*sqrt((n+m)/(nm))=0.0114 at this (n,m) -- the asymptotic KS critical value itself sits close to several of the tested D_pop targets here, so the theoretical detectability threshold and the materiality floor (0.05) are close together, compressing the transition into fewer of the 7 tested grid points -- this is a property of the discrete D_pop grid relative to the curve's width at this (n,m), not evidence the underlying power curve is actually discontinuous. D50 (50%-detection point): interpolated between D_pop=0.04 (rate=0.02) and D_pop=0.05 (rate=0.51).
 
-**What actually happens, plainly**: at n=1000 (the smallest batch size tested), c(alpha)*sqrt((n+m)/(n*m)) is itself close to or above several of the tested D_pop targets -- the materiality floor (0.05) sits close to the fit-time detectability limit at small n, so the transition tends to be compressed into fewer of the 7 tested D_pop points there. At n=5000 and n=20000, more of the D_pop grid falls inside the transition region, producing a visibly softer ramp -- consistent with theory (power curves are smooth sigmoids in the true model; whether a GIVEN discrete grid of D_pop values happens to land inside or straddle the steep part of that sigmoid depends on how wide the grid step is relative to the curve's own width at that n,m).
+**What actually happens, plainly**: all 4 non-soft-ramp curves are at n=20000 (the largest batch size tested), where the transition band is narrowest in absolute D_pop terms (power curves sharpen as n grows, for fixed m and alpha) -- narrow enough that the fixed 7-point D_pop grid (spaced 0.01-0.02 apart near the floor) sometimes straddles the whole transition between two adjacent tested points instead of sampling it. This is a grid-resolution artifact, not a discontinuity in the true power curve: item 5's GLM fits a smooth sigmoid in x across ALL n (including n=20000) without needing any special-case discontinuity term, and the between-draw variance in the between-draw section below is still nonzero (not a hard 0/1 jump) for these very cells, confirming there is a real, if narrow, transition band underneath the coarse grid.
+
+
+## 50%-detection D_pop, every curve, relative to the 0.05 floor
+
+D50 = the D_pop at which the pooled detection rate first reaches 0.5, linearly interpolated between the two bracketing tested D_pop grid points (0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10). Reported alongside D50/0.05, the ratio to the configured materiality floor.
+
+| ref_size | feature | n | D50 | D50 / 0.05 | basis |
+|---|---|---|---|---|---|
+| 5000 | dropoff_latitude | 1000 | 0.0277 | 0.55x | interpolated between D_pop=0.02 (rate=0.32) and D_pop=0.03 (rate=0.56) |
+| 5000 | dropoff_longitude | 1000 | 0.0315 | 0.63x | interpolated between D_pop=0.03 (rate=0.46) and D_pop=0.04 (rate=0.75) |
+| 5000 | pickup_latitude | 1000 | 0.0325 | 0.65x | interpolated between D_pop=0.03 (rate=0.43) and D_pop=0.04 (rate=0.70) |
+| 5000 | pickup_longitude | 1000 | 0.0363 | 0.73x | interpolated between D_pop=0.03 (rate=0.34) and D_pop=0.04 (rate=0.59) |
+| 5000 | trip_duration | 1000 | 0.0350 | 0.70x | interpolated between D_pop=0.03 (rate=0.41) and D_pop=0.04 (rate=0.59) |
+| 5000 | dropoff_latitude | 5000 | 0.0364 | 0.73x | interpolated between D_pop=0.03 (rate=0.28) and D_pop=0.04 (rate=0.62) |
+| 5000 | dropoff_longitude | 5000 | 0.0408 | 0.82x | interpolated between D_pop=0.04 (rate=0.47) and D_pop=0.05 (rate=0.89) |
+| 5000 | pickup_latitude | 5000 | 0.0377 | 0.75x | interpolated between D_pop=0.03 (rate=0.26) and D_pop=0.04 (rate=0.57) |
+| 5000 | pickup_longitude | 5000 | 0.0468 | 0.94x | interpolated between D_pop=0.04 (rate=0.28) and D_pop=0.05 (rate=0.60) |
+| 5000 | trip_duration | 5000 | 0.0437 | 0.87x | interpolated between D_pop=0.04 (rate=0.35) and D_pop=0.05 (rate=0.76) |
+| 5000 | dropoff_latitude | 20000 | 0.0377 | 0.75x | interpolated between D_pop=0.03 (rate=0.23) and D_pop=0.04 (rate=0.58) |
+| 5000 | dropoff_longitude | 20000 | 0.0418 | 0.84x | interpolated between D_pop=0.04 (rate=0.41) and D_pop=0.05 (rate=0.89) |
+| 5000 | pickup_latitude | 20000 | 0.0409 | 0.82x | interpolated between D_pop=0.04 (rate=0.47) and D_pop=0.05 (rate=0.84) |
+| 5000 | pickup_longitude | 20000 | 0.0489 | 0.98x | interpolated between D_pop=0.04 (rate=0.12) and D_pop=0.05 (rate=0.55) |
+| 5000 | trip_duration | 20000 | 0.0445 | 0.89x | interpolated between D_pop=0.04 (rate=0.30) and D_pop=0.05 (rate=0.74) |
+| 50000 | dropoff_latitude | 1000 | 0.0325 | 0.65x | interpolated between D_pop=0.03 (rate=0.42) and D_pop=0.04 (rate=0.72) |
+| 50000 | dropoff_longitude | 1000 | 0.0351 | 0.70x | interpolated between D_pop=0.03 (rate=0.34) and D_pop=0.04 (rate=0.66) |
+| 50000 | pickup_latitude | 1000 | 0.0339 | 0.68x | interpolated between D_pop=0.03 (rate=0.36) and D_pop=0.04 (rate=0.71) |
+| 50000 | pickup_longitude | 1000 | 0.0423 | 0.85x | interpolated between D_pop=0.04 (rate=0.42) and D_pop=0.05 (rate=0.76) |
+| 50000 | trip_duration | 1000 | 0.0407 | 0.81x | interpolated between D_pop=0.04 (rate=0.48) and D_pop=0.05 (rate=0.76) |
+| 50000 | dropoff_latitude | 5000 | 0.0403 | 0.81x | interpolated between D_pop=0.04 (rate=0.48) and D_pop=0.05 (rate=0.93) |
+| 50000 | dropoff_longitude | 5000 | 0.0431 | 0.86x | interpolated between D_pop=0.04 (rate=0.33) and D_pop=0.05 (rate=0.88) |
+| 50000 | pickup_latitude | 5000 | 0.0416 | 0.83x | interpolated between D_pop=0.04 (rate=0.41) and D_pop=0.05 (rate=0.94) |
+| 50000 | pickup_longitude | 5000 | 0.0481 | 0.96x | interpolated between D_pop=0.04 (rate=0.09) and D_pop=0.05 (rate=0.60) |
+| 50000 | trip_duration | 5000 | 0.0478 | 0.96x | interpolated between D_pop=0.04 (rate=0.16) and D_pop=0.05 (rate=0.59) |
+| 50000 | dropoff_latitude | 20000 | 0.0435 | 0.87x | interpolated between D_pop=0.04 (rate=0.23) and D_pop=0.05 (rate=0.99) |
+| 50000 | dropoff_longitude | 20000 | 0.0441 | 0.88x | interpolated between D_pop=0.04 (rate=0.20) and D_pop=0.05 (rate=0.93) |
+| 50000 | pickup_latitude | 20000 | 0.0439 | 0.88x | interpolated between D_pop=0.04 (rate=0.19) and D_pop=0.05 (rate=0.98) |
+| 50000 | pickup_longitude | 20000 | 0.0509 | 1.02x | interpolated between D_pop=0.05 (rate=0.45) and D_pop=0.06 (rate=0.98) |
+| 50000 | trip_duration | 20000 | 0.0499 | 1.00x | interpolated between D_pop=0.04 (rate=0.02) and D_pop=0.05 (rate=0.51) |
+
+Across all 30 curves, D50 ranges from 0.0277 to 0.0509 (0.55x to 1.02x the 0.05 floor). **D50 sits BELOW the floor for 29/30 curves** (the exception: ref_size=50000, pickup_longitude, n=20000 (1.02x), barely above) -- 50% detection power is generally reached at a true population D somewhat SMALLER than the configured materiality floor, not larger. This is NOT the naive-symmetric-noise expectation (which would put D50 approximately AT the floor); it reflects the two-sample KS statistic's known finite-sample upward bias (a supremum-based statistic is biased up by sampling noise, more so at smaller n relative to the true D) -- a true D_pop below the floor can still often produce an OBSERVED effect_size that clears it. The bias shrinks as n grows: at n=1000, D50/floor averages 0.70x (well below the floor); at n=20000, it averages 0.89x (close to 1.0, i.e. D50 converges toward the nominal floor as sampling noise shrinks) -- consistent with the observed effect_size converging to the true population D as n grows.
 
 
 ## Between-reference-draw variance

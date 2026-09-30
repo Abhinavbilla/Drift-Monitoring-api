@@ -139,23 +139,15 @@ treated as final:**
    sequentially with retries. Checkpointed to a JSONL file (not committed,
    redundant with the aggregated raw JSON) so the run survived one restart
    (a host memory-pressure kill mid-run) with zero data loss.
-5. **DONE (2026-09-30)**: Redo the data-collapse analysis as a binomial
-   GLM. `scripts/step2_item5_glm.py`, using item 4's data: logit link
-   (scikit-learn `LogisticRegression`, weak L2 in place of unpenalized MLE
-   — the power curve is near-deterministic away from its transition
-   region, which causes quasi-separation/unbounded coefficients under true
-   MLE; statsmodels is not installed and this project doesn't add
-   dependencies without sign-off, so this is a documented practical
-   substitute, not silent). M0: `material ~ x`. M1: `+ feature`. M2:
-   `+ reference_size`. At n=42,000, BOTH nested LRTs are highly
-   significant (feature: chi2=560.0, df=4, p<0.0001; reference size:
-   chi2=1294.0, df=1, p<0.0001) — real, non-noise deviations from a
-   single-curve collapse, exactly as the instruction anticipated ("theory
-   only guarantees approximate collapse"). The reference-size effect has a
-   clear, reported direction: at matched x, m=50000 batches have LOWER
-   detection probability than m=5000 (coefficient -0.849) — a residual
-   finite-sample effect the leading-order `sqrt(nm/(n+m))` scaling doesn't
-   fully absorb. Both commits: `c3e63df`. Full suite: 99/99 passing.
+5. **DONE (2026-09-30, REVISED 2026-09-30 — see "Evidence fixes" below for
+   the superseding version)**: Redo the data-collapse analysis as a
+   binomial GLM. `scripts/step2_item5_glm.py`, using item 4's data. The
+   version in commit `c3e63df` used `material` as the outcome — this was
+   methodologically wrong (materiality is a fixed-floor threshold on the
+   observed effect size, not a function of x, so collapse theory makes no
+   prediction about it) and was corrected the same day; see "Evidence
+   fixes" for the current (Gate-1-only, cluster-robust) version. Do not
+   cite the `material`-based coefficients from this entry.
 6. Verify `/fit` returns, per KS feature: the floor, `minimum_detectable_d`,
    and a new `recommended_batch_size` (smallest n with
    `c(alpha)*sqrt((n+m)/(nm)) <= floor`) — add if missing (additive field).
@@ -174,9 +166,81 @@ treated as final:**
    "reference_too_small_for_floor": false, "recommended_batch_size": 869}`
    for a 5,000-row reference. Full suite: 99/99 passing.
 
-**All six items DONE (2026-09-30).** Commit per logical change; don't
-push. Stop after these checks and report the numbers — don't proceed to
-(d)/(e) or the programmatic-integration work without a further go-ahead.
+**All six items DONE (2026-09-30).**
+
+**Evidence fixes (user, 2026-09-30, same day as the six-item review) — DONE:**
+1. **A/A over multiple reference draws.** `scripts/step2_aa_multidraw.py`:
+   the original A/A test used ONE reference draw per size, so its
+   false-alarm rate was conditional on that one draw's own sampling
+   error, not an unconditional estimate. Reuses item 4's 10 disjoint
+   reference draws per size (already fit, not refit) x >=20 independent
+   clean batches per draw x n in {1000, 5000, 20000} = 1,200 trials.
+   Reports Gate-1-only/Gate-2-only/combined per draw and averaged, with
+   Clopper-Pearson CIs and between-draw spread
+   (`results/step2_aa_multidraw_report.md`). Finding: at ref=5000,
+   n=20000, Gate-1-only ranges from 0.000 to 1.000 ACROSS THE 10 DRAWS
+   (mean 0.575, std 0.419) — confirms the original single-draw estimate
+   could have landed anywhere in that range. The combined (two-gate) rate
+   stays <=0.05 in every single draw/cell tested, at both reference
+   sizes — the materiality gate is what keeps the system stable across
+   reference draws, not Gate 1 alone. Explains the original single-draw
+   Holm=on/Floor=off figure (0.430 at ref=5000, n=10000): the elevated,
+   n-growing false-alarm rate reflects the reference's own finite-sample
+   deviation from the true population (typical size `c(alpha)/sqrt(m)`),
+   which every trial against that one reference inherits — larger n gives
+   the KS test more power to detect even this small, fixed,
+   reference-specific artifact. **Design implication, stated explicitly**:
+   the materiality floor must be at least around `c(alpha)/sqrt(m)`
+   (0.0192 at m=5,000; 0.0061 at m=50,000 — exactly the
+   `minimum_detectable_d_at_fit_time` quantity from item 6) for a stable
+   false-alarm rate; the locked default floor (0.05) sits comfortably
+   above both.
+2. **GLM outcome and inference, corrected.** `scripts/step2_item5_glm.py`
+   rewritten: outcome is now `significant` (Gate 1) ONLY — materiality
+   depends on observed effect size vs. a FIXED floor, not on x, so
+   collapse theory makes no prediction about it and the prior version's
+   use of `material` as the primary target was a category error (superseded
+   entry above). Refit with Huber-White cluster-robust SEs, clustered by
+   the physical reference draw (20 clusters — flagged as below the usual
+   30-50+ comfort zone, so treated as indicative). Headline results are
+   predicted-probability GAPS, not p-values: max gap between features at
+   matched x = 0.331 (33 points, at x=1.203, `pickup_longitude` vs.
+   `dropoff_latitude`) — real and survives cluster-robust correction
+   (all 4 feature-dummy p-values < 0.05 even clustered). Max gap between
+   reference sizes at matched x = 0.068 (7 points, at x=1.032) — this is
+   what the raw M2 coefficient (-0.274 for m=50000 vs. m=5000; NOTE: not
+   the -0.849 from the superseded `material`-based fit) means in practice.
+   Naive p-value on this coefficient was 1.07e-11; cluster-robust p-value
+   is 0.124 — NOT significant once the 20-cluster structure is accounted
+   for. Reported honestly as an upper bound on a plausible-but-unproven
+   effect, not a confirmed one.
+3. **Item 4 additions.** `scripts/step2_item4_report.py` extended: all 4
+   non-soft-ramp curves are at ref_size=50000, n=20000 (the largest
+   reference x largest batch combination) — `dropoff_latitude`,
+   `pickup_latitude`, `pickup_longitude`, `trip_duration`; explained as a
+   grid-resolution artifact (the transition band narrows at large n,
+   narrow enough that the fixed 7-point D_pop grid sometimes straddles it
+   between two adjacent tested points), not a real discontinuity — item
+   5's GLM fits one smooth sigmoid across all n with no special-case
+   discontinuity term needed. D50 (50%-detection D_pop, linearly
+   interpolated) reported for all 30 curves relative to the 0.05 floor:
+   D50 sits BELOW the floor for 29/30 curves (0.55x-0.98x; one exception
+   at 1.02x) — reflects the two-sample KS statistic's known finite-sample
+   upward bias (more pronounced at small n), shrinking toward the nominal
+   floor as n grows (n=1000 average 0.70x -> n=20000 average 0.89x).
+4. **Default decision_mode confirmed** (was already done earlier the same
+   day, re-verified here per this instruction): new projects with no
+   explicit `calibration_config` resolve to `"calibrated"`; existing
+   projects stay `"legacy"` permanently. Test:
+   `tests/test_new_project_default_mode.py` — 4 tests, all passing
+   (`TestNewProjectDefaultsToCalibrated::test_brand_new_project_no_config_gets_calibrated`,
+   `::test_brand_new_project_explicit_legacy_respected`,
+   `::test_refit_of_new_default_project_stays_calibrated`,
+   `TestExistingProjectStaysLegacy::test_project_with_null_config_refit_without_mention_stays_legacy`).
+
+Commit per logical change; don't push. Stop after these checks and
+report the numbers — don't proceed to (d)/(e) or the
+programmatic-integration work without a further go-ahead.
 
 ---
 

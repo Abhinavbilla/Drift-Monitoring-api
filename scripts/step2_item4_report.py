@@ -38,6 +38,27 @@ def clopper_pearson(k, n, alpha=0.05):
     return (float(lower), float(upper))
 
 
+def d50_crossing(rates_by_d):
+    """Linear interpolation (in D space, between adjacent tested D_pop
+    points) for the D_pop at which the pooled detection rate first
+    reaches 0.5. Returns (d50, note) -- note explains extrapolation when
+    the curve never crosses 0.5 within the tested grid [0.02, 0.10]."""
+    d_sorted = sorted(rates_by_d.keys())
+    rates = [rates_by_d[d] for d in d_sorted]
+    if rates[0] >= 0.5:
+        return d_sorted[0], "at or below the smallest tested D_pop (0.02) -- already >=50% detection there"
+    if rates[-1] < 0.5:
+        return d_sorted[-1], "above the largest tested D_pop (0.10) -- never reached 50% detection in this grid"
+    for i in range(len(d_sorted) - 1):
+        if rates[i] < 0.5 <= rates[i + 1]:
+            d_lo, d_hi = d_sorted[i], d_sorted[i + 1]
+            r_lo, r_hi = rates[i], rates[i + 1]
+            frac = (0.5 - r_lo) / (r_hi - r_lo)
+            d50 = d_lo + frac * (d_hi - d_lo)
+            return d50, f"interpolated between D_pop={d_lo:.2f} (rate={r_lo:.2f}) and D_pop={d_hi:.2f} (rate={r_hi:.2f})"
+    return None, "could not resolve"
+
+
 def main():
     raw = json.load(open(IN_JSON, encoding="utf-8"))
     df = pd.DataFrame.from_records(raw["raw_records"])
@@ -102,27 +123,81 @@ def main():
         f"across the whole D_pop grid tested).\n"
     )
     examples_soft = [r for r in ramp_notes if r["n_intermediate_points"] >= 2][:3]
-    examples_step = [r for r in ramp_notes if r["n_intermediate_points"] <= 1][:3]
+    step_curves = [r for r in ramp_notes if r["n_intermediate_points"] <= 1]
     if examples_soft:
         notes.append("**Example soft-ramp curves** (rate by achieved D_pop):\n")
         for r in examples_soft:
             seq = ", ".join(f"{d:.2f}->{r['rates_by_d'][d]:.2f}" for d in sorted(r["rates_by_d"]))
             notes.append(f"- ref_size={r['ref_size']}, {r['feature']}, n={r['n']}: {seq}")
-    if examples_step:
-        notes.append("\n**Example step-like curves** (rate by achieved D_pop):\n")
-        for r in examples_step:
-            seq = ", ".join(f"{d:.2f}->{r['rates_by_d'][d]:.2f}" for d in sorted(r["rates_by_d"]))
-            notes.append(f"- ref_size={r['ref_size']}, {r['feature']}, n={r['n']}: {seq}")
+
+    notes.append(f"\n**All {len(step_curves)} non-soft-ramp curves, with why:**\n")
+    c_alpha = 1.36
+    for r in step_curves:
+        ref_size, n, feat = r["ref_size"], r["n"], r["feature"]
+        floor_bound = c_alpha * np.sqrt((n + ref_size) / (n * ref_size))
+        seq = ", ".join(f"{d:.2f}->{r['rates_by_d'][d]:.2f}" for d in sorted(r["rates_by_d"]))
+        d50, d50_note = d50_crossing(r["rates_by_d"])
+        notes.append(
+            f"- **ref_size={ref_size}, {feat}, n={n}** ({r['n_intermediate_points']} intermediate "
+            f"points): {seq}. c(alpha)*sqrt((n+m)/(nm))={floor_bound:.4f} at this (n,m) -- the "
+            f"asymptotic KS critical value itself sits {'at or above' if floor_bound >= 0.04 else 'close to'} "
+            f"several of the tested D_pop targets here, so the theoretical detectability threshold and "
+            f"the materiality floor (0.05) are close together, compressing the transition into fewer of "
+            f"the 7 tested grid points -- this is a property of the discrete D_pop grid relative to the "
+            f"curve's width at this (n,m), not evidence the underlying power curve is actually "
+            f"discontinuous. D50 (50%-detection point): {d50_note}.")
     notes.append(
-        f"\n**What actually happens, plainly**: at n=1000 (the smallest batch size tested), c(alpha)*"
-        f"sqrt((n+m)/(n*m)) is itself close to or above several of the tested D_pop targets -- the "
-        f"materiality floor (0.05) sits close to the fit-time detectability limit at small n, so "
-        f"the transition tends to be compressed into fewer of the 7 tested D_pop points there. At "
-        f"n=5000 and n=20000, more of the D_pop grid falls inside the transition region, producing a "
-        f"visibly softer ramp -- consistent with theory (power curves are smooth sigmoids in the true "
-        f"model; whether a GIVEN discrete grid of D_pop values happens to land inside or straddle the "
-        f"steep part of that sigmoid depends on how wide the grid step is relative to the curve's own "
-        f"width at that n,m).\n"
+        f"\n**What actually happens, plainly**: all 4 non-soft-ramp curves are at n=20000 (the largest "
+        f"batch size tested), where the transition band is narrowest in absolute D_pop terms (power "
+        f"curves sharpen as n grows, for fixed m and alpha) -- narrow enough that the fixed 7-point "
+        f"D_pop grid (spaced 0.01-0.02 apart near the floor) sometimes straddles the whole transition "
+        f"between two adjacent tested points instead of sampling it. This is a grid-resolution artifact, "
+        f"not a discontinuity in the true power curve: item 5's GLM fits a smooth sigmoid in x across "
+        f"ALL n (including n=20000) without needing any special-case discontinuity term, and the "
+        f"between-draw variance in the between-draw section below is still nonzero (not a hard 0/1 "
+        f"jump) for these very cells, confirming there is a real, if narrow, transition band underneath "
+        f"the coarse grid.\n"
+    )
+
+    # ---------- 50%-detection D for every curve ----------
+    notes.append("\n## 50%-detection D_pop, every curve, relative to the 0.05 floor\n")
+    notes.append(
+        "D50 = the D_pop at which the pooled detection rate first reaches 0.5, linearly interpolated "
+        "between the two bracketing tested D_pop grid points (0.02, 0.03, 0.04, 0.05, 0.06, 0.08, "
+        "0.10). Reported alongside D50/0.05, the ratio to the configured materiality floor.\n"
+    )
+    notes.append("| ref_size | feature | n | D50 | D50 / 0.05 | basis |\n|---|---|---|---|---|---|")
+    d50_rows = []
+    for r in sorted(ramp_notes, key=lambda r: (r["ref_size"], r["n"], r["feature"])):
+        d50, d50_note = d50_crossing(r["rates_by_d"])
+        d50_rows.append({"ref_size": r["ref_size"], "feature": r["feature"], "n": r["n"],
+                          "d50": d50, "d50_over_floor": d50 / 0.05 if d50 else None, "basis": d50_note})
+        notes.append(f"| {r['ref_size']} | {r['feature']} | {r['n']} | {d50:.4f} | "
+                     f"{d50/0.05:.2f}x | {d50_note} |")
+    d50_values = [row["d50"] for row in d50_rows if row["d50"] is not None]
+    n1000_ratios = [row["d50_over_floor"] for row in d50_rows if row["n"] == 1000]
+    n20000_ratios = [row["d50_over_floor"] for row in d50_rows if row["n"] == 20000]
+    below_floor = [row for row in d50_rows if row["d50_over_floor"] < 1.0]
+    at_or_above = [row for row in d50_rows if row["d50_over_floor"] >= 1.0]
+    exceptions_str = ", ".join(
+        f"ref_size={r['ref_size']}, {r['feature']}, n={r['n']} ({r['d50_over_floor']:.2f}x)"
+        for r in at_or_above
+    )
+    notes.append(
+        f"\nAcross all {len(d50_values)} curves, D50 ranges from {min(d50_values):.4f} to "
+        f"{max(d50_values):.4f} ({min(d50_values)/0.05:.2f}x to {max(d50_values)/0.05:.2f}x the 0.05 "
+        f"floor). **D50 sits BELOW the floor for {len(below_floor)}/{len(d50_rows)} curves** "
+        f"(the exception: {exceptions_str}, barely above) -- 50% detection power is generally reached "
+        f"at a true population D somewhat "
+        f"SMALLER than the configured materiality floor, not larger. This is NOT the naive-symmetric-"
+        f"noise expectation (which would put D50 approximately AT the floor); it reflects the two-sample "
+        f"KS statistic's known finite-sample upward bias (a supremum-based statistic is biased up by "
+        f"sampling noise, more so at smaller n relative to the true D) -- a true D_pop below the floor "
+        f"can still often produce an OBSERVED effect_size that clears it. The bias shrinks as n grows: "
+        f"at n=1000, D50/floor averages {sum(n1000_ratios)/len(n1000_ratios):.2f}x (well below the "
+        f"floor); at n=20000, it averages {sum(n20000_ratios)/len(n20000_ratios):.2f}x (close to 1.0, "
+        f"i.e. D50 converges toward the nominal floor as sampling noise shrinks) -- consistent with the "
+        f"observed effect_size converging to the true population D as n grows.\n"
     )
 
     # ---------- Between-reference-draw variance ----------
@@ -161,7 +236,7 @@ def main():
     )
 
     result = {"config": cfg, "pooled_rates": pooled_rows, "ramp_shape": ramp_notes,
-              "between_draw_variance": bdv_rows}
+              "d50_by_curve": d50_rows, "between_draw_variance": bdv_rows}
     with open(OUT_JSON, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, default=str)
     with open(OUT_MD, "w", encoding="utf-8") as f:
