@@ -8,6 +8,52 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Hardening pass (user, 2026-09-30) — required before Step 5, IN
+PROGRESS.** The 2026-09-30 precondition check for Step 5 found this pass
+had NOT actually been done (no matching commits, no cross-user isolation
+tests, no clean-venv run, no client contract changes) despite being
+described as a precondition -- confirmed by grepping the repo and git log
+before starting anything. Scope, in priority order:
+1. **Security — cross-user isolation (highest priority; may justify an
+   exception to "additive only").** Two-user (A/B) tests on EVERY
+   project-scoped endpoint (JSON + upload variants, `/baseline`, `/logs`,
+   `/projects`, DELETE endpoints), via both session JWT and PAT: can B
+   read/analyze/overwrite/list/delete A's data? Report an endpoint x
+   result table. Fix any cross-user access that succeeds (a project must
+   belong to the authenticated user; 404 for other users' projects).
+   Also: PAT default expiry, revoked-token rejection, last_used updates,
+   and a grep of the repo/logs/reports for leaked `dm_` token strings.
+2. **Reproducible environment.** Installed versions (pandas 3.0.3,
+   scikit-learn 1.9.0) don't match `requirements.txt` (2.2.2 / 1.5.2) --
+   environment drift already implicated in two client bugs (Step 3d/3e).
+   Clean venv from `requirements.txt` on Python 3.12 (proposed, pending
+   approval), full suite run, fix failures, OR propose new pins if moving
+   to the newer versions is preferable. Either way, tests must pass on
+   exactly what the Docker image will install.
+3. **Client/server contract.** Replace the client's duplicated
+   categorical-classification heuristic with an explicit optional
+   `feature_types={col: "continuous"|"categorical"}` argument the server
+   honors (falling back to server-side profiling when omitted); the
+   server must never silently drop a column -- return 422 naming the
+   offending columns instead.
+4. **`recommended_batch_size` redefinition.** Smallest n with
+   `c(alpha)*sqrt((n+m)/(n*m)) <= floor/2` (was `<= floor`, kept as
+   `min_batch_size_at_floor`). Verify by simulation (m=5,000 and 50,000):
+   null D_obs distribution and P(D_obs > floor) at true D in {0, 0.02,
+   0.05}, at both the new and old n. Results saved under `results/`.
+5. **Fix the model-serving example.** The Apr-Jun replay's monitored
+   coordinate features sit at population D ~0.02, BELOW the 0.05 floor --
+   the two "flagged" windows in the Step 3e README were noise at n=869,
+   not real drift; that wording must be corrected. Add a labeled
+   synthetic scenario (D~0.10 on one feature, alerts every window) for
+   contrast. Re-run using the 50,000-row reference and the new
+   recommended_batch_size. README tables generated from `reports/*.json`
+   by script, not typed by hand.
+
+Tests + isolation checks required on every new/changed endpoint. Commit
+per logical change; don't push. **Do not start Step 5 until this is
+reported and the user says go.**
+
 **Project goal, for context on every decision below (recorded 2026-09-30):**
 this API exists so ML teams can integrate it into their model-serving
 pipelines to monitor **data drift of model inputs only** — no labels, no
