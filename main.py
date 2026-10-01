@@ -33,6 +33,7 @@ from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES, R
 from drift.calibration import (
     CalibrationConfig, minimum_detectable_d_at_fit_time, recommended_batch_size,
     min_batch_size_at_floor, NEW_PROJECT_DEFAULT_DECISION_MODE,
+    dkw_bound, min_reference_size_for_dkw_floor,
 )
 from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
@@ -710,12 +711,22 @@ def _resolve_and_persist_fit(
                 min_d = minimum_detectable_d_at_fit_time(m, active_config.alpha)
                 floor = active_config.effect_floor_for(feature, "ks_d")
                 too_small = bool(min_d > floor)
+                # Step 5 item 7: a DIFFERENT, stricter check than
+                # too_small above -- this is about whether the floor is
+                # even resolvable given the reference's OWN empirical-CDF
+                # estimation error (a distribution-free, exact bound),
+                # not the two-sample test's asymptotic critical value.
+                floor_below_dkw = bool(floor < dkw_bound(m))
                 calibration_info[feature] = FeatureCalibrationInfo(
                     minimum_detectable_d=min_d,
                     effect_floor=floor,
                     reference_too_small_for_floor=too_small,
                     recommended_batch_size=None if too_small else recommended_batch_size(m, floor, active_config.alpha),
                     min_batch_size_at_floor=None if too_small else min_batch_size_at_floor(m, floor, active_config.alpha),
+                    floor_below_dkw_bound=floor_below_dkw,
+                    minimum_reference_size_for_dkw_safe_floor=(
+                        min_reference_size_for_dkw_floor(floor) if floor_below_dkw else None
+                    ),
                 )
         else:
             floor = active_config.effect_floor_for(feature, "psi")
@@ -737,6 +748,18 @@ def _resolve_and_persist_fit(
         message += (
             f" Warning: this reference is too small to reliably detect effects as small as the "
             f"configured floor for: {', '.join(too_small)} (see calibration_info)."
+        )
+    dkw_warnings = {
+        f: info.minimum_reference_size_for_dkw_safe_floor
+        for f, info in calibration_info.items() if info.floor_below_dkw_bound
+    }
+    if dkw_warnings:
+        detail = ", ".join(f"{f} (needs >= {n})" for f, n in dkw_warnings.items())
+        message += (
+            f" Warning: the configured KS floor is below the DKW bound "
+            f"(sqrt(ln(2/0.05)/(2*reference_size))) for: {detail} -- this reference can't reliably "
+            f"characterize its own distribution to that precision, regardless of batch size "
+            f"(see calibration_info)."
         )
 
     return FitBaselineResponse(

@@ -8,7 +8,7 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
-**Step 5 Part 1 (user, 2026-10-01) — IN PROGRESS.** Ground rules
+**Step 5 Part 1 (user, 2026-10-01) — DONE, all 8 items (0-7).** Ground rules
 (unchanged, reaffirmed): no fabricated numbers, no regressions, additive
 API changes, self-healing migrations, ask before changing any default,
 commit per logical change, don't push, no new Streamlit UI, no raw rows
@@ -190,15 +190,34 @@ test. Scope, in order:
    two baseline-version-boundary tests, policy validation, persistence
    across re-fit, two-user isolation). Full suite green (253 backend +
    13 live-client), live-verified against the running server.
-7. `/fit` warns when the configured KS floor is below the DKW bound
-   `sqrt(ln(2/0.05)/(2m))`, and reports the minimum reference size that
-   would support the configured floor.
+7. **DONE.** `/fit` warns when the configured KS floor is below the DKW
+   bound `sqrt(ln(2/0.05)/(2m))`, and reports the minimum reference size
+   that would support the configured floor. New `drift/calibration.py`:
+   `dkw_bound(m)` (the Dvoretzky-Kiefer-Wolfowitz distribution-free bound
+   on a reference's OWN empirical-CDF estimation error -- distinct from
+   `minimum_detectable_d_at_fit_time`'s asymptotic two-sample KS
+   approximation) and `min_reference_size_for_dkw_floor(floor)`. Per
+   continuous feature: `FeatureCalibrationInfo` gained
+   `floor_below_dkw_bound` and `minimum_reference_size_for_dkw_safe_floor`
+   (None unless the warning fires); `/fit`'s response `message` gains a
+   third warning sentence when it does. Fixed at the literal 0.05 in the
+   formula (a DKW confidence level, not the project's own alpha -- both
+   default to 0.05 but are different concepts). New
+   `tests/test_dkw_floor_warning.py` (8 tests: the formula itself against
+   a literal Python re-derivation, the crossover point, small- vs
+   large-reference /fit behavior, a custom per-feature floor escaping the
+   warning, categorical features unaffected). Full suite green (261
+   backend + 13 live-client), live-verified against the running server.
 
-Tests required: alert state machine (incl. version boundaries),
-idempotency (all three cases), schema-report cases, history filters,
-version activate/rollback, isolation on every new endpoint. **Stop after
-Part 1 and report** -- do not start Part 2 (webhooks etc., if any)
-without a further go-ahead.
+All required test categories covered: alert state machine incl. version
+boundaries (test_alert_state_machine.py), idempotency all 3 cases
+(test_idempotency.py), schema-report cases (test_schema_report.py),
+history filters (test_history.py), version activate/rollback
+(test_baseline_versioning.py), isolation on every new endpoint (folded
+into each item's own test file + test_cross_user_isolation.py's rewrite
+for item 1). Final count: 261 backend + 13 live-client tests, all
+green. **Stopped after Part 1 and reported, per instruction** -- Part 2
+(webhooks etc., if any) not started, awaiting a further go-ahead.
 
 **Short cleanup pass (user, 2026-10-01) — DONE, four items:**
 1. **DONE.** `build_joint_classifier` ran as L2 while docs described L1

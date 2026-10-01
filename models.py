@@ -90,6 +90,19 @@ class FeatureCalibrationInfo(BaseModel):
                     "for the more conservative figure. None if reference_too_small_for_floor is True. "
                     "Continuous features only. Also an asymptotic approximation for continuous data."
     )
+    floor_below_dkw_bound: Optional[bool] = Field(
+        default=None,
+        description="Step 5 item 7: True if the configured KS materiality floor is BELOW the "
+                    "Dvoretzky-Kiefer-Wolfowitz distribution-free bound on this reference's own "
+                    "empirical-CDF estimation error (sqrt(ln(2/0.05)/(2*m))) -- i.e. the floor is "
+                    "finer than this reference size can actually resolve, regardless of the two-sample "
+                    "test's own asymptotics. A reliability warning, not an error. Continuous only."
+    )
+    minimum_reference_size_for_dkw_safe_floor: Optional[int] = Field(
+        default=None,
+        description="Step 5 item 7: the smallest reference size at which the DKW bound would no "
+                    "longer exceed the configured floor. Present only when floor_below_dkw_bound is True."
+    )
 
 class FitBaselineResponse(BaseModel):
     status: str

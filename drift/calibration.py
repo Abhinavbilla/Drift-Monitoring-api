@@ -133,6 +133,37 @@ def min_batch_size_at_floor(m: int, floor: float, alpha: float = DEFAULT_ALPHA) 
     return math.ceil(n_min)
 
 
+DKW_ALPHA = 0.05
+
+
+def dkw_bound(m: int, alpha: float = DKW_ALPHA) -> float:
+    """Step 5 item 7: Dvoretzky-Kiefer-Wolfowitz distribution-free bound on
+    a single empirical CDF's own estimation error at sample size m: with
+    probability >= 1-alpha, sup|F_m - F| <= sqrt(ln(2/alpha) / (2*m)).
+
+    Unlike minimum_detectable_d_at_fit_time (an ASYMPTOTIC two-sample KS
+    approximation for comparing two empirical distributions), this is an
+    exact, distribution-free, finite-sample bound on how well the
+    REFERENCE's own empirical CDF can characterize its true distribution
+    at all. A KS materiality floor set below this bound is finer than the
+    reference can actually resolve, independent of the two-sample test's
+    own asymptotics. Fixed at alpha=0.05 per the formula as specified --
+    a DKW confidence level, not the project's own significance alpha
+    (both default to 0.05, but they're different concepts)."""
+    if m <= 0:
+        raise ValueError("m must be positive.")
+    return math.sqrt(math.log(2 / alpha) / (2 * m))
+
+
+def min_reference_size_for_dkw_floor(floor: float, alpha: float = DKW_ALPHA) -> int:
+    """Smallest integer m such that dkw_bound(m, alpha) <= floor -- solving
+    sqrt(ln(2/alpha)/(2m)) <= floor for m gives m >= ln(2/alpha)/(2*floor^2)."""
+    if floor <= 0:
+        raise ValueError("floor must be positive.")
+    m_min = math.log(2 / alpha) / (2 * floor ** 2)
+    return math.ceil(m_min)
+
+
 def recommended_batch_size(m: int, floor: float, alpha: float = DEFAULT_ALPHA) -> Optional[int]:
     """Smallest integer n such that c(alpha)*sqrt((n+m)/(n*m)) <= floor/2
     (2026-09-30 redefinition -- was <= floor; the old definition is kept,
