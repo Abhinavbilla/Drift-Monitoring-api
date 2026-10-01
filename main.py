@@ -626,10 +626,11 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     #   created from this point on gets an explicit "calibrated" config
     #   written at creation time.
     validate_schema_policy(request.schema_policy)
+    validate_alert_policy(request.alert_policy)
     return _resolve_and_persist_fit(
         project_id, inferred_feature_types, continuous_features, categorical_features,
         combined_df, request.calibration_config, client, request.schema_policy,
-        request.model_version_label,
+        request.model_version_label, request.alert_policy,
     )
 
 
@@ -639,6 +640,7 @@ def _resolve_and_persist_fit(
     calibration_config_request: Any, client: dict,
     schema_policy_request: Optional[Dict[str, str]] = None,
     model_version_label: Optional[str] = None,
+    alert_policy_request: Optional[Dict[str, int]] = None,
 ) -> FitBaselineResponse:
     """Shared tail of /fit/{project_id} (JSON body) and
     /fit/{project_id}/upload (multipart file) -- both endpoints build
@@ -685,6 +687,8 @@ def _resolve_and_persist_fit(
         insert_kwargs["schema_policy"] = schema_policy_request
     cleaning_summary = crud.insert_baseline(**insert_kwargs)
     crud.create_project(internal_id, f"Project {project_id}", client["email"])
+    if alert_policy_request is not None:
+        crud.set_alert_policy(internal_id, alert_policy_request["k"], alert_policy_request["m"])
 
     # Step 5 item 5: every /fit archives a new version and makes it
     # active -- old versions are kept, never overwritten.
@@ -756,6 +760,7 @@ async def fit_model_baseline_upload(
     ),
     schema_policy: Optional[str] = Form(None, description="Optional schema_policy, JSON-encoded."),
     model_version_label: Optional[str] = Form(None, description="Optional label for this baseline version."),
+    alert_policy: Optional[str] = Form(None, description="Optional alert_policy ({k,m}), JSON-encoded."),
     client: dict = Depends(verify_project_access),
 ):
     """
@@ -832,9 +837,18 @@ async def fit_model_baseline_upload(
             raise ValidationError(f"schema_policy is not valid JSON: {e}")
     validate_schema_policy(parsed_schema_policy)
 
+    parsed_alert_policy = None
+    if alert_policy:
+        try:
+            parsed_alert_policy = json.loads(alert_policy)
+        except json.JSONDecodeError as e:
+            raise ValidationError(f"alert_policy is not valid JSON: {e}")
+    validate_alert_policy(parsed_alert_policy)
+
     return _resolve_and_persist_fit(
         project_id, inferred_feature_types, continuous_features, categorical_features,
         combined_df, parsed_calibration_config, client, parsed_schema_policy, model_version_label,
+        parsed_alert_policy,
     )
 
 
@@ -893,6 +907,26 @@ def validate_schema_policy(policy: Optional[Dict[str, str]]) -> None:
             raise ValidationError(
                 f"schema_policy['{key}'] must be one of {SCHEMA_POLICY_VALID_SEVERITIES}, got '{severity}'."
             )
+
+
+def validate_alert_policy(policy: Optional[Dict[str, int]]) -> None:
+    """Step 5 item 6. Required shape: exactly {"k": int, "m": int}, both
+    >=1, k<=m (k out of m can't exceed m itself)."""
+    if policy is None:
+        return
+    extra_keys = set(policy) - {"k", "m"}
+    if extra_keys:
+        raise ValidationError(f"alert_policy has unrecognized key(s) {sorted(extra_keys)}; only 'k' and 'm' are valid.")
+    missing_keys = {"k", "m"} - set(policy)
+    if missing_keys:
+        raise ValidationError(f"alert_policy is missing required key(s) {sorted(missing_keys)}.")
+    k, m = policy["k"], policy["m"]
+    if not isinstance(k, int) or not isinstance(m, int) or isinstance(k, bool) or isinstance(m, bool):
+        raise ValidationError("alert_policy's 'k' and 'm' must be integers.")
+    if k < 1 or m < 1:
+        raise ValidationError("alert_policy's 'k' and 'm' must each be >= 1.")
+    if k > m:
+        raise ValidationError(f"alert_policy's k ({k}) cannot exceed m ({m}) -- can't require more than m alerts out of m.")
 
 
 def _resolve_schema_policy(raw_policy: Optional[Dict[str, str]]) -> Dict[str, str]:
@@ -1042,6 +1076,12 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
                 system_alert_triggered=existing["system_alert"],
                 feature_metrics=existing["feature_results"],
                 schema_report=existing["schema_report"] or {},
+                alert=existing["system_alert"],
+                sustained_alert=existing["sustained_alert"],
+                windows_considered=existing["windows_considered"],
+                alert_state=None if existing["sustained_alert"] is None else
+                            ("open" if existing["sustained_alert"] else "ok"),
+                transition=None,  # a replay never represents a NEW state transition
             )
 
     # Step 5 item 4: schema_report (missing/unexpected columns, dtype
@@ -1072,10 +1112,11 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     # (item 5) is the version actually used -- explicit or the resolved
     # active one. sustained_alert is NULL until item 6 populates it.
     batch_size = len(next(iter(production_data.values()), []))
-    crud.insert_analysis_run(
+    run_ts = datetime.now(timezone.utc).isoformat()
+    run_id = crud.insert_analysis_run(
         project=internal_id,
         baseline_version=resolved_version,
-        ts=datetime.now(timezone.utc).isoformat(),
+        ts=run_ts,
         batch_size=batch_size,
         idempotency_key=idempotency_key,
         payload_hash=payload_hash,
@@ -1085,6 +1126,31 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         feature_results=report["feature_metrics"],
         schema_report=schema_report,
     )
+
+    # Step 5 item 6: alert policy {k, m} (default 1,1 = today's behavior).
+    # sustained_alert = >=k of the last m analyses on this SAME baseline
+    # version alerted -- this row counts as one of them, since it was
+    # just inserted above. alert_events only gets a new row on an actual
+    # STATE CHANGE (ok->open, open->open "still_open", open->ok) -- a
+    # steady "ok" streak never writes anything.
+    k, m = crud.get_alert_policy(internal_id)
+    recent_alerts = crud.recent_system_alerts_for_version(internal_id, resolved_version, m)
+    windows_considered = len(recent_alerts)
+    sustained_alert = sum(recent_alerts) >= k
+    crud.update_analysis_run_alert_fields(run_id, sustained_alert, windows_considered)
+
+    last_event = crud.get_last_alert_event(internal_id, resolved_version)
+    was_open = last_event is not None and last_event["transition"] in ("opened", "still_open")
+    transition = None
+    if sustained_alert and not was_open:
+        transition = "opened"
+    elif sustained_alert and was_open:
+        transition = "still_open"
+    elif not sustained_alert and was_open:
+        transition = "resolved"
+    if transition is not None:
+        crud.insert_alert_event(internal_id, resolved_version, run_ts, transition, sustained_alert, windows_considered)
+    alert_state = "open" if sustained_alert else "ok"
 
     # ==========================================
     # NEW: ASYNCHRONOUS ALERT TRIGGER
@@ -1106,6 +1172,11 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         system_alert_triggered=report["system_alert_triggered"],
         feature_metrics=report["feature_metrics"],
         schema_report=schema_report,
+        alert=report["system_alert_triggered"],
+        sustained_alert=sustained_alert,
+        windows_considered=windows_considered,
+        alert_state=alert_state,
+        transition=transition,
     )
 
 

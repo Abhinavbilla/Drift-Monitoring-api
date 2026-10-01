@@ -64,7 +64,14 @@ class TestIdempotencyReplay:
         r1 = _analyze(pid, [1.0, 2.0, 3.0] * 20, key="k1")
         r2 = _analyze(pid, [1.0, 2.0, 3.0] * 20, key="k1")
         assert r1.status_code == r2.status_code == 200
-        assert r1.json() == r2.json()
+        # Step 5 item 6: a replay never represents a NEW alert-state
+        # transition, even if the original call's analysis caused one --
+        # transition is the one field allowed to legitimately differ.
+        body1, body2 = r1.json(), r2.json()
+        assert body2["transition"] is None
+        body1.pop("transition")
+        body2.pop("transition")
+        assert body1 == body2
 
         hist = client.get(f"/history/{pid}", headers=HEADERS).json()
         assert hist["total"] == 1  # only one row, despite two calls

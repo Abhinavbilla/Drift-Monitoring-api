@@ -149,11 +149,47 @@ test. Scope, in order:
    /analyze's default), explicit `baseline_version` override + history
    recording, two-user isolation). Full suite green (238 backend + 13
    live-client), live-verified against the running server.
-6. Alert policy: per-project `{k, m}` (default 1,1 = today's behavior).
-   `sustained_alert` = >=k of the last m analyses on the SAME baseline
-   version alerted. Alert state (ok/open) with transitions (opened,
-   resolved, still_open) in an `alert_events` table. New response fields:
-   alert, sustained_alert, windows_considered, alert_state, transition.
+6. **DONE.** Alert policy: per-project `{k, m}` (default 1,1 = today's
+   behavior), settable via `/fit`'s optional `alert_policy` field
+   (tabular only, same scoping as items 2-5), persisted on `projects`
+   (new `alert_k`/`alert_m` columns) since it governs alerting behavior
+   over time, independent of which baseline version is active --
+   unlike `calibration_config`/`schema_policy`, it's never archived or
+   reset by activating an old version. `sustained_alert` = >=k of the
+   last m analyses on the SAME baseline version alerted (the just-
+   inserted row counts as one of them); `windows_considered` is the
+   actual count available (<=m, lower right after a /fit or baseline
+   version switch -- see new `analysis_runs.windows_considered` column).
+   Alert state machine: `alert_events` logs a row ONLY on an actual
+   transition (opened: ok->open, still_open: open->open, resolved:
+   open->ok) -- a steady "ok" streak writes nothing, so the table can't
+   grow unbounded on a healthy project. Current state for a (project,
+   baseline_version) is just "what did the latest alert_events row say,
+   or ok if none." New response fields: `alert` (= `system_alert_
+   triggered`), `sustained_alert`, `windows_considered`, `alert_state`,
+   `transition` (None on an item-3 idempotent replay -- a replay is
+   never a new transition).
+
+   **Found and fixed a real, previously-latent bug while building this**:
+   `crud.create_project`'s `INSERT OR REPLACE INTO projects (id, name,
+   owner_email)` silently reset every OTHER column -- including the new
+   `alert_k`/`alert_m` -- back to their DEFAULT on every single re-fit,
+   since `create_project` runs on every /fit call, new or existing
+   project. Caught by `test_explicit_old_baseline_version_has_its_own_
+   independent_state` legitimately failing; root-caused via direct DB
+   inspection, not assumed. Fixed with an upsert (`ON CONFLICT(id) DO
+   UPDATE SET name=excluded.name, owner_email=excluded.owner_email`)
+   that touches only those two columns, leaving alert_k/alert_m (and any
+   future project-level column) completely alone on a re-fit -- same bug
+   class the calibration_config "__UNSET__" sentinel already guarded
+   against on `baselines`, just never applied to `projects`.
+
+   New `tests/test_alert_state_machine.py` (15 tests: default-policy
+   parity with today, full opened/still_open/resolved cycle, no-event-
+   on-steady-ok, k>1/m>1 sustained-alert math, sliding-window behavior,
+   two baseline-version-boundary tests, policy validation, persistence
+   across re-fit, two-user isolation). Full suite green (253 backend +
+   13 live-client), live-verified against the running server.
 7. `/fit` warns when the configured KS floor is below the DKW bound
    `sqrt(ln(2/0.05)/(2m))`, and reports the minimum reference size that
    would support the configured floor.

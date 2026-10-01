@@ -139,6 +139,28 @@ def init_db():
         )
     ''')
 
+    # Step 5 item 6: one row per STATE TRANSITION only (opened/resolved/
+    # still_open) -- never one row per /analyze call, so a long stable
+    # "ok" or steady "open" streak doesn't grow this table. The current
+    # alert_state for a (project, baseline_version) is always just "is
+    # the latest row's transition opened/still_open (-> open) or resolved
+    # (-> ok)", or "ok" if no row exists yet.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alert_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project TEXT NOT NULL,
+            baseline_version INTEGER NOT NULL,
+            ts TEXT NOT NULL,
+            transition TEXT NOT NULL,
+            sustained_alert INTEGER NOT NULL,
+            windows_considered INTEGER NOT NULL
+        )
+    ''')
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_alert_events_project_version_ts '
+        'ON alert_events (project, baseline_version, ts)'
+    )
+
     # Self-healing migration for DBs created before the multimodal (v2.0)
     # columns existed — avoids requiring a separate manual migration step.
     for _column, ddl in [
@@ -156,6 +178,16 @@ def init_db():
         # "__UNSET__" preserve-existing-value sentinel.
         ("reference_null_rates", "ALTER TABLE baselines ADD COLUMN reference_null_rates TEXT"),
         ("schema_policy", "ALTER TABLE baselines ADD COLUMN schema_policy TEXT"),
+        # Step 5 item 6: per-project alert policy -- NOT part of a
+        # baseline version (unlike calibration_config/schema_policy), so
+        # it lives on `projects`, never archived/activated with a
+        # baseline. DEFAULT 1 for both -- SQLite backfills it onto every
+        # existing row, matching today's un-sustained-alert behavior
+        # exactly (k=1 of last m=1 means "this analysis alerted", the
+        # only check that existed before this item).
+        ("alert_k", "ALTER TABLE projects ADD COLUMN alert_k INTEGER DEFAULT 1"),
+        ("alert_m", "ALTER TABLE projects ADD COLUMN alert_m INTEGER DEFAULT 1"),
+        ("windows_considered", "ALTER TABLE analysis_runs ADD COLUMN windows_considered INTEGER"),
     ]:
         try:
             cursor.execute(ddl)
@@ -167,11 +199,20 @@ def init_db():
 
 # UPDATED: Added owner_email as a parameter
 def create_project(project_id: str, name: str, owner_email: str):
+    """Called on every /fit (new project or re-fit). Step 5 item 6 found
+    a real bug here: the old `INSERT OR REPLACE` listed only (id, name,
+    owner_email), so SQLite reset every OTHER column -- including
+    alert_k/alert_m -- back to their DEFAULT on every re-fit, silently
+    discarding a project's alert_policy the next time it was fit (same
+    bug class insert_baseline's calibration_config sentinel already
+    guards against). Upserting instead touches only name/owner_email;
+    every other column on an existing row -- alert_k, alert_m, and any
+    future project-level column -- is left completely alone."""
     conn = get_connection()
     cursor = conn.cursor()
-    # UPDATED: Insert owner_email into the database
     cursor.execute(
-        "INSERT OR REPLACE INTO projects (id, name, owner_email) VALUES (?, ?, ?)", 
+        "INSERT INTO projects (id, name, owner_email) VALUES (?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET name = excluded.name, owner_email = excluded.owner_email",
         (project_id, name, owner_email)
     )
     conn.commit()
@@ -782,7 +823,22 @@ def _row_to_analysis_run(row) -> Dict[str, Any]:
         "sustained_alert": None if row[9] is None else bool(row[9]),
         "feature_results": json.loads(row[10]) if row[10] else {},
         "schema_report": json.loads(row[11]) if row[11] else None,
+        "windows_considered": row[12],
     }
+
+
+def update_analysis_run_alert_fields(run_id: int, sustained_alert: bool, windows_considered: int) -> None:
+    """Step 5 item 6: filled in right after insert_analysis_run, once the
+    alert state machine has evaluated the last `m` runs on this baseline
+    version (which requires this row to already exist, to be countable)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE analysis_runs SET sustained_alert = ?, windows_considered = ? WHERE id = ?",
+        (1 if sustained_alert else 0, windows_considered, run_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_analysis_runs(
@@ -796,7 +852,7 @@ def get_analysis_runs(
     cursor = conn.cursor()
     query = (
         "SELECT id, project, baseline_version, ts, batch_size, idempotency_key, payload_hash, "
-        "decision_mode, system_alert, sustained_alert, feature_results, schema_report "
+        "decision_mode, system_alert, sustained_alert, feature_results, schema_report, windows_considered "
         "FROM analysis_runs WHERE project = ?"
     )
     params: List[Any] = [project]
@@ -825,7 +881,7 @@ def find_analysis_run_by_idempotency_key(
     cursor = conn.cursor()
     cursor.execute(
         "SELECT id, project, baseline_version, ts, batch_size, idempotency_key, payload_hash, "
-        "decision_mode, system_alert, sustained_alert, feature_results, schema_report "
+        "decision_mode, system_alert, sustained_alert, feature_results, schema_report, windows_considered "
         "FROM analysis_runs WHERE project = ? AND idempotency_key = ? AND ts >= ? "
         "ORDER BY ts DESC, id DESC LIMIT 1",
         (project, idempotency_key, not_before_ts),
@@ -833,3 +889,100 @@ def find_analysis_run_by_idempotency_key(
     row = cursor.fetchone()
     conn.close()
     return _row_to_analysis_run(row) if row else None
+
+
+def get_alert_policy(project_id: str) -> Tuple[int, int]:
+    """Step 5 item 6: per-project {k, m}, defaulting to (1, 1) -- today's
+    behavior (sustained_alert is true iff this single analysis alerted).
+    Lives on `projects`, not `baselines`/`baseline_versions`: it governs
+    alerting behavior over time, independent of which baseline is active."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT alert_k, alert_m FROM projects WHERE id = ?", (project_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row or row[0] is None or row[1] is None:
+        return (1, 1)
+    return (row[0], row[1])
+
+
+def set_alert_policy(project_id: str, k: int, m: int) -> None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE projects SET alert_k = ?, alert_m = ? WHERE id = ?", (k, m, project_id))
+    conn.commit()
+    conn.close()
+
+
+def recent_system_alerts_for_version(project_id: str, baseline_version: int, m: int) -> List[bool]:
+    """The last up-to-`m` /analyze calls' system_alert values for this
+    (project, baseline_version), newest first -- "last m analyses on the
+    SAME baseline version", per instruction. Fewer than m are returned if
+    fewer exist yet (e.g. just after activating a different version)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT system_alert FROM analysis_runs WHERE project = ? AND baseline_version = ? "
+        "ORDER BY ts DESC, id DESC LIMIT ?",
+        (project_id, baseline_version, m),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [bool(r[0]) for r in rows]
+
+
+def get_last_alert_event(project_id: str, baseline_version: int) -> Optional[Dict[str, Any]]:
+    """The most recent transition for this (project, baseline_version), if
+    any -- its transition alone tells us the CURRENT state: "opened" or
+    "still_open" means open, "resolved" means ok. No row at all means ok
+    (never alerted on this baseline version)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT transition FROM alert_events WHERE project = ? AND baseline_version = ? "
+        "ORDER BY ts DESC, id DESC LIMIT 1",
+        (project_id, baseline_version),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return {"transition": row[0]} if row else None
+
+
+def insert_alert_event(
+    project_id: str, baseline_version: int, ts: str, transition: str,
+    sustained_alert: bool, windows_considered: int,
+) -> None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO alert_events (project, baseline_version, ts, transition, sustained_alert, "
+        "windows_considered) VALUES (?, ?, ?, ?, ?, ?)",
+        (project_id, baseline_version, ts, transition, 1 if sustained_alert else 0, windows_considered),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_alert_events(project_id: str, baseline_version: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Newest first; optionally scoped to one baseline version."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = (
+        "SELECT id, project, baseline_version, ts, transition, sustained_alert, windows_considered "
+        "FROM alert_events WHERE project = ?"
+    )
+    params: List[Any] = [project_id]
+    if baseline_version is not None:
+        query += " AND baseline_version = ?"
+        params.append(baseline_version)
+    query += " ORDER BY ts DESC, id DESC"
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0], "project": r[1], "baseline_version": r[2], "ts": r[3],
+            "transition": r[4], "sustained_alert": bool(r[5]), "windows_considered": r[6],
+        }
+        for r in rows
+    ]

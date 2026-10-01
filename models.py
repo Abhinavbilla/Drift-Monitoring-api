@@ -35,6 +35,13 @@ class FitBaselineRequest(BaseModel):
                     "stored on the baseline version this /fit call creates. Purely descriptive -- never "
                     "required, never interpreted by the server."
     )
+    alert_policy: Optional[Dict[str, int]] = Field(
+        default=None,
+        description="Step 5 item 6: per-project {k, m} for sustained_alert (>=k of the last m analyses "
+                    "on the same baseline version alerted). Omit to leave the project's existing policy "
+                    "untouched (default {k: 1, m: 1} -- today's behavior: a single alerting analysis is "
+                    "itself sustained). Project-level, not tied to any one baseline version."
+    )
 
 class ActivateBaselineVersionRequest(BaseModel):
     version: int = Field(description="The existing baseline version number to make active.")
@@ -162,6 +169,31 @@ class AnalyzeBatchResponse(BaseModel):
                     "null_rate, unseen_categories, constant_column -- each with a severity "
                     "(alert/warn/ignore) resolved from the project's schema_policy. Empty for the "
                     "text/image/joint analyze endpoints, which have no column-level schema concept."
+    )
+    alert: Optional[bool] = Field(
+        default=None,
+        description="Step 5 item 6 (tabular /analyze and /analyze/upload only): same value as "
+                    "system_alert_triggered -- did THIS SINGLE analysis alert. None for text/image/joint."
+    )
+    sustained_alert: Optional[bool] = Field(
+        default=None,
+        description="True iff >=k of the last m analyses on the SAME baseline version alerted (the "
+                    "project's alert_policy, default k=1,m=1). None for text/image/joint."
+    )
+    windows_considered: Optional[int] = Field(
+        default=None,
+        description="How many of the last m analyses on this baseline version actually existed yet "
+                    "(<=m; lower right after a /fit or a baseline version switch)."
+    )
+    alert_state: Optional[str] = Field(
+        default=None,
+        description="'open' if sustained_alert, else 'ok', for this (project, baseline_version)."
+    )
+    transition: Optional[str] = Field(
+        default=None,
+        description="'opened'/'resolved'/'still_open' if this analysis changed or reaffirmed the alert "
+                    "state (logged in alert_events); None if nothing changed (steady 'ok') or this "
+                    "response is an item-3 idempotent replay (never a new transition)."
     )
     
     
