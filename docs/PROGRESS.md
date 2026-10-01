@@ -89,13 +89,34 @@ test. Scope, in order:
    backdated row, and the required two-user isolation case) plus two
    live-server client tests. Full suite green (206 backend + 13
    live-client).
-4. `schema_report` on every `/analyze` response (missing/unexpected
-   columns, dtype changes, null rate vs. baseline, unseen categories,
-   constant columns, severity per item) -- analyze valid columns, never a
-   500, never silently drop. Per-project alert|warn|ignore policy
-   (default: alert on missing, warn on the rest). Document the NULL
-   policy; if current handling is inconsistent, propose one and ask
-   first.
+4. **DONE.** `schema_report` on both tabular `/analyze` endpoints (JSON +
+   upload -- same scoping as items 2/3; text/image/joint have no
+   column/dtype concept, so their response's `schema_report` is always
+   `{}`, which `AnalyzeBatchResponse`'s new field defaults to). Asked
+   first per instruction, since item 0's recon found an inconsistency:
+   /fit drops NaN/None before storage but /analyze did zero cleaning,
+   silently producing a meaningless nan statistic. User chose "clean
+   before computing" -- /analyze now drops None/NaN (and, for continuous
+   features, non-numeric cells) from each column before the detector
+   runs, same policy /fit already applies; schema_report surfaces what
+   was found. Issue types: `missing_column`, `unexpected_column`,
+   `dtype_change`, `null_rate` (vs. a new `reference_null_rates` column
+   on `baselines`, computed at /fit time, flagged when a batch's null
+   rate exceeds the baseline's by >10 points), `unseen_categories`,
+   `constant_column` -- each with a severity resolved from a per-project
+   `schema_policy` (new `baselines` column, preserved across re-fits like
+   `calibration_config`'s `__UNSET__` sentinel; settable via `/fit`'s new
+   optional `schema_policy` field, default `{missing_columns: alert,
+   default: warn}`; `"ignore"` suppresses that issue type entirely).
+   Unexpected columns are reported but never fed to the detector; every
+   other valid column is still analyzed regardless of issues found
+   elsewhere -- never a 500, never an unreported drop. schema_report is
+   also stored in the item-2 history row and replayed verbatim on an
+   item-3 idempotent replay. New `tests/test_schema_report.py` (17
+   tests: all six issue types, policy resolution/validation/persistence,
+   history + idempotency integration, two-user isolation). Full suite
+   green (223 backend + 13 live-client), live-verified against the
+   running server with four simultaneous issues in one batch.
 5. Baseline versioning: `/fit` creates version n+1 (old versions kept,
    optional `model_version` label), `GET /baselines/{project_id}`,
    `POST /baselines/{project_id}/activate`, `/analyze`'s optional

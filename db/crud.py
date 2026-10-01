@@ -116,6 +116,12 @@ def init_db():
         # CalibrationConfig.from_dict(None) resolves to the legacy default --
         # existing projects stay legacy permanently with no data migration.
         ("calibration_config", "ALTER TABLE baselines ADD COLUMN calibration_config TEXT"),
+        # Step 5 item 4: reference_null_rates is recomputed on every /fit
+        # (reflects the CURRENT reference data); schema_policy persists
+        # across re-fits like calibration_config, via the same
+        # "__UNSET__" preserve-existing-value sentinel.
+        ("reference_null_rates", "ALTER TABLE baselines ADD COLUMN reference_null_rates TEXT"),
+        ("schema_policy", "ALTER TABLE baselines ADD COLUMN schema_policy TEXT"),
     ]:
         try:
             cursor.execute(ddl)
@@ -203,6 +209,7 @@ def insert_baseline(
     reference_data: dict,
     categorical_data: Optional[dict] = None,
     calibration_config: Optional[dict] = "__UNSET__",
+    schema_policy: Optional[dict] = "__UNSET__",
 ) -> Dict[str, Dict[str, int]]:
     """
     Stores all raw reference data (continuous + categorical) in `reference_data` column.
@@ -225,10 +232,24 @@ def insert_baseline(
     if calibration_config == "__UNSET__":
         existing = get_baseline(project_id)
         calibration_config = existing["calibration_config"] if existing else None
+    if schema_policy == "__UNSET__":
+        existing = get_baseline(project_id)
+        schema_policy = existing["schema_policy"] if existing else None
     # Merge continuous and categorical raw data into a single dictionary
     combined_raw_data = dict(reference_data)
     if categorical_data:
         combined_raw_data.update(categorical_data)
+
+    # Step 5 item 4: null rate of the RAW reference data, before any
+    # cleaning below -- /analyze compares a production batch's null rate
+    # against this to flag a meaningful increase.
+    reference_null_rates: Dict[str, float] = {}
+    for feature, values in combined_raw_data.items():
+        if not values:
+            reference_null_rates[feature] = 0.0
+            continue
+        null_count = sum(1 for v in values if v is None or (isinstance(v, float) and np.isnan(v)))
+        reference_null_rates[feature] = null_count / len(values)
 
     # Clean continuous columns BEFORE they're stored, not just when computing
     # fences below -- this same reference_data blob is separately consumed by
@@ -269,8 +290,9 @@ def insert_baseline(
     # but we keep it to avoid migration issues.
     cursor.execute('''
         INSERT OR REPLACE INTO baselines
-            (project_id, feature_types, reference_data, iqr_fences, categorical_baselines, calibration_config)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (project_id, feature_types, reference_data, iqr_fences, categorical_baselines,
+             calibration_config, reference_null_rates, schema_policy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         project_id,
         json.dumps(feature_types),
@@ -278,6 +300,8 @@ def insert_baseline(
         json.dumps(fences),
         json.dumps(cat_freq_baselines),
         json.dumps(calibration_config) if calibration_config is not None else None,
+        json.dumps(reference_null_rates),
+        json.dumps(schema_policy) if schema_policy is not None else None,
     ))
 
     conn.commit()
@@ -292,7 +316,7 @@ def get_baseline(project_id: str) -> dict:
 
     cursor.execute(
         'SELECT feature_types, reference_data, iqr_fences, modality, embedding_reference, embedding_model, '
-        'calibration_config '
+        'calibration_config, reference_null_rates, schema_policy '
         'FROM baselines WHERE project_id = ?',
         (project_id,)
     )
@@ -314,6 +338,13 @@ def get_baseline(project_id: str) -> dict:
         # through, not resolved here, so this module stays independent of
         # drift/calibration.py.
         "calibration_config": json.loads(row[6]) if row[6] else None,
+        # Step 5 item 4: {} for every pre-item-4 row (no null-rate
+        # baseline recorded yet) -- /analyze treats a missing entry as
+        # "no baseline null rate known", not as 0.
+        "reference_null_rates": json.loads(row[7]) if row[7] else {},
+        # None -> the default policy (alert on missing columns, warn on
+        # everything else) -- resolved in main.py, not here.
+        "schema_policy": json.loads(row[8]) if row[8] else None,
     }
 
 

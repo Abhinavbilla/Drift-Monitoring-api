@@ -21,6 +21,14 @@ class FitBaselineRequest(BaseModel):
                     "which one matches the type given here); an unrecognized value or an unknown "
                     "column name is a 422."
     )
+    schema_policy: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Step 5 item 4: per-project severity policy for /analyze's schema_report. Keys: "
+                    "'missing_columns' and 'default' (every other issue type); values: 'alert', "
+                    "'warn', or 'ignore'. Omit to leave the project's existing policy untouched (or "
+                    "default to {missing_columns: alert, default: warn} for a brand-new project) -- "
+                    "never required."
+    )
 
 class FeatureCalibrationInfo(BaseModel):
     minimum_detectable_d: Optional[float] = Field(
@@ -132,6 +140,14 @@ class AnalyzeBatchResponse(BaseModel):
     system_alert_triggered: bool = Field(description="True if ANY feature in the batch is drifting.")
     feature_metrics: Dict[str, FeatureDriftMetric] = Field(
         description="Detailed drift metrics for every feature evaluated."
+    )
+    schema_report: Dict[str, List[Dict[str, Any]]] = Field(
+        default_factory=dict,
+        description="Step 5 item 4 (tabular /analyze and /analyze/upload only): per-column schema "
+                    "issues found in this batch -- missing_column, unexpected_column, dtype_change, "
+                    "null_rate, unseen_categories, constant_column -- each with a severity "
+                    "(alert/warn/ignore) resolved from the project's schema_policy. Empty for the "
+                    "text/image/joint analyze endpoints, which have no column-level schema concept."
     )
     
     

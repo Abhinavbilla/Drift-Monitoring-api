@@ -2,6 +2,7 @@ import sqlite3
 import jwt
 import binascii
 import hashlib
+import numpy as np
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional
@@ -36,7 +37,7 @@ from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
 from adapters.image import ImageAdapter
 from adapters.joint import JointAdapter, build_joint_classifier
-from utils.profiler import profile_columns
+from utils.profiler import profile_columns, coerce_numeric_column
 from utils.validation import (
     ValidationError,
     validate_tabular_columns,
@@ -592,9 +593,10 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     #   resolve to CalibrationConfig's own "legacy" default; only a project
     #   created from this point on gets an explicit "calibrated" config
     #   written at creation time.
+    validate_schema_policy(request.schema_policy)
     return _resolve_and_persist_fit(
         project_id, inferred_feature_types, continuous_features, categorical_features,
-        combined_df, request.calibration_config, client,
+        combined_df, request.calibration_config, client, request.schema_policy,
     )
 
 
@@ -602,6 +604,7 @@ def _resolve_and_persist_fit(
     project_id: str, inferred_feature_types: dict, continuous_features: dict,
     categorical_features: dict, combined_df: pd.DataFrame,
     calibration_config_request: Any, client: dict,
+    schema_policy_request: Optional[Dict[str, str]] = None,
 ) -> FitBaselineResponse:
     """Shared tail of /fit/{project_id} (JSON body) and
     /fit/{project_id}/upload (multipart file) -- both endpoints build
@@ -644,6 +647,8 @@ def _resolve_and_persist_fit(
     )
     if resolved_calibration_config != "__UNSET__":
         insert_kwargs["calibration_config"] = resolved_calibration_config
+    if schema_policy_request is not None:
+        insert_kwargs["schema_policy"] = schema_policy_request
     cleaning_summary = crud.insert_baseline(**insert_kwargs)
 
     crud.create_project(internal_id, f"Project {project_id}", client["email"])
@@ -711,6 +716,7 @@ async def fit_model_baseline_upload(
     feature_types: Optional[str] = Form(
         None, description="Optional {column: 'continuous'|'categorical'} override, JSON-encoded."
     ),
+    schema_policy: Optional[str] = Form(None, description="Optional schema_policy, JSON-encoded."),
     client: dict = Depends(verify_project_access),
 ):
     """
@@ -779,9 +785,17 @@ async def fit_model_baseline_upload(
         except json.JSONDecodeError as e:
             raise ValidationError(f"calibration_config is not valid JSON: {e}")
 
+    parsed_schema_policy = None
+    if schema_policy:
+        try:
+            parsed_schema_policy = json.loads(schema_policy)
+        except json.JSONDecodeError as e:
+            raise ValidationError(f"schema_policy is not valid JSON: {e}")
+    validate_schema_policy(parsed_schema_policy)
+
     return _resolve_and_persist_fit(
         project_id, inferred_feature_types, continuous_features, categorical_features,
-        combined_df, parsed_calibration_config, client,
+        combined_df, parsed_calibration_config, client, parsed_schema_policy,
     )
 
 
@@ -819,6 +833,105 @@ def predict_realtime_anomaly(project_id: str, request: PredictRequest, backgroun
 # ENDPOINT 3: BATCH DRIFT DETECTION
 # ---------------------------------------------------------
 IDEMPOTENCY_KEY_TTL_DAYS = 7
+DEFAULT_SCHEMA_POLICY = {"missing_columns": "alert", "default": "warn"}
+SCHEMA_POLICY_VALID_SEVERITIES = ("alert", "warn", "ignore")
+SCHEMA_POLICY_VALID_KEYS = ("missing_columns", "default")
+# How many percentage points a batch's null rate may exceed its baseline's
+# before item 4 flags it -- arbitrary but simple; not claimed to be
+# statistically derived.
+NULL_RATE_INCREASE_THRESHOLD = 0.1
+
+
+def validate_schema_policy(policy: Optional[Dict[str, str]]) -> None:
+    if policy is None:
+        return
+    for key, severity in policy.items():
+        if key not in SCHEMA_POLICY_VALID_KEYS:
+            raise ValidationError(
+                f"schema_policy key '{key}' is not recognized; use one of {SCHEMA_POLICY_VALID_KEYS}."
+            )
+        if severity not in SCHEMA_POLICY_VALID_SEVERITIES:
+            raise ValidationError(
+                f"schema_policy['{key}'] must be one of {SCHEMA_POLICY_VALID_SEVERITIES}, got '{severity}'."
+            )
+
+
+def _resolve_schema_policy(raw_policy: Optional[Dict[str, str]]) -> Dict[str, str]:
+    policy = dict(DEFAULT_SCHEMA_POLICY)
+    if raw_policy:
+        policy.update(raw_policy)
+    return policy
+
+
+def _build_schema_report_and_clean(state: dict, production_data: dict):
+    """Step 5 item 4. Returns (schema_report, cleaned_production_data).
+
+    Cleaning drops None/NaN from every column, and non-numeric cells from
+    continuous columns, BEFORE the detector runs -- the NULL policy
+    decided for this item: /analyze's computed statistics are based on
+    the cleaned data (matching /fit's existing behavior), not the silent
+    meaningless-nan-statistic that reached the detector before this.
+    Unexpected (not-in-baseline) columns are reported but never fed to
+    the detector; every valid column is still analyzed regardless of any
+    issue found elsewhere in the batch -- never a 500, never a silent,
+    unreported drop."""
+    policy = _resolve_schema_policy(state.get("schema_policy"))
+    feature_types = state["feature_types"]
+    reference_null_rates = state.get("reference_null_rates") or {}
+    allowed_values_by_feature = {
+        f["feature_name"]: set(f.get("allowed_values", []))
+        for f in state.get("iqr_fences", []) if f.get("type") == "categorical"
+    }
+
+    report: Dict[str, List[Dict[str, Any]]] = {}
+
+    def _add(column: str, issue: str, severity_key: str, **extra):
+        severity = policy.get(severity_key, policy["default"])
+        if severity == "ignore":
+            return
+        report.setdefault(column, []).append({"issue": issue, "severity": severity, **extra})
+
+    for col in sorted(set(feature_types) - set(production_data)):
+        _add(col, "missing_column", "missing_columns")
+    for col in sorted(set(production_data) - set(feature_types)):
+        _add(col, "unexpected_column", "default")
+
+    cleaned: Dict[str, list] = {}
+    for col, values in production_data.items():
+        if col not in feature_types:
+            continue  # already reported as unexpected_column above
+
+        total = len(values)
+        is_null = [v is None or (isinstance(v, float) and np.isnan(v)) for v in values]
+        null_count = sum(is_null)
+        batch_null_rate = (null_count / total) if total else 0.0
+        baseline_null_rate = reference_null_rates.get(col)
+        if baseline_null_rate is not None and batch_null_rate - baseline_null_rate > NULL_RATE_INCREASE_THRESHOLD:
+            _add(col, "null_rate", "default", baseline=baseline_null_rate, batch=batch_null_rate)
+
+        non_null_values = [v for v, skip in zip(values, is_null) if not skip]
+
+        if feature_types[col] == "continuous":
+            numeric = pd.to_numeric(pd.Series(non_null_values), errors="coerce") if non_null_values else pd.Series([], dtype=float)
+            bad_dtype_count = int(numeric.isna().sum())
+            if bad_dtype_count:
+                _add(col, "dtype_change", "default", dropped=bad_dtype_count, batch_size=total)
+            cleaned_values = numeric.dropna().tolist()
+            cleaned[col] = cleaned_values
+            if len(cleaned_values) > 1 and len(set(cleaned_values)) == 1:
+                _add(col, "constant_column", "default", value=cleaned_values[0])
+        else:
+            str_values = [str(v) for v in non_null_values]
+            allowed = allowed_values_by_feature.get(col)
+            if allowed is not None:
+                unseen = sorted(set(str_values) - allowed)
+                if unseen:
+                    _add(col, "unseen_categories", "default", values=unseen[:20], count=len(unseen))
+            cleaned[col] = str_values
+            if len(str_values) > 1 and len(set(str_values)) == 1:
+                _add(col, "constant_column", "default", value=str_values[0])
+
+    return report, cleaned
 
 
 @app.post("/analyze/{project_id}", response_model=AnalyzeBatchResponse, tags=["Analytics"])
@@ -871,7 +984,16 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
             return AnalyzeBatchResponse(
                 system_alert_triggered=existing["system_alert"],
                 feature_metrics=existing["feature_results"],
+                schema_report=existing["schema_report"] or {},
             )
+
+    # Step 5 item 4: schema_report (missing/unexpected columns, dtype
+    # changes, null-rate increases, unseen categories, constant columns)
+    # computed against the ORIGINAL production_data, and cleaning (drop
+    # None/NaN, and non-numeric cells for continuous features) applied
+    # before the detector ever sees it -- only valid, known columns reach
+    # the detector; nothing is silently dropped without being reported.
+    schema_report, cleaned_production_data = _build_schema_report_and_clean(state, production_data)
 
     # None (every project fit before Step 2, or never given a config) ->
     # CalibrationConfig.from_dict(None) -> legacy -> DistributionDetector's
@@ -884,14 +1006,14 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         feature_types=state["feature_types"]
     )
 
-    report = detector.analyze_production_window(production_data)
+    report = detector.analyze_production_window(cleaned_production_data)
 
     # Step 5 item 2: one history row per /analyze call, statistics only
     # (never the raw production_data itself -- payload_hash is a one-way
-    # digest of it, used above for item 3's idempotency replay detection,
-    # not for recovering the data). baseline_version is hardcoded to 1
-    # until item 5 adds real versioning; schema_report/sustained_alert
-    # are NULL until items 4/6 populate them for real.
+    # digest of the ORIGINAL payload, used above for item 3's idempotency
+    # replay detection, not for recovering the data). baseline_version is
+    # hardcoded to 1 until item 5 adds real versioning; sustained_alert is
+    # NULL until item 6 populates it for real.
     batch_size = len(next(iter(production_data.values()), []))
     crud.insert_analysis_run(
         project=internal_id,
@@ -904,7 +1026,7 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         system_alert=report["system_alert_triggered"],
         sustained_alert=None,
         feature_results=report["feature_metrics"],
-        schema_report=None,
+        schema_report=schema_report,
     )
 
     # ==========================================
@@ -925,7 +1047,8 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
 
     return AnalyzeBatchResponse(
         system_alert_triggered=report["system_alert_triggered"],
-        feature_metrics=report["feature_metrics"]
+        feature_metrics=report["feature_metrics"],
+        schema_report=schema_report,
     )
 
 
