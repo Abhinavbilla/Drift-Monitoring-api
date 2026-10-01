@@ -117,11 +117,38 @@ test. Scope, in order:
    history + idempotency integration, two-user isolation). Full suite
    green (223 backend + 13 live-client), live-verified against the
    running server with four simultaneous issues in one batch.
-5. Baseline versioning: `/fit` creates version n+1 (old versions kept,
-   optional `model_version` label), `GET /baselines/{project_id}`,
-   `POST /baselines/{project_id}/activate`, `/analyze`'s optional
-   `baseline_version` (default active), history records the version
-   used. Propose a version-retention cap and ask before enforcing.
+5. **DONE.** Baseline versioning: `/fit` creates version n+1 for ALL
+   modalities (tabular/text/image/joint -- the archive mechanism is
+   generic at the storage layer, cheap to apply everywhere; `model_
+   version_label` input and the `version` response field are tabular-only,
+   matching items 2-4's scoping). Design: `baselines` stays a
+   materialized view of whichever version is ACTIVE (so every pre-
+   existing read path -- `get_baseline`, `/predict`, `/health`, `/analyze`
+   without an explicit version -- keeps working completely unchanged);
+   new `baseline_versions` table archives a full snapshot on every /fit,
+   never deleted; new `baseline_active_version` table points at the
+   current one. `GET /baselines/{project_id}` lists all versions newest
+   first, flagging the active one -- lazily backfills version 1 for a
+   project fit before this feature existed (`crud.
+   _backfill_version_one_if_needed`), so it works for every project
+   without a migration step. `POST /baselines/{project_id}/activate`
+   `{"version": n}` re-points the active cache at an old version.
+   `/analyze`'s optional `baseline_version` query param (tabular JSON +
+   upload only) overrides the active version for that one call; omitted,
+   byte-identical to before. History now records the REAL version used
+   (explicit or resolved-active), not the item 2/3/4 placeholder of 1.
+   Retention: **asked, user said no cap for now** -- every version kept
+   indefinitely (low-traffic monitoring API, re-fit is occasional not
+   per-request, storage growth is slow). Backlog for later, only if disk
+   use actually grows: a manual "prune old baseline versions" admin
+   script (keep the active version plus any referenced by history within
+   the last N days) and a `/fit` warning when a project exceeds ~50
+   versions -- neither built yet, intentionally. New
+   `tests/test_baseline_versioning.py` (15 tests: version creation,
+   listing + legacy backfill, activate (incl. 404 and re-routing
+   /analyze's default), explicit `baseline_version` override + history
+   recording, two-user isolation). Full suite green (238 backend + 13
+   live-client), live-verified against the running server.
 6. Alert policy: per-project `{k, m}` (default 1,1 = today's behavior).
    `sustained_alert` = >=k of the last m analyses on the SAME baseline
    version alerted. Alert state (ok/open) with transitions (opened,

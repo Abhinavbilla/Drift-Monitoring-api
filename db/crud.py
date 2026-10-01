@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import numpy as np
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Tuple
 from typing import Optional
 import pandas as pd
@@ -104,6 +105,39 @@ def init_db():
         )
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_runs_project_ts ON analysis_runs (project, ts)')
+
+    # Step 5 item 5: every /fit archives a full snapshot here, old
+    # versions never overwritten (unlike `baselines`, which stays a
+    # materialized view of whichever version is currently ACTIVE -- every
+    # existing read path, get_baseline() included, keeps working
+    # unchanged). baseline_active_version is a one-row-per-project pointer
+    # into this table; activating an old version copies its snapshot back
+    # into `baselines`.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS baseline_versions (
+            project_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            model_version_label TEXT,
+            feature_types TEXT,
+            reference_data TEXT,
+            iqr_fences TEXT,
+            categorical_baselines TEXT,
+            modality TEXT,
+            embedding_reference TEXT,
+            embedding_model TEXT,
+            calibration_config TEXT,
+            reference_null_rates TEXT,
+            schema_policy TEXT,
+            PRIMARY KEY (project_id, version)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS baseline_active_version (
+            project_id TEXT PRIMARY KEY,
+            version INTEGER NOT NULL
+        )
+    ''')
 
     # Self-healing migration for DBs created before the multimodal (v2.0)
     # columns existed — avoids requiring a separate manual migration step.
@@ -346,6 +380,166 @@ def get_baseline(project_id: str) -> dict:
         # everything else) -- resolved in main.py, not here.
         "schema_policy": json.loads(row[8]) if row[8] else None,
     }
+
+
+_BASELINE_VERSION_COLUMNS = (
+    "feature_types, reference_data, iqr_fences, categorical_baselines, modality, "
+    "embedding_reference, embedding_model, calibration_config, reference_null_rates, schema_policy"
+)
+
+
+def _backfill_version_one_if_needed(project_id: str) -> None:
+    """Step 5 item 5: a project fit before this feature existed has a
+    `baselines` row but no `baseline_versions` history. The first time any
+    version-aware call touches it, archive its CURRENT state as version 1
+    -- so GET /baselines and activate work for every pre-existing project
+    without a separate migration step. created_at reflects this backfill
+    moment, not the project's true original fit time (never recorded)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM baseline_versions WHERE project_id = ? LIMIT 1", (project_id,))
+    if cursor.fetchone():
+        conn.close()
+        return
+    cursor.execute(f"SELECT {_BASELINE_VERSION_COLUMNS} FROM baselines WHERE project_id = ?", (project_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    cursor.execute(
+        f"INSERT INTO baseline_versions (project_id, version, created_at, model_version_label, "
+        f"{_BASELINE_VERSION_COLUMNS}) VALUES (?, 1, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (project_id, now, *row),
+    )
+    cursor.execute(
+        "INSERT OR REPLACE INTO baseline_active_version (project_id, version) VALUES (?, 1)",
+        (project_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def archive_baseline_version(project_id: str, model_version_label: Optional[str] = None) -> int:
+    """Step 5 item 5: snapshots the CURRENT `baselines` row (just written
+    by insert_baseline/insert_embedding_baseline/insert_joint_baseline)
+    into baseline_versions as the next version for this project, and
+    makes it the active version. Returns the new version number. Old
+    versions are never deleted (no retention cap enforced).
+
+    Deliberately does NOT call _backfill_version_one_if_needed: this is
+    always invoked right after a /fit call has just written the new state
+    into `baselines`, so backfilling first would double-count that same
+    write as both a synthesized version 1 AND a freshly archived version
+    N -- the backfill path is for READ paths touching a project that has
+    never been archived at all."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM baseline_versions WHERE project_id = ?", (project_id,))
+    next_version = cursor.fetchone()[0]
+    cursor.execute(f"SELECT {_BASELINE_VERSION_COLUMNS} FROM baselines WHERE project_id = ?", (project_id,))
+    row = cursor.fetchone()
+    now = datetime.now(timezone.utc).isoformat()
+    cursor.execute(
+        f"INSERT INTO baseline_versions (project_id, version, created_at, model_version_label, "
+        f"{_BASELINE_VERSION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (project_id, next_version, now, model_version_label, *row),
+    )
+    cursor.execute(
+        "INSERT OR REPLACE INTO baseline_active_version (project_id, version) VALUES (?, ?)",
+        (project_id, next_version),
+    )
+    conn.commit()
+    conn.close()
+    return next_version
+
+
+def list_baseline_versions(project_id: str) -> List[Dict[str, Any]]:
+    """Newest first; each entry flags whether it's the active version."""
+    _backfill_version_one_if_needed(project_id)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT version, created_at, model_version_label, modality FROM baseline_versions "
+        "WHERE project_id = ? ORDER BY version DESC",
+        (project_id,),
+    )
+    rows = cursor.fetchall()
+    active = get_active_baseline_version(project_id)
+    conn.close()
+    return [
+        {
+            "version": r[0], "created_at": r[1], "model_version_label": r[2],
+            "modality": r[3] or "tabular", "active": r[0] == active,
+        }
+        for r in rows
+    ]
+
+
+def get_active_baseline_version(project_id: str) -> Optional[int]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT version FROM baseline_active_version WHERE project_id = ?", (project_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def get_baseline_version(project_id: str, version: int) -> Optional[Dict[str, Any]]:
+    """Same shape as get_baseline(), but for one specific archived
+    version -- used by /analyze's optional baseline_version override."""
+    _backfill_version_one_if_needed(project_id)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        f"SELECT {_BASELINE_VERSION_COLUMNS} FROM baseline_versions WHERE project_id = ? AND version = ?",
+        (project_id, version),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "feature_types": json.loads(row[0]) if row[0] else {},
+        "reference_data": json.loads(row[1]) if row[1] else {},
+        "iqr_fences": json.loads(row[2]) if row[2] else [],
+        "modality": row[4] or "tabular",
+        "embedding_reference": json.loads(row[5]) if row[5] else None,
+        "embedding_model": row[6],
+        "calibration_config": json.loads(row[7]) if row[7] else None,
+        "reference_null_rates": json.loads(row[8]) if row[8] else {},
+        "schema_policy": json.loads(row[9]) if row[9] else None,
+    }
+
+
+def set_active_baseline_version(project_id: str, version: int) -> bool:
+    """Activates an existing version: points baseline_active_version at
+    it AND refreshes the `baselines` materialized-view row to match, so
+    every existing read path (get_baseline included) immediately reflects
+    it. Returns False if that version doesn't exist for this project."""
+    _backfill_version_one_if_needed(project_id)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        f"SELECT {_BASELINE_VERSION_COLUMNS} FROM baseline_versions WHERE project_id = ? AND version = ?",
+        (project_id, version),
+    )
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return False
+    cursor.execute(
+        f"INSERT OR REPLACE INTO baselines (project_id, {_BASELINE_VERSION_COLUMNS}) "
+        f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (project_id, *row),
+    )
+    cursor.execute(
+        "INSERT OR REPLACE INTO baseline_active_version (project_id, version) VALUES (?, ?)",
+        (project_id, version),
+    )
+    conn.commit()
+    conn.close()
+    return True
 
 
 def set_calibration_config(project_id: str, config: Optional[dict]) -> None:

@@ -25,6 +25,7 @@ from models import (
     FitImageBaselineRequest, AnalyzeImageBatchRequest,
     EmbeddingFitResponse,
     FitJointBaselineRequest, AnalyzeJointBatchRequest,
+    ActivateBaselineVersionRequest,
 )
 from db import crud
 from drift.detector import compute_iqr_anomalies, DistributionDetector
@@ -351,6 +352,37 @@ def get_baseline(project_id: str, client: dict = Depends(verify_project_access))
     modality = row[2] or "tabular"
     return {"fences": fences, "feature_types": feature_types, "modality": modality}
 
+
+@app.get("/baselines/{project_id}", tags=["Management"])
+def list_baselines(project_id: str, client: dict = Depends(verify_project_access)):
+    """Step 5 item 5: every baseline version ever fit for this project,
+    newest first, flagging which one is currently active. A project fit
+    before this feature existed is lazily backfilled as version 1 the
+    first time it's touched here (see crud._backfill_version_one_if_needed)."""
+    _require_existing_project(client["internal_project_id"])
+    versions = crud.list_baseline_versions(client["internal_project_id"])
+    return {"project_id": project_id, "versions": versions}
+
+
+@app.post("/baselines/{project_id}/activate", tags=["Management"])
+def activate_baseline_version(
+    project_id: str, request: ActivateBaselineVersionRequest,
+    client: dict = Depends(verify_project_access),
+):
+    """Step 5 item 5: makes an existing (old or current) baseline version
+    active again -- every endpoint that doesn't explicitly request a
+    version (including /analyze without baseline_version) immediately
+    starts using it."""
+    _require_existing_project(client["internal_project_id"])
+    ok = crud.set_active_baseline_version(client["internal_project_id"], request.version)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Baseline version {request.version} does not exist for project '{project_id}'.",
+        )
+    return {"status": "success", "project_id": project_id, "active_version": request.version}
+
+
 @app.get("/logs/{project_id}", tags=["Management"])
 def get_logs(project_id: str, client: dict = Depends(verify_project_access)):
     """Returns the recent logs for a project (last 1000)."""
@@ -597,6 +629,7 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     return _resolve_and_persist_fit(
         project_id, inferred_feature_types, continuous_features, categorical_features,
         combined_df, request.calibration_config, client, request.schema_policy,
+        request.model_version_label,
     )
 
 
@@ -605,6 +638,7 @@ def _resolve_and_persist_fit(
     categorical_features: dict, combined_df: pd.DataFrame,
     calibration_config_request: Any, client: dict,
     schema_policy_request: Optional[Dict[str, str]] = None,
+    model_version_label: Optional[str] = None,
 ) -> FitBaselineResponse:
     """Shared tail of /fit/{project_id} (JSON body) and
     /fit/{project_id}/upload (multipart file) -- both endpoints build
@@ -650,8 +684,11 @@ def _resolve_and_persist_fit(
     if schema_policy_request is not None:
         insert_kwargs["schema_policy"] = schema_policy_request
     cleaning_summary = crud.insert_baseline(**insert_kwargs)
-
     crud.create_project(internal_id, f"Project {project_id}", client["email"])
+
+    # Step 5 item 5: every /fit archives a new version and makes it
+    # active -- old versions are kept, never overwritten.
+    new_version = crud.archive_baseline_version(internal_id, model_version_label)
 
     # 10. Minimum-detectable-D + configured floor per continuous feature, at
     # this reference's size -- API response field only, shown regardless of
@@ -704,6 +741,7 @@ def _resolve_and_persist_fit(
         inferred_feature_types=inferred_feature_types,
         cleaning_summary=cleaning_summary,
         calibration_info=calibration_info,
+        version=new_version,
     )
 MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024  # 200MB
 
@@ -717,6 +755,7 @@ async def fit_model_baseline_upload(
         None, description="Optional {column: 'continuous'|'categorical'} override, JSON-encoded."
     ),
     schema_policy: Optional[str] = Form(None, description="Optional schema_policy, JSON-encoded."),
+    model_version_label: Optional[str] = Form(None, description="Optional label for this baseline version."),
     client: dict = Depends(verify_project_access),
 ):
     """
@@ -795,7 +834,7 @@ async def fit_model_baseline_upload(
 
     return _resolve_and_persist_fit(
         project_id, inferred_feature_types, continuous_features, categorical_features,
-        combined_df, parsed_calibration_config, client, parsed_schema_policy,
+        combined_df, parsed_calibration_config, client, parsed_schema_policy, model_version_label,
     )
 
 
@@ -941,26 +980,44 @@ def analyze_production_batch(
     background_tasks: BackgroundTasks, # <-- 1. Inject BackgroundTasks
     client: dict = Depends(verify_project_access), # <-- 2. Fixed dependency
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    baseline_version: Optional[int] = None,
 ):
     """
     Analyze a large batch of recent production data using KS Tests and TVD
     to detect long-term mathematical drift.
     """
-    return _run_tabular_analysis(project_id, request.production_data, client, background_tasks, idempotency_key)
+    return _run_tabular_analysis(project_id, request.production_data, client, background_tasks,
+                                  idempotency_key, baseline_version)
 
 
 def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
                            background_tasks: BackgroundTasks,
-                           idempotency_key: Optional[str] = None) -> AnalyzeBatchResponse:
+                           idempotency_key: Optional[str] = None,
+                           baseline_version: Optional[int] = None) -> AnalyzeBatchResponse:
     """Shared tail of /analyze/{project_id} (JSON body) and
     /analyze/{project_id}/upload (multipart file) -- both converge on the
     same flat {feature_name: [values...]} shape. project_id is the
     PUBLIC id (used for display/email only); storage uses
-    client["internal_project_id"] (Step 5 item 1)."""
+    client["internal_project_id"] (Step 5 item 1).
+
+    Step 5 item 5: baseline_version (optional query param) analyzes
+    against a SPECIFIC archived baseline version instead of whichever is
+    currently active; omitted, this is byte-identical to pre-item-5
+    behavior (the active version via crud.get_baseline)."""
     internal_id = client["internal_project_id"]
-    state = crud.get_baseline(internal_id)
-    if not state:
-        raise HTTPException(status_code=404, detail="Baseline not found. Call /fit first.")
+    if baseline_version is not None:
+        state = crud.get_baseline_version(internal_id, baseline_version)
+        if not state:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Baseline version {baseline_version} does not exist for project '{project_id}'.",
+            )
+        resolved_version = baseline_version
+    else:
+        state = crud.get_baseline(internal_id)
+        if not state:
+            raise HTTPException(status_code=404, detail="Baseline not found. Call /fit first.")
+        resolved_version = crud.get_active_baseline_version(internal_id) or 1
 
     # Step 5 item 3: idempotency, scoped per (internal, i.e. owner-
     # namespaced) project. Checked BEFORE running the detector, so a
@@ -1011,13 +1068,13 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     # Step 5 item 2: one history row per /analyze call, statistics only
     # (never the raw production_data itself -- payload_hash is a one-way
     # digest of the ORIGINAL payload, used above for item 3's idempotency
-    # replay detection, not for recovering the data). baseline_version is
-    # hardcoded to 1 until item 5 adds real versioning; sustained_alert is
-    # NULL until item 6 populates it for real.
+    # replay detection, not for recovering the data). baseline_version
+    # (item 5) is the version actually used -- explicit or the resolved
+    # active one. sustained_alert is NULL until item 6 populates it.
     batch_size = len(next(iter(production_data.values()), []))
     crud.insert_analysis_run(
         project=internal_id,
-        baseline_version=1,
+        baseline_version=resolved_version,
         ts=datetime.now(timezone.utc).isoformat(),
         batch_size=batch_size,
         idempotency_key=idempotency_key,
@@ -1059,6 +1116,7 @@ async def analyze_production_batch_upload(
     file: UploadFile = File(..., description="CSV or Parquet file of production data."),
     client: dict = Depends(verify_project_access),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    baseline_version: Optional[int] = None,
 ):
     """Multipart-upload counterpart to /analyze/{project_id} -- CSV or
     Parquet, up to MAX_UPLOAD_SIZE_BYTES."""
@@ -1080,7 +1138,8 @@ async def analyze_production_batch_upload(
         raise ValidationError("Uploaded file parsed to zero rows.")
 
     production_data = {col: df[col].tolist() for col in df.columns}
-    return _run_tabular_analysis(project_id, production_data, client, background_tasks, idempotency_key)
+    return _run_tabular_analysis(project_id, production_data, client, background_tasks,
+                                  idempotency_key, baseline_version)
 
 
 # ---------------------------------------------------------
@@ -1105,6 +1164,7 @@ def fit_text_baseline(project_id: str, request: FitTextBaselineRequest, client: 
         model_name=TextAdapter.model_name,
     )
     crud.create_project(client["internal_project_id"], f"Project {project_id}", client["email"])
+    crud.archive_baseline_version(client["internal_project_id"])  # Step 5 item 5
 
     message = f"Text baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
     if sample_warning:
@@ -1171,6 +1231,7 @@ def fit_image_baseline(project_id: str, request: FitImageBaselineRequest, client
         model_name=ImageAdapter.model_name,
     )
     crud.create_project(client["internal_project_id"], f"Project {project_id}", client["email"])
+    crud.archive_baseline_version(client["internal_project_id"])  # Step 5 item 5
 
     message = f"Image baseline locked for project '{project_id}' with {len(embeddings)} reference samples."
     if sample_warning:
@@ -1239,6 +1300,7 @@ def fit_joint_baseline(project_id: str, request: FitJointBaselineRequest, client
         model_name="joint-v1",
     )
     crud.create_project(client["internal_project_id"], f"Project {project_id}", client["email"])
+    crud.archive_baseline_version(client["internal_project_id"])  # Step 5 item 5
 
     return EmbeddingFitResponse(
         status="success",

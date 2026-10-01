@@ -29,6 +29,16 @@ class FitBaselineRequest(BaseModel):
                     "default to {missing_columns: alert, default: warn} for a brand-new project) -- "
                     "never required."
     )
+    model_version_label: Optional[str] = Field(
+        default=None,
+        description="Step 5 item 5: an optional human-readable label (e.g. 'v2-retrained-on-march-data') "
+                    "stored on the baseline version this /fit call creates. Purely descriptive -- never "
+                    "required, never interpreted by the server."
+    )
+
+class ActivateBaselineVersionRequest(BaseModel):
+    version: int = Field(description="The existing baseline version number to make active.")
+
 
 class FeatureCalibrationInfo(BaseModel):
     minimum_detectable_d: Optional[float] = Field(
@@ -89,6 +99,10 @@ class FitBaselineResponse(BaseModel):
         description="Per-feature minimum-detectable-D and configured effect floor, shown regardless "
                     "of decision_mode so a caller can see what this reference size can and cannot "
                     "detect before choosing floors. API field only -- no dashboard UI for this."
+    )
+    version: int = Field(
+        description="Step 5 item 5: the baseline version this /fit call just created. Old versions "
+                    "are kept, not overwritten -- see GET /baselines/{project_id}."
     )
 
 
