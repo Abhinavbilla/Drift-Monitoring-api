@@ -40,11 +40,12 @@ Drift Monitoring API addresses this by continuously comparing your live producti
 10. [Deployment](#deployment)
 11. [Usage](#usage)
 12. [API Reference](#api-reference)
-13. [Testing and Validation Methodology](#testing-and-validation-methodology)
-14. [Known Limitations](#known-limitations)
-15. [Future Plans](#future-plans)
-16. [License](#license)
-17. [About](#about)
+13. [History, Schema Validation, Versioning & Alerting](#history-schema-validation-versioning--alerting)
+14. [Testing and Validation Methodology](#testing-and-validation-methodology)
+15. [Known Limitations](#known-limitations)
+16. [Future Plans](#future-plans)
+17. [License](#license)
+18. [About](#about)
 
 ---
 
@@ -449,13 +450,13 @@ To deploy your own instance on Render:
 
 ### Sending Production Data
 
-Production batches are sent to the `/analyze` endpoint through the dashboard's upload flow. Direct programmatic calls to `/analyze` require a valid session token in the `Authorization` header (see [Known Limitations](#known-limitations) — there's currently no self-serve way to obtain one outside the dashboard's own login flow):
+Production batches are sent to the `/analyze` endpoint through the dashboard's upload flow. Direct programmatic calls to `/analyze` need a Bearer token — either a session token (from a Google login) or a self-serve personal access token minted with `scripts/create_token.py` (no dashboard login needed; see [API Reference](#api-reference)):
 
 ```python
 import requests
 
 MODEL_ID = "your_model_id"
-SESSION_TOKEN = "..."  # minted from a Google login, see dashboard.py's mint_session_token
+SESSION_TOKEN = "dm_..."  # a PAT from scripts/create_token.py, or a session token (see dashboard.py's mint_session_token)
 
 payload = {
     "production_data": {
@@ -507,22 +508,62 @@ print(response.json())
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/fit/{project_id}` | POST | Lock a tabular baseline from training data |
-| `/analyze/{project_id}` | POST | Compare a tabular production batch against the stored baseline |
+| `/fit/{project_id}` | POST | Lock a tabular baseline from training data (JSON body) |
+| `/fit/{project_id}/upload` | POST | Same as above, via multipart CSV/Parquet upload (large reference sets) |
+| `/analyze/{project_id}` | POST | Compare a tabular production batch against the stored baseline (JSON body) |
+| `/analyze/{project_id}/upload` | POST | Same as above, via multipart CSV/Parquet upload. Both tabular analyze endpoints accept an optional `Idempotency-Key` header and an optional `baseline_version` query param |
 | `/fit/{project_id}/text` | POST | Lock a text baseline (embeds `reference_texts`) |
 | `/analyze/{project_id}/text` | POST | Compare a text production batch via the Domain Classifier Test |
 | `/fit/{project_id}/image` | POST | Lock an image baseline (embeds base64-encoded `reference_images`) |
 | `/analyze/{project_id}/image` | POST | Compare an image production batch via the Domain Classifier Test |
 | `/fit/{project_id}/joint` | POST | Lock a joint baseline from records combining tabular/text/image (`reference_records`) |
 | `/analyze/{project_id}/joint` | POST | Compare a joint production batch via the Domain Classifier Test |
+| `/predict/{project_id}` | POST | Real-time single-point anomaly check against locked IQR boundaries |
 | `/profile` | POST | Profile a tabular dataset's columns without locking a baseline |
 | `/projects` | GET | List all projects for the authenticated user |
-| `/baseline/{project_id}` | GET | Fetch IQR fences, feature types, and modality for a project |
+| `/projects/{project_id}` | DELETE | Permanently delete a project and all associated baseline/log data |
+| `/models/{model_id}` | DELETE | Deprecated alias for `DELETE /projects/{project_id}` |
+| `/baseline/{project_id}` | GET | Fetch IQR fences, feature types, and modality for a project's *active* baseline |
+| `/baselines/{project_id}` | GET | List every baseline version ever fit for a project, newest first, flagging the active one |
+| `/baselines/{project_id}/activate` | POST | Make an existing (old or current) baseline version active again |
+| `/history/{project_id}` | GET | Paginated history of `/analyze` calls, with `since`/`until`/`feature`/`alert_only` filters and a per-feature time series |
 | `/logs/{project_id}` | GET | Retrieve recent logs for a project |
-| `/models/{model_id}` | DELETE | Permanently delete a model and associated data |
+| `/health/{project_id}` | GET | Burst-alert health check (wave of recent real-time anomalies) |
 | `/docs` | GET | Interactive Swagger UI |
 
 Full request/response schemas are available at `/docs` when the server is running.
+
+**Auth for programmatic access:** every endpoint above accepts either a session token (minted via the dashboard's Google login) or a personal access token (PAT, `dm_<prefix>_<secret>`) as a Bearer token. Mint a PAT with `scripts/create_token.py` — no need to go through the dashboard's login flow for scripted/CI use. A PAT can be scoped to specific project IDs or left unscoped (`["*"]`); see `auth/tokens.py`.
+
+**Python client:** `clients/python/drift_monitor_client` wraps the tabular `/fit` and `/analyze` endpoints (including large-frame uploads, `calibration_config`, `feature_types`, and `idempotency_key=`) behind a small `DriftClient` class, so scripted/CI use doesn't need to hand-build requests:
+
+```python
+from drift_monitor_client import DriftClient
+
+client = DriftClient("http://localhost:8000", token="dm_...")
+client.fit("my_project", reference_df)
+result = client.analyze("my_project", production_df, idempotency_key="batch-2026-10-01")
+```
+
+---
+
+## History, Schema Validation, Versioning & Alerting
+
+Beyond a single fit-and-compare cycle, the tabular `/analyze` endpoints (`/analyze/{project_id}` and its upload counterpart) also give each project a queryable history, a safety net against malformed batches, multiple baselines to roll between, and an alert state machine that distinguishes "drifted once" from "still drifting."
+
+**History (`GET /history/{project_id}`):** every tabular `/analyze` call is recorded — statistics only, never the raw production rows — with `since`/`until`/`feature`/`alert_only` filters, pagination, and a per-feature time series (`statistic`, `effect_size`, `p_value_adjusted`, `significant`, `material`) so you can track how a feature's drift metric has moved over time without re-running anything.
+
+**Idempotency:** pass an `Idempotency-Key` header on either tabular analyze endpoint. Replaying the same key with the same batch returns the stored result verbatim (no new history row, no re-sent alert email); replaying it with a *different* batch is a `409`. Keys are scoped per project and expire after 7 days.
+
+**`schema_report`:** every tabular `/analyze` response includes a `schema_report` flagging what's wrong with the batch *before* trusting its drift numbers — missing columns, unexpected columns, a column whose dtype no longer matches what was fit (e.g. a numeric column suddenly receiving strings), a null rate well above the reference's, categories never seen at fit time, or a column that's gone constant. Valid columns are still analyzed regardless of what's flagged elsewhere in the batch — a malformed column never produces a 500 or a silent drop. Nulls and non-numeric cells are cleaned out before statistics are computed (matching how `/fit` already cleans reference data), so a batch with missing values gets a real computed statistic instead of a meaningless `NaN`. Each issue carries a severity (`alert`/`warn`/`ignore`) resolved from a per-project `schema_policy` (set via `/fit`'s optional `schema_policy` field; default: alert on missing columns, warn on everything else).
+
+**Baseline versioning:** every `/fit` call creates a new version instead of overwriting the last one — old versions are kept indefinitely. `GET /baselines/{project_id}` lists them (optionally labeled via `/fit`'s `model_version_label`), `POST /baselines/{project_id}/activate` switches which one is live, and `/analyze` accepts an optional `baseline_version` query param to compare against a specific past version instead of whichever is currently active.
+
+**Sustained-alert state machine:** a single alerting batch doesn't necessarily mean "something is wrong" — it could be noise. Each project has a `{k, m}` policy (default `1, 1` — today's single-batch behavior); `sustained_alert` is true once `k` of the last `m` analyses *on the same baseline version* have alerted. The resulting `alert_state` (`ok`/`open`) only logs a transition event (`opened`, `still_open`, `resolved`) when something actually changes — a long stable streak in either direction doesn't grow the event log. Set via `/fit`'s optional `alert_policy` field.
+
+**DKW floor warning:** `/fit` checks whether the configured KS materiality floor for a continuous feature is finer than this reference size can actually resolve, using the Dvoretzky–Kiefer–Wolfowitz distribution-free bound on the reference's own empirical-CDF estimation error — a stricter, non-asymptotic check than the existing minimum-detectable-effect warning. When it fires, the response reports the minimum reference size that would make the configured floor trustworthy.
+
+Every project ID is namespaced per owner internally, so two different users can each have a project called `"demo"` without colliding or being able to probe each other's project names via status codes — existing (pre-namespacing) projects keep working without migration.
 
 ---
 
@@ -608,11 +649,9 @@ Text, image, and joint all behaved exactly as expected on real (not synthetic) m
 
 **Batch-based detection only:** The system compares distributions over a batch of incoming data. It does not currently support online/streaming drift detection where each individual data point updates a running estimate. Point anomalies are caught via IQR scoring, but distributional drift requires a batch.
 
-**Single baseline per project:** Each project has one active baseline. If your model is retrained and the new model operates on a shifted feature distribution (intentionally), you need to re-fit the baseline manually. There is no automatic baseline versioning yet.
+**Baseline versioning has no retention cap:** every `/fit` call keeps its version indefinitely (see [History, Schema Validation, Versioning & Alerting](#history-schema-validation-versioning--alerting)) — there's no automatic pruning yet, so a project re-fit very frequently will accumulate versions without bound. Low risk for a typical re-fit cadence (occasional, not per-request), but worth knowing before scripting frequent automated re-fits.
 
 **SQLite at scale:** SQLite is appropriate for moderate traffic and single-server deployments. High-concurrency production environments would benefit from migrating the storage layer to PostgreSQL.
-
-**No self-serve credential flow for programmatic API access:** Backend authentication is derived directly from Google login (the dashboard mints a short-lived session token after you sign in) rather than a static, separately-provisioned API key. This removes a class of "forgotten API key sitting in a script" risk, but it also means there's currently no way to obtain a valid credential for calling `/fit` or `/analyze` from your own external script without going through the dashboard's own login flow. A proper service-account/personal-access-token feature would be needed to support that use case again.
 
 **Text/image/joint validation is smoke-tested, not yet fully validated:** Unlike the tabular path's four-part methodology against a 4.5M-row real dataset, the text/image/joint Domain Classifier Test has only been verified with unit-level smoke tests, manual end-to-end checks, and a real-data (dog vs. cat) smoke test across all four modalities via the [PetFinder.my dataset](#real-world-multimodal-smoke-test-petfindermy) — no formal precision/recall/F1 numbers exist for any of them yet (see [Scope and Supported Data](#scope-and-supported-data)). Treat text/image/joint drift verdicts as directionally useful, not benchmarked.
 
@@ -631,13 +670,11 @@ Text, image, and joint all behaved exactly as expected on real (not synthetic) m
 ## Future Plans
 
 - Wasserstein distance as an additional continuous drift metric
-- Webhook support for drift alerts (Slack, email, PagerDuty)
-- Baseline versioning with drift history across model versions
+- Webhook support for drift alerts (Slack, email, PagerDuty) — `sustained_alert`'s state-transition events (see [History, Schema Validation, Versioning & Alerting](#history-schema-validation-versioning--alerting)) are a natural trigger source for this once built
 - Time-windowed drift detection (rolling window rather than fixed baseline)
 - PostgreSQL support for production-scale deployments
-- REST API client SDK (Python package)
+- A retention cap/pruning script for old baseline versions (see [Known Limitations](#known-limitations))
 - Full four-part validation methodology for the text/image Domain Classifier Test, matching the tabular benchmark's rigor
-- Service-account/personal-access-token support for programmatic API access outside the dashboard
 - Extend drift detection to audio and video via embedding-based drift metrics
 - Make joint correlation-inversion detection robust across effect sizes, not just the tuned one (see Known Limitations) — adaptive `C` was tried and rejected as not viable (no fit-time-observable signal to adapt on, and the `C`-vs-AUC relationship isn't safely targetable); a genuinely different classifier family (e.g. a small tree-based or nonlinear model, actually evaluated this time rather than assumed) is the more promising unexplored direction
 - Close the remaining pure text↔image correlation-inversion gap for joint projects with zero tabular fields (see Known Limitations) — without regressing text/image's existing behavior the way a global classifier change would
