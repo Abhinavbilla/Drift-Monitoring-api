@@ -18,6 +18,7 @@ drift.db
 *.arff
 *.dat
 *.parquet
+datasets/
 
 # IDE
 .vscode/
