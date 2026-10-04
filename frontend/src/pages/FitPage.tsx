@@ -1,13 +1,54 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Button, Card, ErrorBanner, Field, PageHeader, SuccessBanner, Tabs, TextArea } from "../components/ui";
+import { Button, Card, ErrorBanner, Field, InfoPanel, PageHeader, SuccessBanner, Tabs, TextArea } from "../components/ui";
 import { api, ApiError } from "../lib/api";
 import { TABULAR_ACCEPT, TABULAR_FORMATS_HINT } from "../lib/constants";
 import { filesToBase64, parseJointRecordsFile, parseTextSamplesFile } from "../lib/files";
 import type { FitResponse } from "../lib/types";
 
 type Modality = "tabular" | "text" | "image" | "joint";
+
+// Verified against the actual backend code (db/crud.py, utils/profiler.py,
+// adapters/text.py, adapters/image.py, adapters/joint.py) -- not assumed.
+// Keep this in sync if any of that logic changes.
+const LIMITATIONS: Record<Modality, { title: string; items: string[] }> = {
+  tabular: {
+    title: "Before you upload a tabular dataset",
+    items: [
+      "Cleaning is narrow: a numeric column has non-numeric cells automatically dropped (and reported), but categorical values are NOT normalized -- \"USA\", \"usa\", and \" USA \" are counted as three different categories, not merged.",
+      "A column that's constant, or a perfectly increasing/decreasing sequence (e.g. a row index or auto-incrementing ID), is silently excluded from monitoring entirely -- by design, not an error, but it means that column won't show up at all afterward.",
+      "A categorical column with more than 50 unique values is rejected outright as likely a free-text or ID field -- it is not truncated, sampled down, or auto-converted to continuous.",
+      "No deduplication, outlier removal, or PII redaction happens automatically -- if your raw export has duplicate rows or sensitive fields, remove them yourself first.",
+    ],
+  },
+  text: {
+    title: "Before you upload text",
+    items: [
+      "This expects already-extracted plain text strings. It does NOT extract text from PDFs, Word docs, or HTML -- uploading one of those embeds the raw file bytes as garbage, not its readable content.",
+      "Long text is silently truncated to the embedding model's 256-token input limit -- anything beyond that is ignored when comparing batches.",
+      "No profanity/PII scrubbing, deduplication, or language filtering happens automatically.",
+      "Needs at least 4 samples to run at all; 40+ is recommended for a stable signal (fewer than that, results get noisy).",
+    ],
+  },
+  image: {
+    title: "Before you upload images",
+    items: [
+      "Standard formats PIL can decode work (JPEG, PNG, and similar) -- a corrupted or unsupported file is rejected cleanly with an error, not silently skipped.",
+      "Every image is resized and center-cropped to 224×224 before embedding -- for a very wide, tall, or otherwise non-square image, this crops out real content, not just margins.",
+      "No deduplication or quality filtering happens automatically.",
+      "Needs at least 4 images to run at all; 40+ is recommended for a stable signal.",
+    ],
+  },
+  joint: {
+    title: "Before you upload joint (multimodal) data",
+    items: [
+      "The least mature of the four paths -- it does not yet support calibrated decision mode (p-values), only the legacy AUC cutoff.",
+      "Each record needs to already be organized as {tabular?, text?, image?} -- this page can match attached images to records by filename or by order, but it won't auto-detect or auto-pair files on its own.",
+      "Every limitation listed above for text and images applies here too, for whichever part of a record is present.",
+    ],
+  },
+};
 
 function ResultPanel({ result, onContinue }: { result: FitResponse; onContinue: () => void }) {
   return (
@@ -186,7 +227,9 @@ export function FitPage() {
       {result ? (
         <ResultPanel result={result} onContinue={() => navigate(`/projects/${encodeURIComponent(projectId)}/analyze`)} />
       ) : (
-        <Card className="max-w-2xl p-6">
+        <div className="max-w-2xl space-y-4">
+          <InfoPanel title={LIMITATIONS[modality].title} items={LIMITATIONS[modality].items} />
+          <Card className="p-6">
           {modality === "tabular" && (
             <div className="space-y-4">
               <SourceToggle
@@ -344,7 +387,8 @@ export function FitPage() {
               />
             </div>
           )}
-        </Card>
+          </Card>
+        </div>
       )}
     </div>
   );

@@ -77,6 +77,31 @@ export function EmptyState({ title, description, action }: { title: string; desc
   );
 }
 
+export function InfoPanel({ title, items }: { title: string; items: ReactNode[] }) {
+  return (
+    <div className="rounded-xl border border-brand-200 bg-brand-50/60 px-4 py-3.5">
+      <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-brand-700">
+        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path
+            fillRule="evenodd"
+            d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+            clipRule="evenodd"
+          />
+        </svg>
+        {title}
+      </p>
+      <ul className="space-y-1.5 text-sm text-slate-600">
+        {items.map((item, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="text-brand-400">&bull;</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function ErrorBanner({ message }: { message: string }) {
   return (
     <div className="rounded-xl border border-alert-500/30 bg-alert-50 px-4 py-3 text-sm text-alert-600">
