@@ -3,6 +3,7 @@ import jwt
 import binascii
 import hashlib
 import secrets
+import time
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -143,6 +144,10 @@ def verify_access(credentials: HTTPAuthorizationCredentials = Security(bearer_sc
         )
 
     return {"name": payload.get("name", "User"), "email": email, "auth_type": "session", "pat_scope": None}
+
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str
 
 
 PROJECT_NAMESPACE_SEP = "::"
@@ -337,6 +342,36 @@ async def validation_error_handler(request, exc: ValidationError):
     """
     from fastapi.responses import JSONResponse
     return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
+@app.post("/auth/google", tags=["Management"])
+def login_with_google(request: GoogleLoginRequest):
+    """New (React frontend, 2026-10-04): verifies a Google ID token
+    (obtained client-side via Google Identity Services -- the frontend
+    never sees or needs GOOGLE_CLIENT_SECRET) and mints the SAME
+    session-token shape verify_access already expects ({email, name,
+    iat, exp}, HS256/COOKIE_KEY) -- previously only dashboard.py's
+    Streamlit-specific streamlit_google_auth flow could produce one."""
+    from google.oauth2 import id_token as google_id_token
+    from google.auth.transport import requests as google_requests
+
+    try:
+        claims = google_id_token.verify_oauth2_token(
+            request.id_token, google_requests.Request(), GOOGLE_CLIENT_ID,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid Google ID token: {e}")
+
+    email = claims.get("email")
+    if not email or not claims.get("email_verified"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google account email not verified.")
+    name = claims.get("name", email)
+
+    session_token = jwt.encode(
+        {"email": email.lower(), "name": name, "iat": int(time.time()), "exp": int(time.time()) + 3600},
+        COOKIE_KEY, algorithm="HS256",
+    )
+    return {"session_token": session_token, "email": email.lower(), "name": name}
 
 
 @app.get("/baseline/{project_id}", tags=["Management"])
