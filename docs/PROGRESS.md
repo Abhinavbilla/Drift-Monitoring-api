@@ -8,6 +8,37 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Step 2 (d)/(e) (user, 2026-10-04) — SCOPED, NOT STARTED.** Key finding:
+`drift/embedding_detector.py` (text/image/joint `/analyze`) has NO
+calibration support today -- single `AUC > 0.65` legacy cutoff, no
+p-value, no `decision_mode`. So this isn't "rerun validation under
+calibrated mode," it's "build calibrated mode for embeddings, then
+validate it."
+- **(d) DCT calibration**: give the DCT's AUC a p-value via a
+  **precomputed null-distribution grid** (user decision, 2026-10-04 --
+  build it now, not permutation-only) across a batch/reference-size
+  grid, run once via a permutation sweep; Gate 1 = p_value_adjusted <
+  alpha, Gate 2 = existing AUC floor (0.65). Wire `calibration_config`/
+  `decision_mode` into `EmbeddingDriftDetector` and the text/image/joint
+  analyze handlers, matching how tabular's `DistributionDetector`
+  already works. Sizes outside the grid's calibrated range need a
+  documented fallback (clamp or permutation), not silent extrapolation.
+  **decision_mode default stays "legacy"** for new text/image/joint
+  projects even after this ships (user decision, 2026-10-04) --
+  calibrated becomes available to opt into, not the default, until (e)
+  empirically justifies it the way tabular's side-by-side did.
+- **(e) Text/image validation**: Step-1/2-style methodology (ground
+  truth, synthetic sensitivity, batch classification metrics) against
+  real text/image drift scenarios under calibrated mode, closing the
+  README's current "unverified, not benchmarked" label -- including the
+  previously-flagged ~40-sample borderline case
+  (`docs/step2_proposal.md`).
+
+Ground rules unchanged: no fabricated numbers, no regressions, additive
+API changes, ask before changing defaults, commit per logical change,
+don't push without being asked, no new Streamlit UI, two-user isolation
+test on anything new that's project-scoped.
+
 **Step 5 Part 2 (user, 2026-10-04) — DONE.** Webhooks for drift alerts.
 Scope as decided (below), all implemented and tested:
 
