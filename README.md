@@ -527,6 +527,9 @@ print(response.json())
 | `/baselines/{project_id}` | GET | List every baseline version ever fit for a project, newest first, flagging the active one |
 | `/baselines/{project_id}/activate` | POST | Make an existing (old or current) baseline version active again |
 | `/history/{project_id}` | GET | Paginated history of `/analyze` calls, with `since`/`until`/`feature`/`alert_only` filters and a per-feature time series |
+| `/webhooks/{project_id}` | POST | Register a webhook for drift alerts (returns its signing secret once) |
+| `/webhooks/{project_id}` | GET | List a project's webhooks (never includes the secret) |
+| `/webhooks/{project_id}/{webhook_id}` | DELETE | Remove a webhook |
 | `/logs/{project_id}` | GET | Retrieve recent logs for a project |
 | `/health/{project_id}` | GET | Burst-alert health check (wave of recent real-time anomalies) |
 | `/docs` | GET | Interactive Swagger UI |
@@ -560,6 +563,16 @@ Beyond a single fit-and-compare cycle, the tabular `/analyze` endpoints (`/analy
 **Baseline versioning:** every `/fit` call creates a new version instead of overwriting the last one — old versions are kept indefinitely. `GET /baselines/{project_id}` lists them (optionally labeled via `/fit`'s `model_version_label`), `POST /baselines/{project_id}/activate` switches which one is live, and `/analyze` accepts an optional `baseline_version` query param to compare against a specific past version instead of whichever is currently active.
 
 **Sustained-alert state machine:** a single alerting batch doesn't necessarily mean "something is wrong" — it could be noise. Each project has a `{k, m}` policy (default `1, 1` — today's single-batch behavior); `sustained_alert` is true once `k` of the last `m` analyses *on the same baseline version* have alerted. The resulting `alert_state` (`ok`/`open`) only logs a transition event (`opened`, `still_open`, `resolved`) when something actually changes — a long stable streak in either direction doesn't grow the event log. Set via `/fit`'s optional `alert_policy` field.
+
+**Webhooks:** register a URL (`POST /webhooks/{project_id}`) to get an HMAC-signed `POST` whenever a project's alert state actually *transitions* — `opened` and `resolved` by default; `still_open` is opt-in per webhook (via `event_filter`), since a long sustained incident would otherwise fire one delivery per `/analyze` call for its whole duration. Every delivery carries an `X-Drift-Signature-256: sha256=<hmac>` header computed over the raw body with the webhook's own secret (returned once, at registration — verify it the same way Stripe/GitHub webhooks are verified). Failed deliveries retry with exponential backoff (1s/4s/16s/64s) across up to 5 attempts via a background sweep, independent of the request that triggered them — a slow or down endpoint never blocks `/analyze`. Registration rejects any URL that resolves to a loopback, private, link-local, reserved, or multicast address (this also blocks cloud metadata endpoints) — an SSRF guard, not optional.
+
+```python
+import hashlib, hmac
+
+def verify_signature(secret: str, raw_body: bytes, header_value: str) -> bool:
+    expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header_value)
+```
 
 **DKW floor warning:** `/fit` checks whether the configured KS materiality floor for a continuous feature is finer than this reference size can actually resolve, using the Dvoretzky–Kiefer–Wolfowitz distribution-free bound on the reference's own empirical-CDF estimation error — a stricter, non-asymptotic check than the existing minimum-detectable-effect warning. When it fires, the response reports the minimum reference size that would make the configured floor trustworthy.
 
@@ -670,7 +683,7 @@ Text, image, and joint all behaved exactly as expected on real (not synthetic) m
 ## Future Plans
 
 - Wasserstein distance as an additional continuous drift metric
-- Webhook support for drift alerts (Slack, email, PagerDuty) — `sustained_alert`'s state-transition events (see [History, Schema Validation, Versioning & Alerting](#history-schema-validation-versioning--alerting)) are a natural trigger source for this once built
+- A delivery-history endpoint for webhooks (`GET /webhooks/{project_id}/{webhook_id}/deliveries`) and a "send test event" action — the underlying `webhook_deliveries` table already records every attempt, just not exposed via the API yet
 - Time-windowed drift detection (rolling window rather than fixed baseline)
 - PostgreSQL support for production-scale deployments
 - A retention cap/pruning script for old baseline versions (see [Known Limitations](#known-limitations))

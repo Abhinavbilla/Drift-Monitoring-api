@@ -2,6 +2,7 @@ import sqlite3
 import jwt
 import binascii
 import hashlib
+import secrets
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -14,6 +15,7 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from PIL import UnidentifiedImageError
 from drift.alerts import send_drift_email
+from drift import webhooks
 from auth.tokens import parse_prefix, verify_token_hash
 # Importing custom modules
 from models import (
@@ -26,6 +28,7 @@ from models import (
     EmbeddingFitResponse,
     FitJointBaselineRequest, AnalyzeJointBatchRequest,
     ActivateBaselineVersionRequest,
+    RegisterWebhookRequest, WebhookResponse,
 )
 from db import crud
 from drift.detector import compute_iqr_anomalies, DistributionDetector
@@ -312,6 +315,7 @@ def verify_model_access(model_id: str, client: dict = Depends(verify_access)) ->
 async def lifespan(app: FastAPI):
     # Initialize main tables via your crud module
     crud.init_db()
+    webhooks.start_webhook_sweep_thread()  # Step 5 Part 2 -- no-op after the first call
     yield
 
 app = FastAPI(
@@ -382,6 +386,60 @@ def activate_baseline_version(
             detail=f"Baseline version {request.version} does not exist for project '{project_id}'.",
         )
     return {"status": "success", "project_id": project_id, "active_version": request.version}
+
+
+@app.post("/webhooks/{project_id}", response_model=WebhookResponse, tags=["Management"])
+def register_webhook(
+    project_id: str, request: RegisterWebhookRequest, client: dict = Depends(verify_project_access),
+):
+    """Step 5 Part 2: registers a webhook that fires on alert_events
+    transitions (default: opened + resolved; still_open is opt-in via
+    event_filter). The URL is rejected if it resolves to a loopback/
+    private/link-local/reserved/multicast address (SSRF guard) -- see
+    drift/webhooks.py. The secret is returned ONLY in this response;
+    store it now, it's never shown again."""
+    _require_existing_project(client["internal_project_id"])
+    webhooks.validate_webhook_url(request.url)
+    event_filter = webhooks.validate_event_filter(request.event_filter)
+
+    webhook_id = f"wh_{secrets.token_hex(8)}"
+    secret = webhooks.generate_webhook_secret()
+    created_at = datetime.now(timezone.utc).isoformat()
+    crud.create_webhook(webhook_id, client["internal_project_id"], request.url, secret, event_filter, created_at)
+
+    return WebhookResponse(
+        id=webhook_id, project_id=project_id, url=request.url, event_filter=event_filter,
+        enabled=True, created_at=created_at, secret=secret,
+    )
+
+
+@app.get("/webhooks/{project_id}", tags=["Management"])
+def list_webhooks(project_id: str, client: dict = Depends(verify_project_access)):
+    """Lists this project's webhooks -- never includes the secret."""
+    _require_existing_project(client["internal_project_id"])
+    rows = crud.list_webhooks(client["internal_project_id"])
+    return {
+        "project_id": project_id,
+        "webhooks": [
+            WebhookResponse(
+                id=r["id"], project_id=project_id, url=r["url"], event_filter=r["event_filter"],
+                enabled=r["enabled"], created_at=r["created_at"],
+            )
+            for r in rows
+        ],
+    }
+
+
+@app.delete("/webhooks/{project_id}/{webhook_id}", tags=["Management"])
+def delete_webhook(project_id: str, webhook_id: str, client: dict = Depends(verify_project_access)):
+    """Scoped to this project -- a webhook_id belonging to a different
+    project (or that doesn't exist) 404s, same isolation posture as
+    every other project resource."""
+    _require_existing_project(client["internal_project_id"])
+    ok = crud.delete_webhook(webhook_id, client["internal_project_id"])
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Webhook '{webhook_id}' not found for project '{project_id}'.")
+    return {"status": "success", "project_id": project_id, "webhook_id": webhook_id}
 
 
 @app.get("/logs/{project_id}", tags=["Management"])
@@ -1172,7 +1230,15 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     elif not sustained_alert and was_open:
         transition = "resolved"
     if transition is not None:
-        crud.insert_alert_event(internal_id, resolved_version, run_ts, transition, sustained_alert, windows_considered)
+        event_id = crud.insert_alert_event(
+            internal_id, resolved_version, run_ts, transition, sustained_alert, windows_considered
+        )
+        # Step 5 Part 2: webhooks fire on an actual transition only, never
+        # on every alerting batch -- the whole point of this state machine.
+        webhooks.enqueue_deliveries_for_transition(
+            internal_id, project_id, event_id, transition, resolved_version, run_ts,
+            "open" if sustained_alert else "ok", sustained_alert, windows_considered, report["feature_metrics"],
+        )
     alert_state = "open" if sustained_alert else "ok"
 
     # ==========================================

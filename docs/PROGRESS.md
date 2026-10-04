@@ -8,9 +8,8 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
-**Step 5 Part 2 (user, 2026-10-04) — SCOPED, NOT STARTED.** Webhooks for
-drift alerts. Full scope, decisions already made (ask-first items
-resolved below, not re-askable):
+**Step 5 Part 2 (user, 2026-10-04) — DONE.** Webhooks for drift alerts.
+Scope as decided (below), all implemented and tested:
 
 - **Data model:** new `webhooks` table (`id, project, url, secret,
   event_filter JSON, enabled, created_at`) -- one project can register
@@ -27,16 +26,25 @@ resolved below, not re-askable):
   NOT triggered on every alerting batch (unlike the existing email
   alert) -- that's the whole point of item 6's state machine.
 - **Delivery: durable queue** (user decision, 2026-10-04, over a
-  simpler in-process-retry-only option) -- a failed attempt gets a
-  `next_retry_at`; a lightweight asyncio loop started in main.py's
-  `lifespan` sweeps for due retries independently of any single
-  request, surviving a process restart mid-backoff. This is new
-  standing infrastructure (a background loop running for the life of
-  the process) -- first of its kind in this codebase; no existing task
-  queue (Celery/Redis/APScheduler) to build on, so it's hand-rolled on
-  top of SQLite + asyncio only. Exponential backoff (~1s, 4s, 16s,
-  capped), give up and log failure after N attempts (propose N=5 and
-  ask before finalizing, or default to 5 and note it's adjustable).
+  simpler in-process-retry-only option). EVERY attempt (including the
+  first) goes through the same sweep path -- no separate fast-path
+  immediate attempt -- so there's exactly one code path to reason
+  about and no double-delivery race between an inline attempt and the
+  sweep loop. A delivery row is inserted with `next_retry_at = now` so
+  it's picked up on the very next sweep tick (<=30s latency even for
+  the first attempt -- acceptable for a drift alert, not a payments
+  webhook). Implemented as a plain daemon `threading.Thread` (not
+  asyncio) started once from main.py's `lifespan`, guarded by a
+  module-level flag so it can never start twice even if lifespan fires
+  repeatedly (e.g. once per `TestClient(app)` across many test files) --
+  matches this codebase's fully-synchronous style (requests, sqlite3,
+  smtplib are all sync; mixing sync HTTP calls into an asyncio loop
+  would need extra care this doesn't need). First of its kind in this
+  codebase -- no existing task queue (Celery/Redis/APScheduler) to
+  build on. Give up and log failure after 5 attempts total (user-
+  confirmed 2026-10-04: backoff 1s/4s/16s/64s between attempts 1-5,
+  sweep loop polls every 30s). Tests call the sweep function directly
+  (not the background thread) for deterministic, fast assertions.
 - **Signature:** Stripe-style `X-Drift-Signature-256: sha256=<hmac-
   sha256(secret, raw_body)>` over the exact raw response bytes.
   Payload: `event` (`alert.opened`/`alert.resolved`), `project_id`
@@ -52,15 +60,43 @@ resolved below, not re-askable):
 - **Endpoints:** `POST /webhooks/{project_id}` (register, returns
   secret once), `GET /webhooks/{project_id}` (list, no secret),
   `DELETE /webhooks/{project_id}/{webhook_id}`. Two-user isolation test
-  on each, per the standing rule. A `GET .../deliveries` visibility
-  endpoint and a manual "send test event" endpoint are natural
-  follow-ups, not required for the first pass -- ask before adding.
+  on each. A `GET .../deliveries` visibility endpoint and a manual
+  "send test event" endpoint are noted as follow-ups in README's Future
+  Plans, not built -- the `webhook_deliveries` table already records
+  every attempt, just not exposed via the API yet.
 
-Open item still needing a decision before/at implementation time: max
-retry attempts before giving up (proposed N=5, not yet confirmed) and
-the sweep loop's polling interval (proposed 30s). Resolve both at build
-time via the same ask-first discipline as every other default in this
-project, unless the user says to just pick sensible numbers and go.
+**Implementation** (`drift/webhooks.py`, new): `validate_webhook_url`
+(the SSRF guard -- resolves the hostname via `socket.getaddrinfo`,
+rejects if ANY resolved address is loopback/private/link-local/
+reserved/multicast/unspecified; does NOT protect against DNS rebinding
+after registration, a residual risk noted in the docstring, not
+silently claimed solved); `sign_payload` (HMAC-SHA256 over raw body
+bytes); `enqueue_deliveries_for_transition` (called right after main.py
+writes an alert_events row, one delivery task per enabled webhook whose
+event_filter matches); `sweep_due_webhook_deliveries` (the one code
+path for every attempt, callable directly -- tests do this instead of
+waiting on the real thread); `start_webhook_sweep_thread` (idempotent,
+module-level-flag-guarded daemon thread, started from main.py's
+`lifespan`). `db/crud.py` gained `webhooks`/`webhook_deliveries` tables
+and their CRUD functions; `insert_alert_event` now returns the new
+row's id (previously None) so the triggering event_id can be recorded
+on each delivery.
+
+**Verification:** `tests/test_webhooks.py` (26 tests: SSRF rejection
+for loopback/localhost/link-local-metadata/bad-scheme, registration +
+secret-shown-once, listing never includes the secret, deletion,
+two-user isolation, trigger-on-opened/resolved with still_open opt-in,
+disabled webhooks never fire, no raw production values in the payload,
+delivery sweep success/retry-with-backoff/connection-error/give-up-
+after-5/not-yet-due/deleted-webhook-handled-gracefully, signature
+correctness, sweep-thread-singleton). Plus one true end-to-end live
+verification: registered a webhook (via `crud.create_webhook`,
+bypassing only the SSRF-guarded HTTP registration endpoint, not
+delivery itself) pointed at a real local `http.server`, triggered a
+real transition via the live running server's `/analyze`, let the real
+sweep function deliver over a real TCP connection, and verified the
+signature received matched an independent recomputation. Full suite
+green (287 backend + 13 live-client).
 
 Ground rules carried over unchanged from Part 1 (reaffirmed, still in
 force): no fabricated numbers, no regressions, additive API changes,

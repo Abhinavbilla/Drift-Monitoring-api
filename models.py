@@ -272,3 +272,30 @@ class AnalyzeJointBatchRequest(BaseModel):
     production_records: List[JointRecord] = Field(
         ..., description="Recent batch of joint records to compare against the joint baseline."
     )
+
+
+class RegisterWebhookRequest(BaseModel):
+    url: str = Field(description="HTTPS/HTTP URL to POST signed alert events to. Rejected at "
+                                  "registration if it resolves to a loopback/private/link-local/"
+                                  "reserved/multicast address (SSRF guard).")
+    event_filter: Optional[List[str]] = Field(
+        default=None,
+        description="Which alert_events transitions to deliver: any of 'opened', 'resolved', "
+                    "'still_open'. Omit for the default ['opened', 'resolved'] -- still_open is "
+                    "opt-in, since a long sustained incident would otherwise fire one delivery per "
+                    "/analyze call for its whole duration."
+    )
+
+
+class WebhookResponse(BaseModel):
+    id: str
+    project_id: str = Field(description="The PUBLIC project id this webhook is registered on.")
+    url: str
+    event_filter: List[str]
+    enabled: bool
+    created_at: str
+    secret: Optional[str] = Field(
+        default=None,
+        description="Only present in the response to POST /webhooks/{project_id} (webhook creation) "
+                    "-- never returned again afterward, including from GET. Store it now."
+    )

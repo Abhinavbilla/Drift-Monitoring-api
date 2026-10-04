@@ -78,6 +78,52 @@ def init_db():
         )
     ''')
 
+    # Step 5 Part 2: webhooks for drift alerts. `secret` is stored in
+    # PLAINTEXT (unlike api_tokens' hash-only storage) -- it's needed at
+    # delivery time to compute each outgoing HMAC signature, not just to
+    # verify a presented credential, so there's no hash-and-compare
+    # option here. Still only ever returned to the caller once, at
+    # creation (see main.py) -- GET /webhooks never echoes it back.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS webhooks (
+            id TEXT PRIMARY KEY,
+            project TEXT NOT NULL,
+            url TEXT NOT NULL,
+            secret TEXT NOT NULL,
+            event_filter TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_webhooks_project ON webhooks (project)')
+
+    # One row per delivery TASK (one event, one webhook) -- updated in
+    # place on every attempt (attempt_number increments, status_code/
+    # response_snippet reflect the MOST RECENT try), not one row per
+    # attempt. next_retry_at is only meaningful while status='pending';
+    # NULL once status is 'success' or 'failed' (gave up after 5 tries).
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS webhook_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            webhook_id TEXT NOT NULL,
+            event_id INTEGER,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            attempt_number INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'pending',
+            status_code INTEGER,
+            success INTEGER,
+            response_snippet TEXT,
+            next_retry_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    ''')
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_pending '
+        "ON webhook_deliveries (status, next_retry_at)"
+    )
+
     # Step 5 item 2: one row per /analyze (and /analyze/upload) call --
     # statistics only, never raw production rows. "id" is a plain
     # autoincrement surrogate key so history entries never need a natural
@@ -951,7 +997,7 @@ def get_last_alert_event(project_id: str, baseline_version: int) -> Optional[Dic
 def insert_alert_event(
     project_id: str, baseline_version: int, ts: str, transition: str,
     sustained_alert: bool, windows_considered: int,
-) -> None:
+) -> int:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -959,8 +1005,10 @@ def insert_alert_event(
         "windows_considered) VALUES (?, ?, ?, ?, ?, ?)",
         (project_id, baseline_version, ts, transition, 1 if sustained_alert else 0, windows_considered),
     )
+    event_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    return event_id
 
 
 def get_alert_events(project_id: str, baseline_version: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -986,3 +1034,156 @@ def get_alert_events(project_id: str, baseline_version: Optional[int] = None) ->
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Step 5 Part 2: webhooks
+# ---------------------------------------------------------------------------
+
+def create_webhook(
+    webhook_id: str, project: str, url: str, secret: str, event_filter: List[str], created_at: str,
+) -> None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO webhooks (id, project, url, secret, event_filter, enabled, created_at) "
+        "VALUES (?, ?, ?, ?, ?, 1, ?)",
+        (webhook_id, project, url, secret, json.dumps(event_filter), created_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _row_to_webhook(row) -> Dict[str, Any]:
+    return {
+        "id": row[0], "project": row[1], "url": row[2], "secret": row[3],
+        "event_filter": json.loads(row[4]), "enabled": bool(row[5]), "created_at": row[6],
+    }
+
+
+def get_webhook(webhook_id: str) -> Optional[Dict[str, Any]]:
+    """Includes the secret -- for internal delivery use only. Callers
+    exposing this to an HTTP response must strip it themselves."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, project, url, secret, event_filter, enabled, created_at FROM webhooks WHERE id = ?",
+        (webhook_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _row_to_webhook(row) if row else None
+
+
+def list_webhooks(project: str) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, project, url, secret, event_filter, enabled, created_at FROM webhooks "
+        "WHERE project = ? ORDER BY created_at DESC",
+        (project,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_row_to_webhook(r) for r in rows]
+
+
+def delete_webhook(webhook_id: str, project: str) -> bool:
+    """Scoped to the project the caller owns -- returns False (no-op)
+    if the webhook doesn't exist or belongs to a different project,
+    same 404-not-403 isolation posture as every other project resource."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM webhooks WHERE id = ? AND project = ?", (webhook_id, project))
+    changed = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+
+def enqueue_webhook_delivery(
+    webhook_id: str, event_id: Optional[int], event_type: str, payload: dict,
+    next_retry_at: str, now: str,
+) -> int:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO webhook_deliveries (webhook_id, event_id, event_type, payload, attempt_number, "
+        "status, next_retry_at, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 'pending', ?, ?, ?)",
+        (webhook_id, event_id, event_type, json.dumps(payload), next_retry_at, now, now),
+    )
+    delivery_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return delivery_id
+
+
+def _row_to_delivery(row) -> Dict[str, Any]:
+    return {
+        "id": row[0], "webhook_id": row[1], "event_id": row[2], "event_type": row[3],
+        "payload": json.loads(row[4]), "attempt_number": row[5], "status": row[6],
+        "status_code": row[7], "success": None if row[8] is None else bool(row[8]),
+        "response_snippet": row[9], "next_retry_at": row[10],
+        "created_at": row[11], "updated_at": row[12],
+    }
+
+
+def get_due_webhook_deliveries(now: str) -> List[Dict[str, Any]]:
+    """Pending deliveries whose next_retry_at has arrived -- what the
+    sweep loop processes on each tick."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, webhook_id, event_id, event_type, payload, attempt_number, status, "
+        "status_code, success, response_snippet, next_retry_at, created_at, updated_at "
+        "FROM webhook_deliveries WHERE status = 'pending' AND next_retry_at <= ?",
+        (now,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_row_to_delivery(r) for r in rows]
+
+
+def record_delivery_attempt(
+    delivery_id: int, attempt_number: int, success: bool, status_code: Optional[int],
+    response_snippet: Optional[str], now: str, next_retry_at: Optional[str] = None,
+) -> None:
+    """Updates a delivery task in place after an attempt. attempt_number
+    is the count of attempts made so far (including this one).
+    - success=True: status -> 'success', next_retry_at cleared.
+    - success=False and next_retry_at given: status stays 'pending',
+      another retry is scheduled.
+    - success=False and next_retry_at is None: gave up -- status ->
+      'failed'."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    if success:
+        status = "success"
+        next_retry_at = None
+    elif next_retry_at is not None:
+        status = "pending"
+    else:
+        status = "failed"
+    cursor.execute(
+        "UPDATE webhook_deliveries SET status = ?, status_code = ?, success = ?, "
+        "response_snippet = ?, attempt_number = ?, next_retry_at = ?, updated_at = ? WHERE id = ?",
+        (status, status_code, 1 if success else 0, response_snippet, attempt_number, next_retry_at, now, delivery_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_webhook_deliveries(webhook_id: str) -> List[Dict[str, Any]]:
+    """Newest first. Not yet exposed via an endpoint (noted as a
+    follow-up in docs/PROGRESS.md) -- used directly by tests for now."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, webhook_id, event_id, event_type, payload, attempt_number, status, "
+        "status_code, success, response_snippet, next_retry_at, created_at, updated_at "
+        "FROM webhook_deliveries WHERE webhook_id = ? ORDER BY created_at DESC, id DESC",
+        (webhook_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_row_to_delivery(r) for r in rows]
