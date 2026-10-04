@@ -24,7 +24,7 @@ export function HistoryPage() {
     <div>
       <PageHeader
         title="History"
-        subtitle="Every /analyze call for this project -- statistics only, never raw rows."
+        subtitle="Every analysis run for this project, with just the stats -- we never store the raw rows."
       />
 
       <div className="mb-6 flex flex-wrap items-center gap-4">

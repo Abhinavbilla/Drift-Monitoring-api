@@ -39,10 +39,10 @@ export function WebhooksPage() {
 
   return (
     <div>
-      <PageHeader title="Webhooks" subtitle="Get an HMAC-signed POST whenever this project's alert state transitions." />
+      <PageHeader title="Webhooks" subtitle="Get notified the moment this project's alert state changes, with a signed request you can verify." />
 
       <Card className="mb-6 max-w-xl p-6 space-y-4">
-        <Field label="Endpoint URL" hint="Must be publicly reachable -- loopback/private/link-local addresses are rejected.">
+        <Field label="Endpoint URL" hint="This needs to be publicly reachable. We'll reject anything pointing at localhost or a private network.">
           <TextInput value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/drift-webhook" />
         </Field>
         <div>

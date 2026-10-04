@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
+import { useId } from "react";
+import type { ButtonHTMLAttributes, ChangeEvent, HTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
 
 export function Card({ className = "", children, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
@@ -160,6 +161,65 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
       {...props}
       className={`w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100 ${props.className ?? ""}`}
     />
+  );
+}
+
+export function FileInput({
+  accept,
+  multiple,
+  files,
+  onFiles,
+}: {
+  accept?: string;
+  multiple?: boolean;
+  files: File[];
+  onFiles: (files: File[]) => void;
+}) {
+  const inputId = useId();
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    onFiles(Array.from(e.target.files ?? []));
+  };
+
+  const removeFile = (index: number) => {
+    onFiles(files.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div>
+      <input id={inputId} type="file" accept={accept} multiple={multiple} onChange={handleChange} className="sr-only" />
+      <label
+        htmlFor={inputId}
+        className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700"
+      >
+        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M9.25 13.25a.75.75 0 001.5 0V4.636l2.955 3.129a.75.75 0 001.09-1.03l-4.25-4.5a.75.75 0 00-1.09 0l-4.25 4.5a.75.75 0 101.09 1.03L9.25 4.636v8.614z" />
+          <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+        </svg>
+        Choose file{multiple ? "s" : ""}
+      </label>
+
+      {files.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {files.map((f, i) => (
+            <span
+              key={`${f.name}-${i}`}
+              className="inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600"
+            >
+              {f.name}
+              <button
+                type="button"
+                onClick={() => removeFile(i)}
+                className="text-slate-400 hover:text-alert-600"
+                aria-label={`Remove ${f.name}`}
+              >
+                &times;
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

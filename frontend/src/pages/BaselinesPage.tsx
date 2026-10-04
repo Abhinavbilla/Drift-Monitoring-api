@@ -23,7 +23,7 @@ export function BaselinesPage() {
 
   return (
     <div>
-      <PageHeader title="Baselines" subtitle="Every version this project has ever been fit to -- old versions are kept, never overwritten." />
+      <PageHeader title="Baselines" subtitle="Every version this project has been fit to, kept around in case you need to roll back." />
 
       {isLoading && (
         <div className="flex items-center justify-center py-16 text-slate-400">

@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { AnalyzeResultPanel } from "../components/AnalyzeResultPanel";
-import { Button, Card, ErrorBanner, Field, PageHeader, Tabs, TextArea, TextInput } from "../components/ui";
+import { Button, Card, ErrorBanner, Field, FileInput, PageHeader, Tabs, TextArea, TextInput } from "../components/ui";
 import { api, ApiError } from "../lib/api";
 import { TABULAR_ACCEPT, TABULAR_FORMATS_HINT } from "../lib/constants";
 import { filesToBase64 } from "../lib/files";
@@ -86,13 +86,11 @@ export function AnalyzePage() {
         {modality === "tabular" && (
           <>
             <Field label="Production batch" hint={TABULAR_FORMATS_HINT}>
-              <input
-                type="file"
+              <FileInput
                 accept={TABULAR_ACCEPT}
-                onChange={(e) => setTabularFile(e.target.files?.[0] ?? null)}
-                className="block w-full text-sm text-slate-600"
+                files={tabularFile ? [tabularFile] : []}
+                onFiles={(files) => setTabularFile(files[0] ?? null)}
               />
-              {tabularFile && <p className="mt-1 text-xs text-slate-400">{tabularFile.name}</p>}
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Idempotency-Key (optional)">
@@ -133,15 +131,8 @@ export function AnalyzePage() {
         {modality === "image" && (
           <>
             <Field label="Production images">
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))}
-                className="block w-full text-sm text-slate-600"
-              />
+              <FileInput accept="image/*" multiple files={imageFiles} onFiles={setImageFiles} />
             </Field>
-            {imageFiles.length > 0 && <p className="text-xs text-slate-400">{imageFiles.length} file(s) selected</p>}
             <Button onClick={() => imageMutation.mutate()} disabled={imageFiles.length === 0 || imageMutation.isPending}>
               {imageMutation.isPending ? "Analyzing..." : "Run Analysis"}
             </Button>

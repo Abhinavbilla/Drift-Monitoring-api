@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Button, Card, ErrorBanner, Field, InfoPanel, PageHeader, SuccessBanner, Tabs, TextArea } from "../components/ui";
+import { Button, Card, ErrorBanner, Field, FileInput, InfoPanel, PageHeader, SuccessBanner, Tabs, TextArea } from "../components/ui";
 import { api, ApiError } from "../lib/api";
 import { TABULAR_ACCEPT, TABULAR_FORMATS_HINT } from "../lib/constants";
 import { filesToBase64, parseJointRecordsFile, parseTextSamplesFile } from "../lib/files";
@@ -9,43 +9,43 @@ import type { FitResponse } from "../lib/types";
 
 type Modality = "tabular" | "text" | "image" | "joint";
 
-// Verified against the actual backend code (db/crud.py, utils/profiler.py,
-// adapters/text.py, adapters/image.py, adapters/joint.py) -- not assumed.
-// Keep this in sync if any of that logic changes.
+// Checked against the real backend logic (db/crud.py, utils/profiler.py,
+// adapters/text.py, adapters/image.py, adapters/joint.py) so this stays
+// honest. Update it if that logic ever changes.
 const LIMITATIONS: Record<Modality, { title: string; items: string[] }> = {
   tabular: {
-    title: "Before you upload a tabular dataset",
+    title: "A few things worth knowing before you upload",
     items: [
-      "Cleaning is narrow: a numeric column has non-numeric cells automatically dropped (and reported), but categorical values are NOT normalized -- \"USA\", \"usa\", and \" USA \" are counted as three different categories, not merged.",
-      "A column that's constant, or a perfectly increasing/decreasing sequence (e.g. a row index or auto-incrementing ID), is silently excluded from monitoring entirely -- by design, not an error, but it means that column won't show up at all afterward.",
-      "A categorical column with more than 50 unique values is rejected outright as likely a free-text or ID field -- it is not truncated, sampled down, or auto-converted to continuous.",
-      "No deduplication, outlier removal, or PII redaction happens automatically -- if your raw export has duplicate rows or sensitive fields, remove them yourself first.",
+      "We'll clean up numeric columns for you (dropping anything that isn't a number, and telling you how many we dropped), but text categories aren't normalized. \"USA\", \"usa\", and \" USA \" will be treated as three separate categories.",
+      "If a column is the same value all the way down, or just counts up/down in order (like a row number or an ID), we leave it out of monitoring automatically. That's intentional, not a bug, but it does mean that column just won't show up afterward.",
+      "Categorical columns are capped at 50 distinct values. Go over that and the upload is rejected outright, since it's almost always a free-text or ID field that shouldn't be treated as categorical anyway.",
+      "We don't deduplicate rows, strip outliers, or scrub personal data for you, so do that on your end first if it matters.",
     ],
   },
   text: {
-    title: "Before you upload text",
+    title: "A few things worth knowing before you upload",
     items: [
-      "This expects already-extracted plain text strings. It does NOT extract text from PDFs, Word docs, or HTML -- uploading one of those embeds the raw file bytes as garbage, not its readable content.",
-      "Long text is silently truncated to the embedding model's 256-token input limit -- anything beyond that is ignored when comparing batches.",
-      "No profanity/PII scrubbing, deduplication, or language filtering happens automatically.",
-      "Needs at least 4 samples to run at all; 40+ is recommended for a stable signal (fewer than that, results get noisy).",
+      "This wants plain text, already extracted. If you upload a PDF or Word doc, it'll just read the raw bytes, not the words inside, so the result will be meaningless.",
+      "Anything past 256 tokens per sample gets cut off automatically by the embedding model. Long documents still work, they just get judged on their first chunk.",
+      "There's no profanity filtering, PII scrubbing, or deduplication happening here.",
+      "You need at least 4 samples for this to run at all, but aim for 40 or more. Fewer than that and the results get noisy.",
     ],
   },
   image: {
-    title: "Before you upload images",
+    title: "A few things worth knowing before you upload",
     items: [
-      "Standard formats PIL can decode work (JPEG, PNG, and similar) -- a corrupted or unsupported file is rejected cleanly with an error, not silently skipped.",
-      "Every image is resized and center-cropped to 224×224 before embedding -- for a very wide, tall, or otherwise non-square image, this crops out real content, not just margins.",
-      "No deduplication or quality filtering happens automatically.",
-      "Needs at least 4 images to run at all; 40+ is recommended for a stable signal.",
+      "Most common formats work fine (JPEG, PNG, and so on). A file that can't be read gets rejected with a clear error instead of silently vanishing.",
+      "Every image gets resized and cropped to a 224×224 square before it's embedded. For anything that isn't roughly square to begin with, that crop can cut off real content, not just empty margin.",
+      "No deduplication or quality checks happen automatically.",
+      "Same as text: 4 images minimum to run, 40+ recommended for something you can actually trust.",
     ],
   },
   joint: {
-    title: "Before you upload joint (multimodal) data",
+    title: "A few things worth knowing before you upload",
     items: [
-      "The least mature of the four paths -- it does not yet support calibrated decision mode (p-values), only the legacy AUC cutoff.",
-      "Each record needs to already be organized as {tabular?, text?, image?} -- this page can match attached images to records by filename or by order, but it won't auto-detect or auto-pair files on its own.",
-      "Every limitation listed above for text and images applies here too, for whichever part of a record is present.",
+      "This is the newest of the four paths, and it hasn't gotten calibrated mode yet, so it only runs in legacy mode for now.",
+      "Each record needs to already be shaped as tabular, text, and/or image fields. We can match attached images to records by filename, or just pair them up in order, but we won't figure out how your files relate to each other on our own.",
+      "Everything above about text and images still applies here, for whichever part of a record you're including.",
     ],
   },
 };
@@ -242,13 +242,11 @@ export function FitPage() {
               />
               {tabularSource === "file" ? (
                 <Field label="Reference dataset" hint={TABULAR_FORMATS_HINT}>
-                  <input
-                    type="file"
+                  <FileInput
                     accept={TABULAR_ACCEPT}
-                    onChange={(e) => setTabularFile(e.target.files?.[0] ?? null)}
-                    className="block w-full text-sm text-slate-600"
+                    files={tabularFile ? [tabularFile] : []}
+                    onFiles={(files) => setTabularFile(files[0] ?? null)}
                   />
-                  {tabularFile && <p className="mt-1 text-xs text-slate-400">{tabularFile.name}</p>}
                 </Field>
               ) : (
                 <Field label="Paste CSV data" hint="First row is treated as the header.">
@@ -284,19 +282,17 @@ export function FitPage() {
                   <TextArea rows={8} value={referenceTexts} onChange={(e) => setReferenceTexts(e.target.value)} />
                 </Field>
               ) : (
-                <Field label="Reference texts file" hint=".txt (one per line), .json (array of strings), or .jsonl/.ndjson.">
-                  <input
-                    type="file"
+                <Field label="Reference texts file" hint="A .txt file with one sample per line, or a .json/.jsonl file.">
+                  <FileInput
                     accept=".txt,.json,.jsonl,.ndjson"
-                    onChange={(e) => setTextFile(e.target.files?.[0] ?? null)}
-                    className="block w-full text-sm text-slate-600"
+                    files={textFile ? [textFile] : []}
+                    onFiles={(files) => setTextFile(files[0] ?? null)}
                   />
-                  {textFile && <p className="mt-1 text-xs text-slate-400">{textFile.name}</p>}
                 </Field>
               )}
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input type="checkbox" checked={textCalibrated} onChange={(e) => setTextCalibrated(e.target.checked)} />
-                Use calibrated decision mode (p-value via precomputed null grid, opt-in)
+                Use calibrated mode (gives drift a real p-value instead of a flat cutoff)
               </label>
               <Button onClick={() => textMutation.mutate()} disabled={textMutation.isPending}>
                 {textMutation.isPending ? "Fitting..." : "Lock Baseline"}
@@ -306,19 +302,12 @@ export function FitPage() {
 
           {modality === "image" && (
             <div className="space-y-4">
-              <Field label="Reference images" hint="PNG, JPEG, or any browser-readable image format. 40+ recommended.">
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))}
-                  className="block w-full text-sm text-slate-600"
-                />
+              <Field label="Reference images" hint="JPEG, PNG, or most other common formats. Pick a batch of 40 or more for a stable baseline.">
+                <FileInput accept="image/*" multiple files={imageFiles} onFiles={setImageFiles} />
               </Field>
-              {imageFiles.length > 0 && <p className="text-xs text-slate-400">{imageFiles.length} file(s) selected</p>}
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input type="checkbox" checked={imageCalibrated} onChange={(e) => setImageCalibrated(e.target.checked)} />
-                Use calibrated decision mode (p-value via precomputed null grid, opt-in)
+                Use calibrated mode (gives drift a real p-value instead of a flat cutoff)
               </label>
               <Button onClick={() => imageMutation.mutate()} disabled={imageFiles.length === 0 || imageMutation.isPending}>
                 {imageMutation.isPending ? "Fitting..." : "Lock Baseline"}
@@ -340,30 +329,19 @@ export function FitPage() {
                 <>
                   <Field
                     label="Records file"
-                    hint='.json (array of records) or .jsonl. Each record: {"tabular"?, "text"?, "image"?}. An image field can be inline base64, or a filename matching one of the files attached below.'
+                    hint='A .json or .jsonl file where each record looks like {"tabular": {...}, "text": "...", "image": "..."}. Any of the three can be left out. If an image is inline base64 already, it works as-is.'
                   >
-                    <input
-                      type="file"
+                    <FileInput
                       accept=".json,.jsonl,.ndjson"
-                      onChange={(e) => setJointRecordsFile(e.target.files?.[0] ?? null)}
-                      className="block w-full text-sm text-slate-600"
+                      files={jointRecordsFile ? [jointRecordsFile] : []}
+                      onFiles={(files) => setJointRecordsFile(files[0] ?? null)}
                     />
-                    {jointRecordsFile && <p className="mt-1 text-xs text-slate-400">{jointRecordsFile.name}</p>}
                   </Field>
                   <Field
                     label="Attach images (optional)"
-                    hint="If your records file doesn't already embed images inline, attach them here -- matched by filename, or assigned in order to records without an image."
+                    hint="Got images as separate files instead of inline base64? Attach them here and we'll match them to your records by filename, or just pair them up in order if there's nothing to match on."
                   >
-                    <input
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      onChange={(e) => setJointImageFiles(Array.from(e.target.files ?? []))}
-                      className="block w-full text-sm text-slate-600"
-                    />
-                    {jointImageFiles.length > 0 && (
-                      <p className="mt-1 text-xs text-slate-400">{jointImageFiles.length} image(s) attached</p>
-                    )}
+                    <FileInput accept="image/*" multiple files={jointImageFiles} onFiles={setJointImageFiles} />
                   </Field>
                 </>
               ) : (
