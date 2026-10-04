@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { AnalyzeResultPanel } from "../components/AnalyzeResultPanel";
 import { Button, Card, ErrorBanner, Field, PageHeader, Tabs, TextArea, TextInput } from "../components/ui";
 import { api, ApiError } from "../lib/api";
+import { TABULAR_ACCEPT, TABULAR_FORMATS_HINT } from "../lib/constants";
 import { filesToBase64 } from "../lib/files";
 import type { AnalyzeResponse } from "../lib/types";
 
@@ -84,13 +85,14 @@ export function AnalyzePage() {
       <Card className="max-w-2xl p-6 space-y-4 mb-6">
         {modality === "tabular" && (
           <>
-            <Field label="Production batch" hint="CSV or Parquet.">
+            <Field label="Production batch" hint={TABULAR_FORMATS_HINT}>
               <input
                 type="file"
-                accept=".csv,.parquet"
+                accept={TABULAR_ACCEPT}
                 onChange={(e) => setTabularFile(e.target.files?.[0] ?? null)}
                 className="block w-full text-sm text-slate-600"
               />
+              {tabularFile && <p className="mt-1 text-xs text-slate-400">{tabularFile.name}</p>}
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Idempotency-Key (optional)">

@@ -80,6 +80,36 @@ class TestFitUpload:
         )
         assert resp.status_code == 200
 
+    def test_excel_upload_fits_baseline(self):
+        """Declared supported (ingest/readers.py, README) but had no
+        end-to-end test through the real upload endpoint -- found while
+        verifying the frontend's upload UI copy; openpyxl wasn't even
+        installed in this dev environment despite being in
+        requirements.txt, so this was previously unverified, not just
+        untested."""
+        pytest.importorskip("openpyxl")
+        df = pd.DataFrame({"x": _X_VALUES, "cat": ["a" if i % 2 == 0 else "b" for i in range(60)]})
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False, engine="openpyxl")
+        resp = client.post(
+            "/fit/test_upload_excel_proj/upload",
+            files={"file": ("reference.xlsx", buf.getvalue(),
+                             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            headers=HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["inferred_feature_types"] == {"x": "continuous", "cat": "categorical"}
+
+    def test_json_upload_fits_baseline(self):
+        records = [{"x": _X_VALUES[i], "cat": "a" if i % 2 == 0 else "b"} for i in range(60)]
+        resp = client.post(
+            "/fit/test_upload_json_proj/upload",
+            files={"file": ("reference.json", json.dumps(records).encode(), "application/json")},
+            headers=HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["inferred_feature_types"] == {"x": "continuous", "cat": "categorical"}
+
     def test_calibration_config_form_field_applied(self):
         resp = client.post(
             "/fit/test_upload_calib_proj/upload",

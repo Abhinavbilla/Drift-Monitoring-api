@@ -3,7 +3,8 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Card, ErrorBanner, Field, PageHeader, SuccessBanner, Tabs, TextArea } from "../components/ui";
 import { api, ApiError } from "../lib/api";
-import { filesToBase64 } from "../lib/files";
+import { TABULAR_ACCEPT, TABULAR_FORMATS_HINT } from "../lib/constants";
+import { filesToBase64, parseJointRecordsFile, parseTextSamplesFile } from "../lib/files";
 import type { FitResponse } from "../lib/types";
 
 type Modality = "tabular" | "text" | "image" | "joint";
@@ -49,6 +50,34 @@ function ResultPanel({ result, onContinue }: { result: FitResponse; onContinue: 
   );
 }
 
+function SourceToggle({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="mb-4 flex gap-4 border-b border-slate-100 pb-1">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          className={`-mb-px border-b-2 px-1 pb-2 text-sm font-medium transition-colors ${
+            value === opt.value
+              ? "border-brand-600 text-brand-700"
+              : "border-transparent text-slate-400 hover:text-slate-600"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function FitPage() {
   const { projectId = "" } = useParams();
   const navigate = useNavigate();
@@ -57,14 +86,24 @@ export function FitPage() {
   const [result, setResult] = useState<FitResponse | null>(null);
 
   // tabular
+  const [tabularSource, setTabularSource] = useState<"file" | "paste">("file");
   const [tabularFile, setTabularFile] = useState<File | null>(null);
+  const [pastedCsv, setPastedCsv] = useState("");
+
   // text
+  const [textSource, setTextSource] = useState<"paste" | "file">("paste");
   const [referenceTexts, setReferenceTexts] = useState("");
+  const [textFile, setTextFile] = useState<File | null>(null);
   const [textCalibrated, setTextCalibrated] = useState(false);
+
   // image
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [imageCalibrated, setImageCalibrated] = useState(false);
+
   // joint
+  const [jointSource, setJointSource] = useState<"file" | "json">("file");
+  const [jointRecordsFile, setJointRecordsFile] = useState<File | null>(null);
+  const [jointImageFiles, setJointImageFiles] = useState<File[]>([]);
   const [jointJson, setJointJson] = useState('[\n  {"tabular": {"amount": 42.5}, "text": "example note"}\n]');
 
   const onSuccess = (data: FitResponse) => {
@@ -75,15 +114,26 @@ export function FitPage() {
 
   const tabularMutation = useMutation({
     mutationFn: () => {
-      if (!tabularFile) throw new Error("Choose a file first.");
-      return api.fitUpload(projectId, tabularFile);
+      if (tabularSource === "file") {
+        if (!tabularFile) throw new Error("Choose a file first.");
+        return api.fitUpload(projectId, tabularFile);
+      }
+      if (!pastedCsv.trim()) throw new Error("Paste some CSV data first.");
+      const blob = new File([pastedCsv], "pasted.csv", { type: "text/csv" });
+      return api.fitUpload(projectId, blob);
     },
     onSuccess,
   });
 
   const textMutation = useMutation({
-    mutationFn: () => {
-      const texts = referenceTexts.split("\n").map((t) => t.trim()).filter(Boolean);
+    mutationFn: async () => {
+      let texts: string[];
+      if (textSource === "file") {
+        if (!textFile) throw new Error("Choose a file first.");
+        texts = await parseTextSamplesFile(textFile);
+      } else {
+        texts = referenceTexts.split("\n").map((t) => t.trim()).filter(Boolean);
+      }
       return api.fitText(projectId, texts, textCalibrated ? { decision_mode: "calibrated" } : undefined);
     },
     onSuccess,
@@ -98,7 +148,12 @@ export function FitPage() {
   });
 
   const jointMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      if (jointSource === "file") {
+        if (!jointRecordsFile) throw new Error("Choose a records file first.");
+        const records = await parseJointRecordsFile(jointRecordsFile, jointImageFiles);
+        return api.fitJoint(projectId, records);
+      }
       const records = JSON.parse(jointJson);
       return api.fitJoint(projectId, records);
     },
@@ -131,28 +186,71 @@ export function FitPage() {
       {result ? (
         <ResultPanel result={result} onContinue={() => navigate(`/projects/${encodeURIComponent(projectId)}/analyze`)} />
       ) : (
-        <Card className="max-w-2xl p-6 space-y-4">
+        <Card className="max-w-2xl p-6">
           {modality === "tabular" && (
-            <>
-              <Field label="Reference dataset" hint="CSV or Parquet, one row per observation.">
-                <input
-                  type="file"
-                  accept=".csv,.parquet"
-                  onChange={(e) => setTabularFile(e.target.files?.[0] ?? null)}
-                  className="block w-full text-sm text-slate-600"
-                />
-              </Field>
-              <Button onClick={() => tabularMutation.mutate()} disabled={!tabularFile || tabularMutation.isPending}>
+            <div className="space-y-4">
+              <SourceToggle
+                value={tabularSource}
+                onChange={(v) => setTabularSource(v as "file" | "paste")}
+                options={[
+                  { value: "file", label: "Upload a file" },
+                  { value: "paste", label: "Paste data" },
+                ]}
+              />
+              {tabularSource === "file" ? (
+                <Field label="Reference dataset" hint={TABULAR_FORMATS_HINT}>
+                  <input
+                    type="file"
+                    accept={TABULAR_ACCEPT}
+                    onChange={(e) => setTabularFile(e.target.files?.[0] ?? null)}
+                    className="block w-full text-sm text-slate-600"
+                  />
+                  {tabularFile && <p className="mt-1 text-xs text-slate-400">{tabularFile.name}</p>}
+                </Field>
+              ) : (
+                <Field label="Paste CSV data" hint="First row is treated as the header.">
+                  <TextArea
+                    rows={8}
+                    value={pastedCsv}
+                    onChange={(e) => setPastedCsv(e.target.value)}
+                    placeholder={"amount,category\n42.5,retail\n13.0,food"}
+                  />
+                </Field>
+              )}
+              <Button
+                onClick={() => tabularMutation.mutate()}
+                disabled={tabularMutation.isPending || (tabularSource === "file" ? !tabularFile : !pastedCsv.trim())}
+              >
                 {tabularMutation.isPending ? "Fitting..." : "Lock Baseline"}
               </Button>
-            </>
+            </div>
           )}
 
           {modality === "text" && (
-            <>
-              <Field label="Reference texts" hint="One text sample per line. 40+ recommended.">
-                <TextArea rows={8} value={referenceTexts} onChange={(e) => setReferenceTexts(e.target.value)} />
-              </Field>
+            <div className="space-y-4">
+              <SourceToggle
+                value={textSource}
+                onChange={(v) => setTextSource(v as "paste" | "file")}
+                options={[
+                  { value: "paste", label: "Paste text" },
+                  { value: "file", label: "Upload a file" },
+                ]}
+              />
+              {textSource === "paste" ? (
+                <Field label="Reference texts" hint="One text sample per line. 40+ recommended.">
+                  <TextArea rows={8} value={referenceTexts} onChange={(e) => setReferenceTexts(e.target.value)} />
+                </Field>
+              ) : (
+                <Field label="Reference texts file" hint=".txt (one per line), .json (array of strings), or .jsonl/.ndjson.">
+                  <input
+                    type="file"
+                    accept=".txt,.json,.jsonl,.ndjson"
+                    onChange={(e) => setTextFile(e.target.files?.[0] ?? null)}
+                    className="block w-full text-sm text-slate-600"
+                  />
+                  {textFile && <p className="mt-1 text-xs text-slate-400">{textFile.name}</p>}
+                </Field>
+              )}
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input type="checkbox" checked={textCalibrated} onChange={(e) => setTextCalibrated(e.target.checked)} />
                 Use calibrated decision mode (p-value via precomputed null grid, opt-in)
@@ -160,12 +258,12 @@ export function FitPage() {
               <Button onClick={() => textMutation.mutate()} disabled={textMutation.isPending}>
                 {textMutation.isPending ? "Fitting..." : "Lock Baseline"}
               </Button>
-            </>
+            </div>
           )}
 
           {modality === "image" && (
-            <>
-              <Field label="Reference images" hint="40+ images recommended.">
+            <div className="space-y-4">
+              <Field label="Reference images" hint="PNG, JPEG, or any browser-readable image format. 40+ recommended.">
                 <input
                   type="file"
                   accept="image/*"
@@ -182,24 +280,69 @@ export function FitPage() {
               <Button onClick={() => imageMutation.mutate()} disabled={imageFiles.length === 0 || imageMutation.isPending}>
                 {imageMutation.isPending ? "Fitting..." : "Lock Baseline"}
               </Button>
-            </>
+            </div>
           )}
 
           {modality === "joint" && (
-            <>
-              <Field label="Reference records (JSON)" hint='Array of {"tabular"?, "text"?, "image"?} records.'>
-                <TextArea rows={10} value={jointJson} onChange={(e) => setJointJson(e.target.value)} />
-              </Field>
-              <Button onClick={() => jointMutation.mutate()} disabled={jointMutation.isPending}>
+            <div className="space-y-4">
+              <SourceToggle
+                value={jointSource}
+                onChange={(v) => setJointSource(v as "file" | "json")}
+                options={[
+                  { value: "file", label: "Upload files" },
+                  { value: "json", label: "Write JSON" },
+                ]}
+              />
+              {jointSource === "file" ? (
+                <>
+                  <Field
+                    label="Records file"
+                    hint='.json (array of records) or .jsonl. Each record: {"tabular"?, "text"?, "image"?}. An image field can be inline base64, or a filename matching one of the files attached below.'
+                  >
+                    <input
+                      type="file"
+                      accept=".json,.jsonl,.ndjson"
+                      onChange={(e) => setJointRecordsFile(e.target.files?.[0] ?? null)}
+                      className="block w-full text-sm text-slate-600"
+                    />
+                    {jointRecordsFile && <p className="mt-1 text-xs text-slate-400">{jointRecordsFile.name}</p>}
+                  </Field>
+                  <Field
+                    label="Attach images (optional)"
+                    hint="If your records file doesn't already embed images inline, attach them here -- matched by filename, or assigned in order to records without an image."
+                  >
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => setJointImageFiles(Array.from(e.target.files ?? []))}
+                      className="block w-full text-sm text-slate-600"
+                    />
+                    {jointImageFiles.length > 0 && (
+                      <p className="mt-1 text-xs text-slate-400">{jointImageFiles.length} image(s) attached</p>
+                    )}
+                  </Field>
+                </>
+              ) : (
+                <Field label="Reference records (JSON)" hint='Array of {"tabular"?, "text"?, "image"?} records.'>
+                  <TextArea rows={10} value={jointJson} onChange={(e) => setJointJson(e.target.value)} />
+                </Field>
+              )}
+              <Button
+                onClick={() => jointMutation.mutate()}
+                disabled={jointMutation.isPending || (jointSource === "file" && !jointRecordsFile)}
+              >
                 {jointMutation.isPending ? "Fitting..." : "Lock Baseline"}
               </Button>
-            </>
+            </div>
           )}
 
           {error && (
-            <ErrorBanner
-              message={error instanceof ApiError ? error.detail : error instanceof Error ? error.message : "Fit failed."}
-            />
+            <div className="mt-4">
+              <ErrorBanner
+                message={error instanceof ApiError ? error.detail : error instanceof Error ? error.message : "Fit failed."}
+              />
+            </div>
           )}
         </Card>
       )}
