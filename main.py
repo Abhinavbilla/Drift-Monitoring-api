@@ -9,6 +9,7 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status, UploadFile, File, Form, Header
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import json
 import ingest.readers as ingest_readers
@@ -328,6 +329,22 @@ app = FastAPI(
     description="Real-time and batch machine learning anomaly detection engine.",
     version="1.0.0",
     lifespan=lifespan
+)
+
+# React frontend (2026-10-04): the SPA calls this API directly from the
+# browser (fetch), unlike the old Streamlit dashboard which only ever
+# talked to it server-to-server -- so, unlike before, CORS actually
+# matters now. FRONTEND_URL is a comma-separated list of allowed
+# origins; defaults cover local Vite dev (5173) so the frontend works
+# out of the box without extra setup, but a real deployment should set
+# FRONTEND_URL explicitly rather than relying on this default.
+_frontend_origins = [o.strip() for o in os.getenv("FRONTEND_URL", "http://localhost:5173").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_frontend_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

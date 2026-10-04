@@ -108,6 +108,10 @@ export const api = {
     }),
   analyzeImage: (projectId: string, productionImages: string[]) =>
     request<AnalyzeResponse>(`/analyze/${projectId}/image`, { method: "POST", body: { production_images: productionImages } }),
+  fitJoint: (projectId: string, referenceRecords: unknown[]) =>
+    request<FitResponse>(`/fit/${projectId}/joint`, { method: "POST", body: { reference_records: referenceRecords } }),
+  analyzeJoint: (projectId: string, productionRecords: unknown[]) =>
+    request<AnalyzeResponse>(`/analyze/${projectId}/joint`, { method: "POST", body: { production_records: productionRecords } }),
 
   // -- history --
   getHistory: (projectId: string, filters: { since?: string; until?: string; feature?: string; alertOnly?: boolean; limit?: number; offset?: number } = {}) =>
