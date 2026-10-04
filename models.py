@@ -231,6 +231,14 @@ class FitTextBaselineRequest(BaseModel):
     reference_texts: List[str] = Field(
         ..., description="Baseline batch of raw strings to lock as the reference distribution."
     )
+    calibration_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Step 2 (d), 2026-10-04: opt into the same two-gate calibrated decision tabular "
+                    "has (decision_mode='calibrated' gives the DCT's AUC a p-value via a precomputed "
+                    "null-distribution grid). Omit to leave the project's existing config untouched "
+                    "(new text projects default to 'legacy', same as today, until Step 2 (e)'s "
+                    "validation empirically justifies switching the default)."
+    )
 
 class AnalyzeTextBatchRequest(BaseModel):
     production_texts: List[str] = Field(
@@ -240,6 +248,11 @@ class AnalyzeTextBatchRequest(BaseModel):
 class FitImageBaselineRequest(BaseModel):
     reference_images: List[str] = Field(
         ..., description="Baseline batch of base64-encoded images to lock as the reference distribution."
+    )
+    calibration_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Step 2 (d), 2026-10-04: see FitTextBaselineRequest.calibration_config -- identical "
+                    "semantics, image modality."
     )
 
 class AnalyzeImageBatchRequest(BaseModel):

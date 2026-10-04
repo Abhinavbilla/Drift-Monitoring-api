@@ -8,31 +8,73 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
-**Step 2 (d)/(e) (user, 2026-10-04) — SCOPED, NOT STARTED.** Key finding:
-`drift/embedding_detector.py` (text/image/joint `/analyze`) has NO
-calibration support today -- single `AUC > 0.65` legacy cutoff, no
-p-value, no `decision_mode`. So this isn't "rerun validation under
-calibrated mode," it's "build calibrated mode for embeddings, then
-validate it."
-- **(d) DCT calibration**: give the DCT's AUC a p-value via a
-  **precomputed null-distribution grid** (user decision, 2026-10-04 --
-  build it now, not permutation-only) across a batch/reference-size
-  grid, run once via a permutation sweep; Gate 1 = p_value_adjusted <
-  alpha, Gate 2 = existing AUC floor (0.65). Wire `calibration_config`/
-  `decision_mode` into `EmbeddingDriftDetector` and the text/image/joint
-  analyze handlers, matching how tabular's `DistributionDetector`
-  already works. Sizes outside the grid's calibrated range need a
-  documented fallback (clamp or permutation), not silent extrapolation.
-  **decision_mode default stays "legacy"** for new text/image/joint
-  projects even after this ships (user decision, 2026-10-04) --
-  calibrated becomes available to opt into, not the default, until (e)
-  empirically justifies it the way tabular's side-by-side did.
-- **(e) Text/image validation**: Step-1/2-style methodology (ground
-  truth, synthetic sensitivity, batch classification metrics) against
-  real text/image drift scenarios under calibrated mode, closing the
-  README's current "unverified, not benchmarked" label -- including the
-  previously-flagged ~40-sample borderline case
-  (`docs/step2_proposal.md`).
+**Step 2 (d) (user, 2026-10-04) — DONE.** Key finding:
+`drift/embedding_detector.py` (text/image/joint `/analyze`) had NO
+calibration support before this -- single `AUC > 0.65` legacy cutoff,
+no p-value, no `decision_mode`. This item built calibrated mode for
+text/image (joint deliberately excluded, see below); **(e) text/image
+validation under calibrated mode is NOT started** -- that's the next
+piece, not done by (d) alone.
+
+- **DCT calibration**: `drift/dct_calibration.py` -- `dct_pvalue()`
+  looks up a precomputed null-distribution grid
+  (`results/dct_null_distribution_grid.json`, built by
+  `scripts/build_dct_calibration_grid.py`: 200 synthetic null draws per
+  `(embedding_dim, n_ref, n_batch)` cell, `embedding_dim` in {384 (text,
+  all-MiniLM-L6-v2), 512 (image, resnet18)}, sizes in {50, 200, 1000,
+  5000} crossed both ways -- 32 cells, ~15 min one-time build).
+  Nearest-neighbor match in log-size space for sizes between grid
+  points (a documented approximation, not silent extrapolation); a
+  genuinely uncalibrated `embedding_dim` (e.g. a future model swap)
+  falls back to `LIVE_FALLBACK_DRAWS=30` live permutation draws instead
+  of borrowing a wrong-dimension number. `EmbeddingDriftDetector.
+  _compute_auc` factored out so the grid-building simulation and the
+  live fallback call the EXACT SAME code path the real detector uses --
+  no risk of calibration drifting out of sync with runtime behavior.
+  Gate 1 = `p_value_adjusted < alpha` (via the grid), Gate 2 = existing
+  AUC floor (0.65, `DEFAULT_EFFECT_FLOORS["dct_auc"]`, already existed).
+  `calibration_config` threaded into `FitTextBaselineRequest`/
+  `FitImageBaselineRequest` and `insert_embedding_baseline` (new
+  `"__UNSET__"` preserve-existing-value sentinel, matching
+  `insert_baseline`'s). **decision_mode stays "legacy" by default** for
+  new text/image projects (user decision, 2026-10-04) -- calibrated is
+  available to opt into, not the default, until (e) empirically
+  justifies switching it the way tabular's side-by-side did.
+- **Joint excluded from this pass** (matches the roadmap's own "(e)
+  text/image validation" wording, which never mentions joint): joint's
+  embeddings don't have one fixed dimension (varies by which modalities
+  are present per record), making a clean calibration grid for it a
+  separate, harder problem. `analyze_joint_batch` untouched; joint stays
+  legacy-only.
+- **Environment finding, not a code fix**: this sandbox has no outbound
+  internet access. `sentence-transformers`/`transformers` tries an
+  online "check for updates" HEAD request on every cold model load even
+  when the model is already cached locally, and retries 5x with
+  backoff before falling back -- costing minutes per cold start here.
+  Worked around for this session's testing with `HF_HUB_OFFLINE=1
+  TRANSFORMERS_OFFLINE=1` (session-only env vars, NOT added to the
+  codebase/deployment config -- a real deployment needs the actual
+  online path for its own first-time model download, so forcing offline
+  mode there could break a fresh deploy).
+
+**Next: Step 2 (e) — text/image validation under calibrated mode.**
+Step-1/2-style methodology (ground truth, synthetic sensitivity, batch
+classification metrics) against real text/image drift scenarios,
+closing the README's "unverified, not benchmarked" label -- including
+the previously-flagged ~40-sample borderline case (`docs/
+step2_proposal.md`). NOT started -- (d) only built the mechanism.
+
+**Verification**: new `tests/test_dct_calibration.py` (14 tests: exact
+and nearest-neighbor grid lookup, missing-dimension and no-grid-file
+fallback, the "+1 correction" never-exactly-zero p-value, legacy mode
+provably byte-identical, calibrated mode's two-gate fields, CRUD-layer
+calibration_config persistence/preservation/default, and real API
+end-to-end checks for BOTH text (384-dim) and image (512-dim) against
+the real grid, plus a two-user isolation check). Full suite green (301
+backend + 13 live-client), live-verified against the running server --
+one real calibrated-mode response showed `p_value=0.004975` = exactly
+`1/201`, confirming the real 200-draw grid cell was used, not the
+30-draw fallback.
 
 Ground rules unchanged: no fabricated numbers, no regressions, additive
 API changes, ask before changing defaults, commit per logical change,

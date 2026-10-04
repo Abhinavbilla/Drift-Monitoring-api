@@ -6,6 +6,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.metrics import roc_auc_score
 
+from drift.calibration import CalibrationConfig, adjust_p_values, apply_two_gate
+from drift.dct_calibration import dct_pvalue
+
 # Empirically, AUC estimates get noisy/unreliable well below this per-batch
 # sample count (see the manual smoke test in the multimodal review: two
 # genuinely same-domain-but-different text batches at n=40 total, 20 unique
@@ -23,6 +26,17 @@ class EmbeddingDriftDetector:
     (no drift); AUC well above 0.5 means the two batches are separable
     (drift). Modality-agnostic — both text and image adapters produce
     plain embedding matrices.
+
+    Step 2 (d), 2026-10-04: analyze() accepts an optional calibration_config
+    (same CalibrationConfig used by the tabular DistributionDetector).
+    Omitted, or decision_mode="legacy": behavior is byte-identical to
+    before this existed -- a bare AUC > auc_threshold cutoff, no p-value.
+    decision_mode="calibrated": the AUC gets a p-value from a precomputed
+    null-distribution grid (drift/dct_calibration.py), keyed by
+    (embedding_dim, n_ref, n_batch) -- falls back to an on-the-fly
+    permutation null if this exact embedding dimension was never
+    calibrated (e.g. a future model swap), rather than silently using a
+    wrong-dimension grid entry or fabricating a p-value.
     """
 
     def __init__(self, auc_threshold: float = 0.65, n_splits: int = 5, classifier: Optional[ClassifierMixin] = None):
@@ -40,7 +54,12 @@ class EmbeddingDriftDetector:
         self.n_splits = n_splits
         self.classifier = classifier if classifier is not None else LogisticRegression(max_iter=1000)
 
-    def analyze(self, ref_embeddings: np.ndarray, cur_embeddings: np.ndarray) -> Dict[str, Any]:
+    def _compute_auc(self, ref_embeddings: np.ndarray, cur_embeddings: np.ndarray) -> float:
+        """The statistic itself, factored out so the calibration grid's
+        own simulation (scripts/build_dct_calibration_grid.py) can call
+        the EXACT SAME code path on synthetic null draws -- no risk of
+        the calibration drifting out of sync with what analyze() actually
+        computes at runtime."""
         ref_embeddings = np.asarray(ref_embeddings)
         cur_embeddings = np.asarray(cur_embeddings)
 
@@ -61,12 +80,45 @@ class EmbeddingDriftDetector:
             )
 
         cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
-
         probs = cross_val_predict(self.classifier, X, y, cv=cv, method="predict_proba")[:, 1]
-        auc = roc_auc_score(y, probs)
+        return float(roc_auc_score(y, probs))
 
+    def analyze(
+        self, ref_embeddings: np.ndarray, cur_embeddings: np.ndarray,
+        calibration_config: Optional[CalibrationConfig] = None,
+    ) -> Dict[str, Any]:
+        auc = self._compute_auc(ref_embeddings, cur_embeddings)
+
+        decision_mode = calibration_config.decision_mode if calibration_config else "legacy"
+        if decision_mode != "calibrated":
+            # Byte-identical to every version of this method before Step 2 (d).
+            return {
+                "statistic": auc,
+                "p_value": None,
+                "drift_detected": bool(auc > self.auc_threshold),
+            }
+
+        n_ref = len(np.asarray(ref_embeddings))
+        n_batch = len(np.asarray(cur_embeddings))
+        embedding_dim = np.asarray(ref_embeddings).shape[1]
+        p_value = dct_pvalue(auc, embedding_dim, n_ref, n_batch, auc_fn=self._compute_auc)
+        p_value_adjusted = adjust_p_values([p_value], calibration_config.multiple_testing)[0]
+        floor = calibration_config.effect_floor_for("embedding_drift", "dct_auc")
+
+        gate = apply_two_gate(
+            effect_size=auc, effect_floor=floor, p_value=p_value, p_value_adjusted=p_value_adjusted,
+            alpha=calibration_config.alpha, decision_mode="calibrated",
+            threshold_used=f"p_adj<{calibration_config.alpha} [DCT-null (grid)], AUC>={floor}",
+        )
         return {
-            "statistic": float(auc),
-            "p_value": None,
-            "drift_detected": bool(auc > self.auc_threshold),
+            "statistic": auc,
+            "p_value": gate.p_value,
+            "drift_detected": gate.drift_detected,
+            "effect_size": gate.effect_size,
+            "effect_floor": gate.effect_floor,
+            "p_value_adjusted": gate.p_value_adjusted,
+            "significant": gate.significant,
+            "material": gate.material,
+            "decision_mode": gate.decision_mode,
+            "threshold_used": gate.threshold_used,
         }

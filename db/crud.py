@@ -644,12 +644,20 @@ def set_calibration_config(project_id: str, config: Optional[dict]) -> None:
     conn.close()
 
 
-def insert_embedding_baseline(project_id: str, modality: str, embeddings, model_name: str, max_reference_samples: int = 3000):
+def insert_embedding_baseline(
+    project_id: str, modality: str, embeddings, model_name: str, max_reference_samples: int = 3000,
+    calibration_config: Optional[dict] = "__UNSET__",
+):
     """
     Stores a text/image baseline as raw reference embeddings, capped at
     max_reference_samples, so the Domain Classifier Test has real vectors
     to retrain against on every /analyze call (mirrors how DistributionDetector
     re-fits from raw arrays for tabular baselines).
+
+    calibration_config: Step 2 (d), 2026-10-04 -- same "__UNSET__"
+    preserve-existing-value sentinel as insert_baseline's. Explicit value
+    (or None, to deliberately clear it) changes it; omitted leaves
+    whatever the project already has untouched across a re-fit.
     """
     embeddings_list = np.asarray(embeddings)
     if len(embeddings_list) > max_reference_samples:
@@ -657,11 +665,12 @@ def insert_embedding_baseline(project_id: str, modality: str, embeddings, model_
         idx = rng.choice(len(embeddings_list), size=max_reference_samples, replace=False)
         embeddings_list = embeddings_list[idx]
 
-    # Preserve any existing calibration_config -- INSERT OR REPLACE deletes
-    # and re-inserts the row, which would otherwise silently wipe it back to
-    # NULL on every re-fit (verified in db/crud.py's insert_baseline).
-    existing = get_baseline(project_id)
-    calibration_config = existing["calibration_config"] if existing else None
+    # INSERT OR REPLACE deletes and re-inserts the row, which would
+    # otherwise silently wipe calibration_config back to NULL on every
+    # re-fit (verified in db/crud.py's insert_baseline) unless preserved.
+    if calibration_config == "__UNSET__":
+        existing = get_baseline(project_id)
+        calibration_config = existing["calibration_config"] if existing else None
 
     conn = get_connection()
     cursor = conn.cursor()

@@ -1317,12 +1317,15 @@ def fit_text_baseline(project_id: str, request: FitTextBaselineRequest, client: 
     except BAD_INPUT_EXCEPTIONS as e:
         raise HTTPException(status_code=400, detail=f"Could not embed reference_texts: {e}")
 
-    crud.insert_embedding_baseline(
+    insert_kwargs = dict(
         project_id=client["internal_project_id"],
         modality="text",
         embeddings=embeddings,
         model_name=TextAdapter.model_name,
     )
+    if request.calibration_config is not None:
+        insert_kwargs["calibration_config"] = request.calibration_config
+    crud.insert_embedding_baseline(**insert_kwargs)
     crud.create_project(client["internal_project_id"], f"Project {project_id}", client["email"])
     crud.archive_baseline_version(client["internal_project_id"])  # Step 5 item 5
 
@@ -1349,9 +1352,12 @@ def analyze_text_batch(
 
     validate_min_samples(len(request.production_texts), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "production text")
 
+    calibration_config = CalibrationConfig.from_dict(state.get("calibration_config"))
     try:
         cur_embeddings = TextAdapter().transform(request.production_texts)
-        result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+        result = EmbeddingDriftDetector().analyze(
+            state["embedding_reference"], cur_embeddings, calibration_config=calibration_config,
+        )
     except BAD_INPUT_EXCEPTIONS as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1384,12 +1390,15 @@ def fit_image_baseline(project_id: str, request: FitImageBaselineRequest, client
     except BAD_INPUT_EXCEPTIONS as e:
         raise HTTPException(status_code=400, detail=f"Could not decode reference_images: {e}")
 
-    crud.insert_embedding_baseline(
+    insert_kwargs = dict(
         project_id=client["internal_project_id"],
         modality="image",
         embeddings=embeddings,
         model_name=ImageAdapter.model_name,
     )
+    if request.calibration_config is not None:
+        insert_kwargs["calibration_config"] = request.calibration_config
+    crud.insert_embedding_baseline(**insert_kwargs)
     crud.create_project(client["internal_project_id"], f"Project {project_id}", client["email"])
     crud.archive_baseline_version(client["internal_project_id"])  # Step 5 item 5
 
@@ -1416,9 +1425,12 @@ def analyze_image_batch(
 
     validate_min_samples(len(request.production_images), HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES, "production image")
 
+    calibration_config = CalibrationConfig.from_dict(state.get("calibration_config"))
     try:
         cur_embeddings = ImageAdapter().transform(request.production_images)
-        result = EmbeddingDriftDetector().analyze(state["embedding_reference"], cur_embeddings)
+        result = EmbeddingDriftDetector().analyze(
+            state["embedding_reference"], cur_embeddings, calibration_config=calibration_config,
+        )
     except BAD_INPUT_EXCEPTIONS as e:
         raise HTTPException(status_code=400, detail=str(e))
 
