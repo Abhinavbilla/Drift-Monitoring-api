@@ -8,6 +8,69 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Step 5 Part 2 (user, 2026-10-04) — SCOPED, NOT STARTED.** Webhooks for
+drift alerts. Full scope, decisions already made (ask-first items
+resolved below, not re-askable):
+
+- **Data model:** new `webhooks` table (`id, project, url, secret,
+  event_filter JSON, enabled, created_at`) -- one project can register
+  several. `secret` generated server-side like a PAT, returned once at
+  creation, never retrievable again. New `webhook_deliveries` table
+  (`id, webhook_id, event_id, ts, attempt_number, status_code, success,
+  response_snippet, next_retry_at`) for visibility into whether
+  deliveries actually land, matching the existing schema_report/
+  cleaning_summary "never fail silently" discipline.
+- **Trigger: `alert_events` transitions, `opened` + `resolved` only by
+  default** (user decision, 2026-10-04) -- the two moments someone needs
+  to act on. `still_open` is opt-in per webhook via `event_filter`, so a
+  long sustained incident doesn't fire one webhook per /analyze call.
+  NOT triggered on every alerting batch (unlike the existing email
+  alert) -- that's the whole point of item 6's state machine.
+- **Delivery: durable queue** (user decision, 2026-10-04, over a
+  simpler in-process-retry-only option) -- a failed attempt gets a
+  `next_retry_at`; a lightweight asyncio loop started in main.py's
+  `lifespan` sweeps for due retries independently of any single
+  request, surviving a process restart mid-backoff. This is new
+  standing infrastructure (a background loop running for the life of
+  the process) -- first of its kind in this codebase; no existing task
+  queue (Celery/Redis/APScheduler) to build on, so it's hand-rolled on
+  top of SQLite + asyncio only. Exponential backoff (~1s, 4s, 16s,
+  capped), give up and log failure after N attempts (propose N=5 and
+  ask before finalizing, or default to 5 and note it's adjustable).
+- **Signature:** Stripe-style `X-Drift-Signature-256: sha256=<hmac-
+  sha256(secret, raw_body)>` over the exact raw response bytes.
+  Payload: `event` (`alert.opened`/`alert.resolved`), `project_id`
+  (public), `baseline_version`, `ts`, `alert_state`, `sustained_alert`,
+  `windows_considered`, `feature_metrics` (statistics only, same shape
+  already returned by /analyze -- no raw rows, per the standing rule).
+- **Security: SSRF guard is NOT optional.** At webhook registration,
+  resolve the hostname and reject loopback/private/link-local ranges
+  and cloud metadata IPs (`169.254.169.254` etc.) -- a feature that
+  POSTs server-signed data to an arbitrary user-supplied URL is an SSRF
+  vector by default; this must be built in from the start, not added
+  later.
+- **Endpoints:** `POST /webhooks/{project_id}` (register, returns
+  secret once), `GET /webhooks/{project_id}` (list, no secret),
+  `DELETE /webhooks/{project_id}/{webhook_id}`. Two-user isolation test
+  on each, per the standing rule. A `GET .../deliveries` visibility
+  endpoint and a manual "send test event" endpoint are natural
+  follow-ups, not required for the first pass -- ask before adding.
+
+Open item still needing a decision before/at implementation time: max
+retry attempts before giving up (proposed N=5, not yet confirmed) and
+the sweep loop's polling interval (proposed 30s). Resolve both at build
+time via the same ask-first discipline as every other default in this
+project, unless the user says to just pick sensible numbers and go.
+
+Ground rules carried over unchanged from Part 1 (reaffirmed, still in
+force): no fabricated numbers, no regressions, additive API changes,
+self-healing migrations, ask before changing any default, commit per
+logical change, don't push without being asked, no new Streamlit UI, no
+raw rows or tokens in history/logs/deliveries, every new endpoint gets a
+two-user isolation test.
+
+---
+
 **Step 5 Part 1 (user, 2026-10-01) — DONE, all 8 items (0-7).** Ground rules
 (unchanged, reaffirmed): no fabricated numbers, no regressions, additive
 API changes, self-healing migrations, ask before changing any default,
