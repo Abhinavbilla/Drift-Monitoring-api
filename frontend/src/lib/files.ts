@@ -15,6 +15,48 @@ export async function filesToBase64(files: File[]): Promise<string[]> {
   return Promise.all(files.map(fileToBase64));
 }
 
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|bmp|webp|tiff?)$/i;
+const MAX_ZIP_IMAGES = 2000;
+
+/** Like filesToBase64, but any .zip in `files` is unpacked in the browser
+ * and each image inside it is included individually. Non-image entries,
+ * directories, and OS junk (__MACOSX/, dotfiles) are skipped. Loose image
+ * files and zips can be mixed. Throws a readable error for a zip with no
+ * images or more than MAX_ZIP_IMAGES, since the whole archive is held in
+ * memory. */
+export async function imageFilesToBase64(files: File[]): Promise<string[]> {
+  const { default: JSZip } = await import("jszip");
+  const out: string[] = [];
+  for (const file of files) {
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      out.push(await fileToBase64(file));
+      continue;
+    }
+    let zip;
+    try {
+      zip = await JSZip.loadAsync(file);
+    } catch {
+      throw new Error(`${file.name} could not be read as a zip file.`);
+    }
+    const entries = Object.values(zip.files).filter((entry) => {
+      if (entry.dir) return false;
+      const parts = entry.name.split("/");
+      if (parts[0] === "__MACOSX" || parts.some((p) => p.startsWith("."))) return false;
+      return IMAGE_EXTENSIONS.test(entry.name);
+    });
+    if (entries.length === 0) {
+      throw new Error(`${file.name} contains no images (looked for jpg, png, gif, bmp, webp, tiff).`);
+    }
+    if (out.length + entries.length > MAX_ZIP_IMAGES) {
+      throw new Error(`Too many images (over ${MAX_ZIP_IMAGES}). Split them into smaller uploads.`);
+    }
+    for (const entry of entries) {
+      out.push(await entry.async("base64"));
+    }
+  }
+  return out;
+}
+
 export function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

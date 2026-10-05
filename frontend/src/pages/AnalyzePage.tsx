@@ -5,7 +5,7 @@ import { AnalyzeResultPanel } from "../components/AnalyzeResultPanel";
 import { Button, Card, ErrorBanner, Field, FileInput, PageHeader, Tabs, TextArea, TextInput } from "../components/ui";
 import { api, ApiError } from "../lib/api";
 import { TABULAR_ACCEPT, TABULAR_FORMATS_HINT } from "../lib/constants";
-import { filesToBase64 } from "../lib/files";
+import { imageFilesToBase64 } from "../lib/files";
 import type { AnalyzeResponse } from "../lib/types";
 
 type Modality = "tabular" | "text" | "image" | "joint";
@@ -48,7 +48,7 @@ export function AnalyzePage() {
 
   const imageMutation = useMutation({
     mutationFn: async () => {
-      const b64 = await filesToBase64(imageFiles);
+      const b64 = await imageFilesToBase64(imageFiles);
       return api.analyzeImage(projectId, b64);
     },
     onSuccess,
@@ -130,8 +130,8 @@ export function AnalyzePage() {
 
         {modality === "image" && (
           <>
-            <Field label="Production images">
-              <FileInput accept="image/*" multiple files={imageFiles} onFiles={setImageFiles} />
+            <Field label="Production images" hint="Image files, or a .zip of images.">
+              <FileInput accept="image/*,.zip" multiple files={imageFiles} onFiles={setImageFiles} />
             </Field>
             <Button onClick={() => imageMutation.mutate()} disabled={imageFiles.length === 0 || imageMutation.isPending}>
               {imageMutation.isPending ? "Analyzing..." : "Run Analysis"}

@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Button, Card, ErrorBanner, Field, FileInput, InfoPanel, PageHeader, SuccessBanner, Tabs, TextArea } from "../components/ui";
 import { api, ApiError } from "../lib/api";
 import { TABULAR_ACCEPT, TABULAR_FORMATS_HINT } from "../lib/constants";
-import { filesToBase64, parseJointRecordsFile, parseTextSamplesFile } from "../lib/files";
+import { imageFilesToBase64, parseJointRecordsFile, parseTextSamplesFile } from "../lib/files";
 import type { FitResponse } from "../lib/types";
 
 type Modality = "tabular" | "text" | "image" | "joint";
@@ -182,7 +182,7 @@ export function FitPage() {
 
   const imageMutation = useMutation({
     mutationFn: async () => {
-      const b64 = await filesToBase64(imageFiles);
+      const b64 = await imageFilesToBase64(imageFiles);
       return api.fitImage(projectId, b64, imageCalibrated ? { decision_mode: "calibrated" } : undefined);
     },
     onSuccess,
@@ -302,8 +302,8 @@ export function FitPage() {
 
           {modality === "image" && (
             <div className="space-y-4">
-              <Field label="Reference images" hint="JPEG, PNG, or most other common formats. Pick a batch of 40 or more for a stable baseline.">
-                <FileInput accept="image/*" multiple files={imageFiles} onFiles={setImageFiles} />
+              <Field label="Reference images" hint="JPEG, PNG, or most other common formats -- or a .zip of images. Pick a batch of 40 or more for a stable baseline.">
+                <FileInput accept="image/*,.zip" multiple files={imageFiles} onFiles={setImageFiles} />
               </Field>
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input type="checkbox" checked={imageCalibrated} onChange={(e) => setImageCalibrated(e.target.checked)} />
