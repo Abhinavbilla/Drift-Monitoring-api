@@ -48,7 +48,7 @@ class TestMixedTypeColumnCoercion:
         'numpy.str_' and 'numpy.str_' -- np.percentile on a mixed list
         because classification only checked the first value's type.
         """
-        fences, cleaning_summary = _calculate_boundaries(
+        fences, cleaning_summary, _ = _calculate_boundaries(
             {"mixed_col": [5.2, 6.1, 7.3, 8.0, 9.1, 10.4, 11.0, 12.5, 13.2, "N/A"]}
         )
         assert fences[0]["type"] == "continuous"
@@ -60,7 +60,7 @@ class TestMixedTypeColumnCoercion:
         numeric column down the categorical path instead (no crash, but
         wrong) -- order shouldn't change the classification.
         """
-        fences, cleaning_summary = _calculate_boundaries(
+        fences, cleaning_summary, _ = _calculate_boundaries(
             {"mixed_col": ["N/A", 5.2, 6.1, 7.3, 8.0, 9.1, 10.4, 11.0, 12.5, 13.2]}
         )
         assert fences[0]["type"] == "continuous"
@@ -70,7 +70,7 @@ class TestMixedTypeColumnCoercion:
         """A column that's genuinely categorical (below the coercion
         threshold) must not be force-coerced just because a few cells
         happen to parse as numbers."""
-        fences, cleaning_summary = _calculate_boundaries(
+        fences, cleaning_summary, _ = _calculate_boundaries(
             {"cat_col": ["red", "blue", "green", "red", "5"]}
         )
         assert fences[0]["type"] == "categorical"
@@ -85,13 +85,14 @@ class TestMixedTypeColumnCoercion:
         compared numpy-upcasted-to-string values (a wrong answer, not a
         crash -- the more dangerous half of this gap).
         """
-        cleaning_summary = insert_baseline(
+        cleaning_summary, excluded_columns = insert_baseline(
             project_id="test_ingestion_robustness_cleaning_propagation",
             feature_types={"mixed_col": "continuous"},
             reference_data={"mixed_col": [5.2, 6.1, 7.3, 8.0, 9.1, 10.4, 11.0, 12.5, 13.2, "N/A"]},
             categorical_data={},
         )
         assert cleaning_summary["mixed_col"]["dropped_non_numeric"] == 1
+        assert excluded_columns == {}
 
         state = get_baseline("test_ingestion_robustness_cleaning_propagation")
         stored = state["reference_data"]["mixed_col"]
@@ -103,15 +104,22 @@ class TestMixedTypeColumnCoercion:
 # Gap 7: unbounded categorical cardinality
 # ---------------------------------------------------------
 class TestCategoricalCardinalityCap:
-    def test_high_cardinality_categorical_column_rejected(self):
+    def test_high_cardinality_categorical_column_excluded_not_rejected(self):
+        """Changed: used to abort the WHOLE fit with a ValueError, which
+        meant one bad column blocked every other column too. Now it's
+        excluded (reported), same as an empty or all-dropped column
+        already was -- the rest of the fit still succeeds."""
         many_values = [f"id_{i}" for i in range(MAX_CATEGORICAL_CARDINALITY + 1)]
-        with pytest.raises(ValueError, match="exceeding"):
-            _calculate_boundaries({"free_text_id": many_values})
+        fences, _, excluded_columns = _calculate_boundaries({"free_text_id": many_values})
+        assert fences == []
+        assert "free_text_id" in excluded_columns
+        assert "over the" in excluded_columns["free_text_id"]
 
     def test_categorical_column_at_the_cap_is_accepted(self):
         values = [f"id_{i}" for i in range(MAX_CATEGORICAL_CARDINALITY)]
-        fences, _ = _calculate_boundaries({"cat_col": values})
+        fences, _, excluded_columns = _calculate_boundaries({"cat_col": values})
         assert fences[0]["type"] == "categorical"
+        assert excluded_columns == {}
 
 
 # ---------------------------------------------------------
@@ -212,7 +220,10 @@ class TestEndpointBoundaryErrors:
             "/fit/test_ingestion_robustness_tabular_cleaning_summary",
             json={
                 "reference_data": {
-                    "price": [5.2, 6.1, 7.3, 8.0, 9.4, 10.1, 11.7, 12.3, 13.9, "N/A"] * 5,
+                    # Distinct values (not a repeated block): /fit now drops
+                    # exact duplicate rows, which would collapse a repeated
+                    # list and shrink the dropped-cell count.
+                    "price": [5.0 + i * 0.37 for i in range(45)] + [f"N/A-{i}" for i in range(5)],
                 },
                 "categorical_data": {},
             },

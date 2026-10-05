@@ -8,6 +8,16 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Tabular /fit cleaning improvements (2026-10-05) — DONE.** Categorical
+values are whitespace-stripped (case untouched); a column over the
+categorical cardinality cap is now excluded instead of aborting the whole
+fit; exact duplicate rows are dropped (profiling runs BEFORE dedup so a
+repeating cycle isn't mistaken for a monotonic index). `/fit` responses
+gain `excluded_columns` and `duplicate_rows_dropped`;
+`crud.insert_baseline` / `_calculate_boundaries` return an extra
+excluded-columns value. New `tests/test_tabular_cleaning_improvements.py`.
+Full suite green (315). Next is still Step 2 (e), below.
+
 **Step 2 (d) (user, 2026-10-04) — DONE.** Key finding:
 `drift/embedding_detector.py` (text/image/joint `/analyze`) had NO
 calibration support before this -- single `AUC > 0.65` legacy cutoff,

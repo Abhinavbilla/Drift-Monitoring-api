@@ -124,6 +124,18 @@ class FitBaselineResponse(BaseModel):
         description="Step 5 item 5: the baseline version this /fit call just created. Old versions "
                     "are kept, not overwritten -- see GET /baselines/{project_id}."
     )
+    excluded_columns: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Columns that were in the submitted data but are NOT being monitored at all, "
+                    "mapped to why: empty, fully non-numeric after cleaning, a constant or "
+                    "monotonic/index-like sequence, or over the categorical cardinality cap. Always "
+                    "reported here instead of silently vanishing from inferred_feature_types."
+    )
+    duplicate_rows_dropped: int = Field(
+        default=0,
+        description="Exact duplicate rows removed before fitting -- a duplicated row would otherwise "
+                    "inflate how often its values appear without adding real information."
+    )
 
 
 

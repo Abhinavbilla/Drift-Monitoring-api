@@ -615,7 +615,52 @@ def profile_dataset(request: ProfileRequest, client: dict = Depends(verify_acces
     
 
     #endpoint 1 fit:
-    
+
+def _split_out_high_cardinality_columns(
+    categorical_features: Dict[str, list], inferred_feature_types: Dict[str, str],
+) -> Dict[str, str]:
+    """A categorical column over db.crud.MAX_CATEGORICAL_CARDINALITY unique
+    values (after stripping whitespace, same normalization insert_baseline
+    applies before storage) is removed from BOTH dicts in place, not just
+    reported -- removing it only from the IQR-fence computation
+    (db/crud.py's _calculate_boundaries) would leave it in feature_types,
+    and DistributionDetector.fit_baseline takes feature_types directly,
+    so /analyze would still run PSI against a column we just said
+    shouldn't be monitored. Returns {column: reason} for the ones removed;
+    _calculate_boundaries's own check becomes a redundant safety net for
+    any OTHER caller of crud.insert_baseline that skips this step.
+
+    Skips a column whose values successfully coerce to numeric (via the
+    SAME coerce_numeric_column _calculate_boundaries itself uses) -- that
+    function classifies continuous-vs-categorical by attempting numeric
+    coercion FIRST, regardless of what dict a column arrived in, so an
+    explicit feature_types={"x": "categorical"} override on an otherwise
+    numeric column is still stored and analyzed as continuous there. The
+    cardinality cap only ever applies to genuinely non-numeric values;
+    checking it against a column _calculate_boundaries will treat as
+    continuous anyway would reject columns that were never actually
+    going to be high-cardinality categorical data (verified against
+    tests/test_fit_feature_types.py's override case, which reproduced
+    exactly this before the fix)."""
+    excluded: Dict[str, str] = {}
+    for col in list(categorical_features.keys()):
+        values = categorical_features[col]
+        non_null = [v for v in values if v is not None]
+        numeric_values, _ = coerce_numeric_column(non_null) if non_null else (None, 0)
+        if numeric_values is not None:
+            continue  # _calculate_boundaries will treat this as continuous regardless of the label
+        normalized = {v.strip() if isinstance(v, str) else v for v in non_null}
+        if len(normalized) > crud.MAX_CATEGORICAL_CARDINALITY:
+            excluded[col] = (
+                f"Has {len(normalized)} unique values, over the {crud.MAX_CATEGORICAL_CARDINALITY}-value "
+                f"cap for categorical fields -- likely a free-text or ID field that shouldn't be "
+                f"monitored as categorical."
+            )
+            del categorical_features[col]
+            inferred_feature_types.pop(col, None)
+    return excluded
+
+
 @app.post("/fit/{project_id}", response_model=FitBaselineResponse, tags=["Machine Learning"])
 def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dict = Depends(verify_project_access)):
     """
@@ -663,17 +708,36 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     
     # 4. Combine for profiling
     combined_df = pd.concat([continuous_df, categorical_df], axis=1) if len(categorical_df) > 0 else continuous_df
-    
-    # 5. Get detailed profiles from the generalised engine
+
+    # 5. Get detailed profiles from the generalised engine -- BEFORE
+    # deduplicating. A column that cycles through a few repeating values
+    # (e.g. [100,200,300,400,500] * 20) is correctly NOT monotonic in its
+    # original form, but deduplicating first would collapse it down to
+    # just its unique values in first-occurrence order, which CAN look
+    # like a monotonic sequence by accident -- profiling the real data
+    # first avoids manufacturing a false "likely a row index" verdict
+    # (reproduced in tests/test_cross_user_isolation.py's FIT_PROBE case).
     detailed_profiles = profile_columns(combined_df)
+
+    # 5b. Drop exact duplicate rows before fitting (not before profiling,
+    # see above) -- a duplicated row artificially inflates how often its
+    # values appear, which skews fences and categorical frequencies
+    # without adding any real information. Reported in the response,
+    # not silent.
+    rows_before_dedup = len(combined_df)
+    combined_df = combined_df.drop_duplicates().reset_index(drop=True)
+    duplicate_rows_dropped = rows_before_dedup - len(combined_df)
 
     # 6. ADAPTER: Route each column to the correct monitoring engine
     inferred_feature_types = {}
+    profiler_excluded_columns: Dict[str, str] = {}
     for p in detailed_profiles:
         if p["monitor"] is True:
             inferred_feature_types[p["name"]] = "continuous"
         elif p["monitor"] == "Categorical":
             inferred_feature_types[p["name"]] = "categorical"
+        elif p.get("reason"):
+            profiler_excluded_columns[p["name"]] = p["reason"]
 
     # 6b. Explicit caller overrides (2026-09-30 hardening pass, item 3):
     # feature_types={col: "continuous"|"categorical"} lets a caller pin a
@@ -692,6 +756,7 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
                     f"or categorical_data."
                 )
             inferred_feature_types[col] = ftype
+            profiler_excluded_columns.pop(col, None)  # explicit override wins over the profiler's exclusion
 
     # 7. Split reference data by type. Looked up from a dict merging BOTH
     # reference_data and categorical_data (2026-09-30 hardening pass,
@@ -702,7 +767,12 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     # override) decided was silently dropped from the stored baseline
     # entirely, with no error. Merging first means a column is found
     # regardless of which dict the caller put it in.
-    raw_values_by_col = {**dict(request.reference_data), **categorical_dict}
+    #
+    # Reads from combined_df (NOT the original request dicts) so the
+    # deduplication above actually reaches storage -- pulling from the
+    # raw request here would silently undo it, since combined_df is the
+    # only place the dropped-duplicate-rows version of the data exists.
+    raw_values_by_col = {col: combined_df[col].tolist() for col in combined_df.columns}
     continuous_features = {
         k: raw_values_by_col[k] for k in inferred_feature_types
         if inferred_feature_types[k] == "continuous" and k in raw_values_by_col
@@ -721,6 +791,12 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
             f"Column(s) {lost_cols} were classified but have no submitted values in either "
             f"reference_data or categorical_data -- this should not happen; please report it."
         )
+
+    # 7b. A categorical column over the cardinality cap is excluded (not
+    # a whole-request failure) -- see _split_out_high_cardinality_columns.
+    profiler_excluded_columns.update(
+        _split_out_high_cardinality_columns(categorical_features, inferred_feature_types)
+    )
 
     # 8. Resolve the calibration config.
     # - Caller provided one explicitly (even {}): resolve and store it,
@@ -742,6 +818,7 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
         project_id, inferred_feature_types, continuous_features, categorical_features,
         combined_df, request.calibration_config, client, request.schema_policy,
         request.model_version_label, request.alert_policy,
+        profiler_excluded_columns=profiler_excluded_columns, duplicate_rows_dropped=duplicate_rows_dropped,
     )
 
 
@@ -752,6 +829,8 @@ def _resolve_and_persist_fit(
     schema_policy_request: Optional[Dict[str, str]] = None,
     model_version_label: Optional[str] = None,
     alert_policy_request: Optional[Dict[str, int]] = None,
+    profiler_excluded_columns: Optional[Dict[str, str]] = None,
+    duplicate_rows_dropped: int = 0,
 ) -> FitBaselineResponse:
     """Shared tail of /fit/{project_id} (JSON body) and
     /fit/{project_id}/upload (multipart file) -- both endpoints build
@@ -796,7 +875,8 @@ def _resolve_and_persist_fit(
         insert_kwargs["calibration_config"] = resolved_calibration_config
     if schema_policy_request is not None:
         insert_kwargs["schema_policy"] = schema_policy_request
-    cleaning_summary = crud.insert_baseline(**insert_kwargs)
+    cleaning_summary, crud_excluded_columns = crud.insert_baseline(**insert_kwargs)
+    excluded_columns = {**(profiler_excluded_columns or {}), **crud_excluded_columns}
     crud.create_project(internal_id, f"Project {project_id}", client["email"])
     if alert_policy_request is not None:
         crud.set_alert_policy(internal_id, alert_policy_request["k"], alert_policy_request["m"])
@@ -850,9 +930,14 @@ def _resolve_and_persist_fit(
     sample_warning = warn_if_below_recommended_samples(len(combined_df), label="rows")
     if sample_warning:
         message += f" Warning: {sample_warning}"
+    if duplicate_rows_dropped:
+        message += f" Removed {duplicate_rows_dropped} exact duplicate row(s) before fitting."
     if cleaning_summary:
         dropped_note = ", ".join(f"{col}: {info['dropped_non_numeric']} dropped" for col, info in cleaning_summary.items())
         message += f" Note: non-numeric values were dropped during cleaning ({dropped_note})."
+    if excluded_columns:
+        excluded_note = ", ".join(f"{col} ({reason})" for col, reason in excluded_columns.items())
+        message += f" Not monitoring: {excluded_note}"
     too_small = [f for f, info in calibration_info.items() if info.reference_too_small_for_floor]
     if too_small:
         message += (
@@ -879,6 +964,8 @@ def _resolve_and_persist_fit(
         cleaning_summary=cleaning_summary,
         calibration_info=calibration_info,
         version=new_version,
+        excluded_columns=excluded_columns,
+        duplicate_rows_dropped=duplicate_rows_dropped,
     )
 MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024  # 200MB
 
@@ -921,13 +1008,22 @@ async def fit_model_baseline_upload(
     if combined_df.empty:
         raise ValidationError("Uploaded file parsed to zero rows.")
 
+    # Profile BEFORE deduplicating -- see the matching comment in
+    # fit_model_baseline (JSON endpoint) for why order here matters.
     detailed_profiles = profile_columns(combined_df)
+
+    rows_before_dedup = len(combined_df)
+    combined_df = combined_df.drop_duplicates().reset_index(drop=True)
+    duplicate_rows_dropped = rows_before_dedup - len(combined_df)
     inferred_feature_types = {}
+    profiler_excluded_columns: Dict[str, str] = {}
     for p in detailed_profiles:
         if p["monitor"] is True:
             inferred_feature_types[p["name"]] = "continuous"
         elif p["monitor"] == "Categorical":
             inferred_feature_types[p["name"]] = "categorical"
+        elif p.get("reason"):
+            profiler_excluded_columns[p["name"]] = p["reason"]
 
     if feature_types:
         try:
@@ -942,6 +1038,7 @@ async def fit_model_baseline_upload(
             if col not in combined_df.columns:
                 raise ValidationError(f"feature_types names column '{col}', which is not present in the uploaded file.")
             inferred_feature_types[col] = ftype
+            profiler_excluded_columns.pop(col, None)
 
     # Split from the (possibly overridden) classification of the combined
     # frame itself -- so every classified column lands somewhere,
@@ -954,6 +1051,9 @@ async def fit_model_baseline_upload(
         col: [str(v) for v in combined_df[col].tolist()]
         for col, ftype in inferred_feature_types.items() if ftype == "categorical"
     }
+    profiler_excluded_columns.update(
+        _split_out_high_cardinality_columns(categorical_features, inferred_feature_types)
+    )
 
     parsed_calibration_config = None
     if calibration_config:
@@ -982,6 +1082,7 @@ async def fit_model_baseline_upload(
         project_id, inferred_feature_types, continuous_features, categorical_features,
         combined_df, parsed_calibration_config, client, parsed_schema_policy, model_version_label,
         parsed_alert_policy,
+        profiler_excluded_columns=profiler_excluded_columns, duplicate_rows_dropped=duplicate_rows_dropped,
     )
 
 

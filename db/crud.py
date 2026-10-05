@@ -264,7 +264,9 @@ def create_project(project_id: str, name: str, owner_email: str):
     conn.commit()
     conn.close()
 
-def _calculate_boundaries(reference_data: Dict[str, List[Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, int]]]:
+def _calculate_boundaries(
+    reference_data: Dict[str, List[Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, int]], Dict[str, str]]:
     """
     Calculates Q1/Q3 for numbers, and Allowed Sets for categorical strings.
 
@@ -279,15 +281,32 @@ def _calculate_boundaries(reference_data: Dict[str, List[Any]]) -> Tuple[List[Di
     and its actual cleaned values can never disagree, and unconvertible
     cells are dropped with a reported count instead of crashing.
 
-    Returns (fences, cleaning_summary) -- cleaning_summary reports how many
-    values were dropped per column, so silent data loss stays visible.
+    Categorical values are stripped of leading/trailing whitespace before
+    counting uniques -- " USA" and "USA" are almost never meant to be
+    different categories, just inconsistent export formatting. Case is
+    left alone (not lowercased): unlike whitespace, a case difference can
+    be a real, intended distinction, so this isn't collapsed by default.
+
+    A column that exceeds the categorical cardinality cap (likely a
+    free-text or ID field) no longer aborts the WHOLE fit -- it's
+    excluded, like an empty or all-dropped column already was, and
+    reported in the third return value instead of raised as an error
+    that would block every other column too.
+
+    Returns (fences, cleaning_summary, excluded_columns).
+    cleaning_summary reports how many values were dropped per column, so
+    silent data loss stays visible. excluded_columns maps a column name
+    to why it isn't being monitored at all (empty, fully non-numeric
+    after coercion, or over the categorical cardinality cap).
     """
     fences = []
     cleaning_summary: Dict[str, Dict[str, int]] = {}
+    excluded_columns: Dict[str, str] = {}
 
     for feature, data in reference_data.items():
         clean_data = [x for x in data if x is not None]
         if not clean_data:
+            excluded_columns[feature] = "Column is empty (every value was null)."
             continue
 
         numeric_values, dropped = coerce_numeric_column(clean_data)
@@ -295,6 +314,7 @@ def _calculate_boundaries(reference_data: Dict[str, List[Any]]) -> Tuple[List[Di
         # 1. NUMERICAL DATA (coercion succeeded above threshold)
         if numeric_values is not None:
             if not numeric_values:
+                excluded_columns[feature] = "Every value in this numeric column was dropped during cleaning."
                 continue
             q1 = float(np.percentile(numeric_values, 25))
             q3 = float(np.percentile(numeric_values, 75))
@@ -309,20 +329,22 @@ def _calculate_boundaries(reference_data: Dict[str, List[Any]]) -> Tuple[List[Di
 
         # 2. CATEGORICAL DATA (everything else)
         else:
-            unique_values = list(set(clean_data))
+            normalized = [v.strip() if isinstance(v, str) else v for v in clean_data]
+            unique_values = list(set(normalized))
             if len(unique_values) > MAX_CATEGORICAL_CARDINALITY:
-                raise ValueError(
-                    f"Column '{feature}' has {len(unique_values)} unique values, exceeding the "
-                    f"{MAX_CATEGORICAL_CARDINALITY}-value cap for categorical fields — likely a "
-                    f"high-cardinality/free-text/ID field that shouldn't be monitored as categorical."
+                excluded_columns[feature] = (
+                    f"Has {len(unique_values)} unique values, over the {MAX_CATEGORICAL_CARDINALITY}-value "
+                    f"cap for categorical fields -- likely a free-text or ID field that shouldn't be "
+                    f"monitored as categorical."
                 )
+                continue
             fences.append({
                 "feature_name": feature,
                 "type": "categorical",
                 "allowed_values": unique_values
             })
 
-    return fences, cleaning_summary
+    return fences, cleaning_summary, excluded_columns
 
 def insert_baseline(
     project_id: str,
@@ -331,7 +353,7 @@ def insert_baseline(
     categorical_data: Optional[dict] = None,
     calibration_config: Optional[dict] = "__UNSET__",
     schema_policy: Optional[dict] = "__UNSET__",
-) -> Dict[str, Dict[str, int]]:
+) -> Tuple[Dict[str, Dict[str, int]], Dict[str, str]]:
     """
     Stores all raw reference data (continuous + categorical) in `reference_data` column.
     This ensures batch drift detection (PSI/KS) can access the full distribution.
@@ -346,9 +368,13 @@ def insert_baseline(
     dict (or None, to deliberately clear it) to actually change the config
     as part of this call.
 
-    Returns a cleaning_summary ({field: {"dropped_non_numeric": n}}) for any
-    continuous column that had unconvertible cells dropped, so callers can
-    surface that data loss instead of it being silent.
+    Returns (cleaning_summary, excluded_columns). cleaning_summary is
+    {field: {"dropped_non_numeric": n}} for any continuous column that had
+    unconvertible cells dropped. excluded_columns maps a column name to a
+    human-readable reason it isn't being monitored at all (empty, fully
+    non-numeric, or over the categorical cardinality cap) -- see
+    _calculate_boundaries. Both exist so callers can surface this instead
+    of it being silent.
     """
     if calibration_config == "__UNSET__":
         existing = get_baseline(project_id)
@@ -387,10 +413,19 @@ def insert_baseline(
                 combined_raw_data[feature] = numeric_values
                 if dropped:
                     cleaning_summary[feature] = {"dropped_non_numeric": dropped}
+        elif ftype == "categorical" and feature in combined_raw_data:
+            # Strip whitespace here too, in the STORED values -- not just
+            # when computing the allowed_values fence below -- so " USA"
+            # and "USA" agree as one category everywhere, not just in the
+            # fence. Case is deliberately left alone (see
+            # _calculate_boundaries' docstring).
+            combined_raw_data[feature] = [
+                v.strip() if isinstance(v, str) else v for v in combined_raw_data[feature]
+            ]
 
     # Calculate IQR fences (for continuous) AND allowed values (for categorical)
     # This uses the now-cleaned merged data so fences and the stored blob agree.
-    fences, fence_cleaning_summary = _calculate_boundaries(combined_raw_data)
+    fences, fence_cleaning_summary, excluded_columns = _calculate_boundaries(combined_raw_data)
     for feature, info in fence_cleaning_summary.items():
         cleaning_summary.setdefault(feature, {}).update(info)
 
@@ -428,7 +463,7 @@ def insert_baseline(
     conn.commit()
     conn.close()
 
-    return cleaning_summary
+    return cleaning_summary, excluded_columns
 
 def get_baseline(project_id: str) -> dict:
     """Retrieves the model state and parses the JSON back into Python dictionaries."""
