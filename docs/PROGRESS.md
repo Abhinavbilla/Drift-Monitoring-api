@@ -16,7 +16,34 @@ repeating cycle isn't mistaken for a monotonic index). `/fit` responses
 gain `excluded_columns` and `duplicate_rows_dropped`;
 `crud.insert_baseline` / `_calculate_boundaries` return an extra
 excluded-columns value. New `tests/test_tabular_cleaning_improvements.py`.
-Full suite green (315). Next is still Step 2 (e), below.
+Full suite green (315).
+
+**Step 2 (e) (user, 2026-10-05) — DONE (measurement only; NO defaults
+changed).** Text/image Domain Classifier Test validated on PetFinder.my
+with ground truth defined by construction (dogs = reference, cats =
+"different"; labels pre-registered in `scripts/step2e_validate.py`'s
+docstring before any result was seen). Scripts: `step2e_embed_petfinder.py`
+(caches embeddings via the real adapters), `step2e_validate.py`,
+`step2e_report.py`, `step2e_small_batch.py`; outputs in `results/step2e_*`
+(report: `step2e_text_image_report.md`). Full write-up with numbers is in
+the README section "Text/Image Validation (Step 2 e)". Findings:
+- Calibrated at the shipped 0.65 floor made IDENTICAL decisions to legacy
+  on all 12,800 main-run draws (the AUC floor decides, not the p-value).
+- Legacy: false alarms <=2% with a 100+ row reference; recall ~0.68 pooled
+  over 25/50/100% off-population batches (25% mixture caught 0-20%).
+- Calibrated p-values are over-confident on real embeddings (A/A P(p<0.05)
+  above 5% in 15 of 16 cells, up to 14.5%): the null grid is synthetic
+  Gaussian + nearest-neighbor sizes. Lowering the floor to 0.60 raises
+  recall (0.80-0.83) but gives up to ~10% false alarms at a 40-row batch.
+- ~40-sample borderline case: real, but mainly a tiny-REFERENCE problem
+  (20 vs 20: 10%/14% false alarms text/image; 40 vs 40: 6%/4%).
+- Verified: 20/20 sampled draws match the real `analyze()` exactly.
+Decisions left to the user (NOT made): whether to change the text/image
+default decision_mode (evidence says no, yet), the AUC floor, and the
+recommended minimum reference size (currently only a batch minimum of 40
+exists; data suggests a reference of ~100+ matters). Natural follow-up:
+rebuild the DCT null from real embeddings (not synthetic Gaussian) and
+re-run this validation. Joint remains unvalidated.
 
 **Step 2 (d) (user, 2026-10-04) — DONE.** Key finding:
 `drift/embedding_detector.py` (text/image/joint `/analyze`) had NO
@@ -67,12 +94,8 @@ piece, not done by (d) alone.
   online path for its own first-time model download, so forcing offline
   mode there could break a fresh deploy).
 
-**Next: Step 2 (e) — text/image validation under calibrated mode.**
-Step-1/2-style methodology (ground truth, synthetic sensitivity, batch
-classification metrics) against real text/image drift scenarios,
-closing the README's "unverified, not benchmarked" label -- including
-the previously-flagged ~40-sample borderline case (`docs/
-step2_proposal.md`). NOT started -- (d) only built the mechanism.
+**(Superseded 2026-10-05: Step 2 (e) is now DONE -- see the entry at the
+top of this section. The paragraph that was here said it was not started.)**
 
 **Verification**: new `tests/test_dct_calibration.py` (14 tests: exact
 and nearest-neighbor grid lookup, missing-dimension and no-grid-file
