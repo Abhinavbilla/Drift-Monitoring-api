@@ -1,6 +1,6 @@
 # Unified Table Monitoring — Implementation Plan (A–S)
 
-Status: **M1 approved and implemented (2026-10-06). M2–M4 await approval.**
+Status: **M1 and M2 approved and implemented (2026-10-06). M3–M4 await approval.**
 Written 2026-10-06 from the user's specification plus six agreed corrections:
 (1) relationship detectors invariant to marginal drift, (2) batch-size-matched,
 disjoint null distributions, (3) real-embedding nulls for text/image so they can
@@ -269,7 +269,7 @@ Notation: reference R (N rows after cleaning and dedup, capped by a seeded sampl
   - If P(num | cat) is unchanged and only proportions change → the weighted ECDF matches → no signal.
   - If the numeric marginal shifts monotonically for all categories → the PIT absorbs it → no signal.
   - If the categories' relative positions change (e.g. "Beagles became the expensive breed") → signal.
-- **Statistic:** T = Σ_k w_k · D_k, where D_k = KS distance between the PIT scores of category k in R vs B, and w_k = p_R(k) normalized over the tested categories. Weights are fixed from R, so proportion changes don't reweight the statistic.
+- **Statistic (revised in M2):** T = Σ_k w_k · |mean_R(u | k) − mean_B(u | k)|, where u is the **mid-rank** PIT and w_k = p_R(k) normalized over the tested categories. The original per-category KS distance on PIT values was dropped after the M2 validation showed it breaks under heavy ties: tie groups land on slightly different PIT values in each sample, which inflated the null to around 0.6. Limitation: it tracks each category's relative position, not spread changes within a category. Floor default 0.05.
 - **Category handling:**
   - a category is tested only if it has ≥ 20 rows in both R and B;
   - rarer reference categories are merged into `__other__` (tested if large enough);

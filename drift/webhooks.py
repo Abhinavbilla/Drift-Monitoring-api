@@ -97,8 +97,8 @@ def validate_webhook_url(url: str) -> None:
 
 def _build_payload(event_type: str, project_id: str, baseline_version: int, ts: str,
                     alert_state: str, sustained_alert: bool, windows_considered: int,
-                    feature_metrics: dict) -> dict:
-    return {
+                    feature_metrics: dict, relationship_metrics: Optional[dict] = None) -> dict:
+    payload = {
         "event": f"alert.{event_type}",
         "project_id": project_id,
         "baseline_version": baseline_version,
@@ -108,12 +108,16 @@ def _build_payload(event_type: str, project_id: str, baseline_version: int, ts: 
         "windows_considered": windows_considered,
         "feature_metrics": feature_metrics,
     }
+    if relationship_metrics:  # table projects only; tabular payloads stay unchanged
+        payload["relationship_metrics"] = relationship_metrics
+    return payload
 
 
 def enqueue_deliveries_for_transition(
     internal_project_id: str, public_project_id: str, event_id: Optional[int],
     transition: str, baseline_version: int, ts: str, alert_state: str,
     sustained_alert: bool, windows_considered: int, feature_metrics: dict,
+    relationship_metrics: Optional[dict] = None,
 ) -> None:
     """Called right after an alert_events row is written for an actual
     transition (opened/still_open/resolved). Enqueues one delivery task
@@ -122,7 +126,7 @@ def enqueue_deliveries_for_transition(
     on its very next tick."""
     payload = _build_payload(
         transition, public_project_id, baseline_version, ts,
-        alert_state, sustained_alert, windows_considered, feature_metrics,
+        alert_state, sustained_alert, windows_considered, feature_metrics, relationship_metrics,
     )
     now = datetime.now(timezone.utc).isoformat()
     for webhook in crud.list_webhooks(internal_project_id):

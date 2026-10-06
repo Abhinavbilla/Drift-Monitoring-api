@@ -1269,7 +1269,9 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
                            payload_hash: Optional[str] = None,
                            batch_size: Optional[int] = None,
                            report_kind: str = "tabular",
-                           job_id: Optional[str] = None) -> AnalyzeBatchResponse:
+                           job_id: Optional[str] = None,
+                           extra_family_tests: Optional[List[dict]] = None,
+                           family_null_draws: Optional[int] = None) -> AnalyzeBatchResponse:
     """Shared tail of /analyze/{project_id} (JSON body) and
     /analyze/{project_id}/upload (multipart file) -- both converge on the
     same flat {feature_name: [values...]} shape. project_id is the
@@ -1287,6 +1289,9 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     untouched), extra_issues (schema issues the tabular check can't see,
     severities resolved from the same schema_policy), a payload_hash of the
     uploaded files, the real batch_size, and report_kind/job_id for history.
+    extra_family_tests (relationship tests) join the features' correction
+    family; family_null_draws raises the PSI bootstrap draws so PSI p-values
+    have enough resolution for the larger family.
     background_tasks=None (job thread) sends the drift email inline.
     With no extras this function behaves exactly as before."""
     internal_id = client["internal_project_id"]
@@ -1334,6 +1339,7 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
                 alert_state=None if existing["sustained_alert"] is None else
                             ("open" if existing["sustained_alert"] else "ok"),
                 transition=None,  # a replay never represents a NEW state transition
+                relationship_metrics=existing["relationship_metrics"],
             )
 
     # Step 5 item 4: schema_report (missing/unexpected columns, dtype
@@ -1348,6 +1354,8 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     # CalibrationConfig.from_dict(None) -> legacy -> DistributionDetector's
     # calibrated branch never runs -- byte-identical to pre-Step-2 behavior.
     calibration_config = CalibrationConfig.from_dict(state.get("calibration_config"))
+    if family_null_draws:
+        calibration_config.psi_null_draws = max(calibration_config.psi_null_draws, family_null_draws)
     detector = DistributionDetector(p_value_threshold=0.05, calibration_config=calibration_config)
 
     detector.fit_baseline(
@@ -1355,7 +1363,8 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         feature_types=state["feature_types"]
     )
 
-    report = detector.analyze_production_window(cleaned_production_data)
+    report = detector.analyze_production_window(cleaned_production_data, extra_family_tests)
+    relationship_metrics = report.pop("extra_metrics", {})
 
     if extra_issues:
         policy = _resolve_schema_policy(state.get("schema_policy"))
@@ -1393,6 +1402,7 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         schema_report=schema_report,
         report_kind=report_kind,
         job_id=job_id,
+        relationship_metrics=relationship_metrics,
     )
 
     # Step 5 item 6: alert policy {k, m} (default 1,1 = today's behavior).
@@ -1425,6 +1435,7 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         webhooks.enqueue_deliveries_for_transition(
             internal_id, project_id, event_id, transition, resolved_version, run_ts,
             "open" if sustained_alert else "ok", sustained_alert, windows_considered, report["feature_metrics"],
+            relationship_metrics,
         )
     alert_state = "open" if sustained_alert else "ok"
 
@@ -1457,6 +1468,7 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         windows_considered=windows_considered,
         alert_state=alert_state,
         transition=transition,
+        relationship_metrics=relationship_metrics,
     )
 
 
@@ -1720,6 +1732,7 @@ def analyze_joint_batch(
 # the schema -> fit job -> analyze job(s). Every heavy step is a background
 # job (jobs.py); clients poll GET /jobs/{job_id}.
 MAX_ZIP_UPLOAD_BYTES = int(os.getenv("DRIFT_MAX_ZIP_UPLOAD_BYTES", str(500 * 1024 * 1024)))
+MAX_TABLE_RELATIONSHIPS = 100  # each one joins the Holm family; more means less power per test
 
 
 def _stage_upload(client: dict, file: UploadFile, images: Optional[UploadFile], purpose: str) -> dict:
@@ -1822,6 +1835,19 @@ def fit_table(project_id: str, request: TableFitRequest, client: dict = Depends(
         if c.type == "image" and not stage["zip_blob"] and not (p["proposed_type"] == "image" and p["proposed_monitor"]):
             raise ValidationError(f"Column '{c.name}' is marked image but no image ZIP was uploaded and its values "
                                   f"aren't embedded images.")
+    monitored_types = {c.name: c.type for c in monitored}
+    pairs = set()
+    for r in request.relationships:
+        types = (monitored_types.get(r.col_a), monitored_types.get(r.col_b))
+        if r.col_a == r.col_b or any(t not in ("numeric", "categorical") for t in types):
+            raise ValidationError(f"Relationship {r.col_a} <-> {r.col_b}: both columns must be different, monitored, "
+                                  f"and numeric or categorical (text/image relationships come later).")
+        pair = frozenset((r.col_a, r.col_b))
+        if pair in pairs:
+            raise ValidationError(f"Relationship {r.col_a} <-> {r.col_b} is listed more than once.")
+        pairs.add(pair)
+    if len(pairs) > MAX_TABLE_RELATIONSHIPS:
+        raise ValidationError(f"At most {MAX_TABLE_RELATIONSHIPS} relationships can be monitored.")
     if request.calibration_config is not None:
         try:
             CalibrationConfig.from_dict(request.calibration_config)
@@ -1886,7 +1912,10 @@ def get_table_baseline(project_id: str, version: Optional[int] = None, client: d
         "columns": [{"column_name": c["column_name"], "type": c["col_type"], "state": c["state"]}
                     for c in table["columns"]],
         "reference_rows": table["reference_rows"]["n_rows"] if table["reference_rows"] else 0,
-        "relationships": [],
+        "relationships": [{k: r[k] for k in ("col_a", "col_b", "kind", "proposed", "proposal_reason",
+                                              "proposal_strength", "final_monitor", "decided_by",
+                                              "materiality_floor", "reference_state")}
+                          for r in table["relationships"]],
     }
 
 

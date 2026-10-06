@@ -508,7 +508,7 @@ print(response.json())
 
 ## API Reference
 
-### Unified table monitoring (new, milestone M1)
+### Unified table monitoring (milestones M1–M2)
 
 One table = one project. A single table can mix **numeric, categorical, text and image** columns; image columns hold filenames resolved against an uploaded ZIP (or base64/data-URI values in JSON). Every heavy step runs as a background job, so clients poll `GET /jobs/{job_id}`. Design and roadmap: [`docs/unified_table_plan.md`](docs/unified_table_plan.md).
 
@@ -524,7 +524,24 @@ One table = one project. A single table can mix **numeric, categorical, text and
 What M1 does and does not do, plainly:
 - **Numeric/categorical columns** use exactly the existing tabular detectors (KS, PSI, calibrated two-gate, Holm). A numeric/categorical-only table produces the same results as `/fit/upload` + `/analyze/upload` (a regression test asserts identical metrics).
 - **Text/image columns** use the existing Domain Classifier Test with the legacy `AUC > 0.65` rule, reported as **outside the Holm family**, because their p-values were measured over-confident in Step 2 (e). Calibrating them is milestone M3.
-- **Relationship drift between columns is not implemented yet** (milestone M2). "No column drifted" does not mean "no data drift": a change in how columns relate to each other is not checked by M1.
+- **Relationship drift (milestone M2)** is checked for numeric↔numeric, categorical↔categorical and numeric↔categorical pairs. The profiler proposes pairs that are clearly related in the training data; the user accepts, rejects or adds pairs. Each test is built to ignore a change in either column's own distribution:
+  - numeric↔numeric: change in Spearman correlation;
+  - categorical↔categorical: a log-linear test that the pairing pattern (odds ratios) is unchanged, which also catches re-pairing at equal strength;
+  - numeric↔categorical: change in where each category sits in the numeric ordering, adjusted for the category mix.
+
+  p-values come from disjoint splits of the reference at the batch's size, and every relationship test joins the same Holm family as the numeric/categorical column tests. A separate informational screen lists unwatched pairs that became strongly related; it never alerts. Relationships involving text or image columns are not implemented yet (M3).
+- **Measured** (`scripts/validate_table_relationships.py`, PetFinder numeric/categorical columns, reference 2,000 rows, 100 seeded draws per cell, batches of 300 / 1,000; raw results in `results/m2_relationship_validation_raw.json`):
+
+  | Scenario | Any relationship alarm | Column alarm on the changed column |
+  |---|---|---|
+  | No change | 0% / 1% | — (any alarm at all: 0% / 1%) |
+  | Monotone transform of the numeric columns in relationships | 2% / 1% | 100% / 100% |
+  | Category mix shifted (cats weighted 3×) | 3% / 1% | 100% / 100% |
+  | One column shuffled across all rows (its own distribution unchanged) | **100% / 100%** | 0% / 0% |
+  | Same, 25% of rows shuffled | 3% / 2% | 0% / 0% |
+
+  Flagged relationships involved the shuffled column 98–100% of the time. The 25% shuffle is not caught: its effect (about 0.03) is below the 0.05 materiality floor, by design. The relationship set came from the real profiler, which typed the integer breed code `Breed1` as numeric; one dataset only. Limitations: Spearman misses non-monotone dependence, and the numeric↔categorical test tracks relative position, not within-category spread.
+- **Duplicate rows:** the fit removes only rows identical in every column, the same rule as the tabular `/fit`. A table without an identifier column can still lose legitimate repeated rows this way, which affects the tabular endpoints too; see `docs/PROGRESS.md`.
 - History, alert state machine, webhooks and idempotency all work for table projects; the original tabular/text/image/joint endpoints are unchanged.
 - Image ZIPs are read in memory, never extracted; unsafe paths, symlinks, encrypted entries, oversized and suspiciously compressed entries are rejected and counted.
 - Measured live on this machine (120 PetFinder rows with photos): profile 1 s, fit 10 s, analysis of 100 rows 4 s. Larger tables and slower hosts will take proportionally longer.

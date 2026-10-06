@@ -242,6 +242,7 @@ def init_db():
         # Unified table path (M1): which workflow produced the run, and the job that ran it.
         ("report_kind", "ALTER TABLE analysis_runs ADD COLUMN report_kind TEXT DEFAULT 'tabular'"),
         ("job_id", "ALTER TABLE analysis_runs ADD COLUMN job_id TEXT"),
+        ("relationship_metrics", "ALTER TABLE analysis_runs ADD COLUMN relationship_metrics TEXT"),
     ]:
         try:
             cursor.execute(ddl)
@@ -979,6 +980,7 @@ def insert_analysis_run(
     idempotency_key: Optional[str], payload_hash: Optional[str], decision_mode: Optional[str],
     system_alert: bool, sustained_alert: Optional[bool], feature_results: dict,
     schema_report: Optional[dict], report_kind: str = "tabular", job_id: Optional[str] = None,
+    relationship_metrics: Optional[dict] = None,
 ) -> int:
     """Step 5 item 2: one row per /analyze call. feature_results/schema_report
     are the already-aggregated statistics dicts the response itself returns
@@ -988,8 +990,8 @@ def insert_analysis_run(
     cursor.execute(
         "INSERT INTO analysis_runs (project, baseline_version, ts, batch_size, idempotency_key, "
         "payload_hash, decision_mode, system_alert, sustained_alert, feature_results, schema_report, "
-        "report_kind, job_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "report_kind, job_id, relationship_metrics) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             project, baseline_version, ts, batch_size, idempotency_key, payload_hash, decision_mode,
             1 if system_alert else 0,
@@ -997,6 +999,7 @@ def insert_analysis_run(
             json.dumps(feature_results) if feature_results is not None else None,
             json.dumps(schema_report) if schema_report is not None else None,
             report_kind, job_id,
+            json.dumps(relationship_metrics) if relationship_metrics else None,
         ),
     )
     run_id = cursor.lastrowid
@@ -1014,6 +1017,7 @@ def _row_to_analysis_run(row) -> Dict[str, Any]:
         "feature_results": json.loads(row[10]) if row[10] else {},
         "schema_report": json.loads(row[11]) if row[11] else None,
         "windows_considered": row[12],
+        "relationship_metrics": json.loads(row[13]) if row[13] else {},
     }
 
 
@@ -1042,7 +1046,8 @@ def get_analysis_runs(
     cursor = conn.cursor()
     query = (
         "SELECT id, project, baseline_version, ts, batch_size, idempotency_key, payload_hash, "
-        "decision_mode, system_alert, sustained_alert, feature_results, schema_report, windows_considered "
+        "decision_mode, system_alert, sustained_alert, feature_results, schema_report, windows_considered, "
+        "relationship_metrics "
         "FROM analysis_runs WHERE project = ?"
     )
     params: List[Any] = [project]
@@ -1071,7 +1076,8 @@ def find_analysis_run_by_idempotency_key(
     cursor = conn.cursor()
     cursor.execute(
         "SELECT id, project, baseline_version, ts, batch_size, idempotency_key, payload_hash, "
-        "decision_mode, system_alert, sustained_alert, feature_results, schema_report, windows_considered "
+        "decision_mode, system_alert, sustained_alert, feature_results, schema_report, windows_considered, "
+        "relationship_metrics "
         "FROM analysis_runs WHERE project = ? AND idempotency_key = ? AND ts >= ? "
         "ORDER BY ts DESC, id DESC LIMIT 1",
         (project, idempotency_key, not_before_ts),
@@ -1507,7 +1513,8 @@ def set_baseline_modality(project_id: str, version: int, modality: str) -> None:
 
 def insert_table_version_artifacts(project_id: str, version: int, schema_rows: List[Dict[str, Any]],
                                    column_baselines: List[Dict[str, Any]],
-                                   reference_rows: Optional[Dict[str, Any]]) -> None:
+                                   reference_rows: Optional[Dict[str, Any]],
+                                   relationships: Optional[List[Dict[str, Any]]] = None) -> None:
     """All per-version table artifacts in one transaction, so a version is
     never left with a schema but no column baselines (or vice versa)."""
     now = _now_iso()
@@ -1536,6 +1543,15 @@ def insert_table_version_artifacts(project_id: str, version: int, schema_rows: L
                 (project_id, version, reference_rows["rows_blob"], reference_rows["n_rows"],
                  reference_rows["sample_seed"], reference_rows["dedup_dropped"]),
             )
+        conn.executemany(
+            "INSERT INTO table_relationships (project_id, version, col_a, col_b, kind, proposed, proposal_reason, "
+            "proposal_strength, final_monitor, decided_by, reference_state, materiality_floor, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(project_id, version, r["col_a"], r["col_b"], r["kind"], int(r["proposed"]), r.get("proposal_reason"),
+              r.get("proposal_strength"), int(r["final_monitor"]), r.get("decided_by"),
+              json.dumps(r.get("reference_state") or {}), r.get("materiality_floor"), now)
+             for r in relationships or []],
+        )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -1566,6 +1582,9 @@ def get_table_version(project_id: str, version: int) -> Optional[Dict[str, Any]]
         r["final_monitor"] = bool(r["final_monitor"])
     for c in columns:
         c["state"] = json.loads(c["state"]) if c["state"] else {}
+    for r in relationships:
+        r["reference_state"] = json.loads(r["reference_state"]) if r["reference_state"] else {}
+        r["proposed"], r["final_monitor"] = bool(r["proposed"]), bool(r["final_monitor"])
     return {"schema": schema, "columns": columns,
             "reference_rows": ref_rows[0] if ref_rows else None, "relationships": relationships}
 

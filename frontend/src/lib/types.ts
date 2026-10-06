@@ -147,10 +147,26 @@ export interface ColumnProposal {
   sample_values: string[];
 }
 
+export interface RelationshipProposal {
+  col_a: string;
+  col_b: string;
+  kind: "num_num" | "cat_cat" | "num_cat";
+  strength: number;
+  proposed: boolean;
+  reason: string;
+}
+
+export interface TableRelationshipChoice {
+  col_a: string;
+  col_b: string;
+  monitor: boolean;
+}
+
 export interface TableProfile {
   stage_id: string;
   n_rows: number;
   columns: ColumnProposal[];
+  relationships: RelationshipProposal[];
   image_zip: { image_entries: number; rejected: Record<string, number> } | null;
 }
 
@@ -182,11 +198,25 @@ export interface ColumnDrift {
   reason?: string;
 }
 
+export interface RelationshipDrift {
+  kind: string;
+  status: "DRIFT" | "STABLE" | "NOT_TESTED";
+  statistic_name: string;
+  reference_value: number | null;
+  current_value: number | null;
+  explanation?: string;
+  p_value_adjusted?: number | null;
+  in_family: boolean;
+  reason?: string;
+}
+
 export interface TableReport {
   baseline_version: number;
   n_rows: number;
   overall: { status: "DRIFT" | "STABLE" | "DATA_ISSUES"; alert: boolean; alert_state: string | null; triggered_by: string[] };
   column_drift: Record<string, ColumnDrift>;
+  relationship_drift: Record<string, RelationshipDrift>;
+  screening?: { emerged_dependencies: { col_a: string; col_b: string; reference: number; current: number }[] };
   schema_report: Record<string, { issue: string; severity: string }[]>;
   data_quality: Record<string, { valid: number; invalid: Record<string, number> }>;
   family: { method: string; members: string[]; excluded: { test: string; why: string }[] };

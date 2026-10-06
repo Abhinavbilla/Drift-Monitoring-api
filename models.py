@@ -220,6 +220,11 @@ class AnalyzeBatchResponse(BaseModel):
                     "state (logged in alert_events); None if nothing changed (steady 'ok') or this "
                     "response is an item-3 idempotent replay (never a new transition)."
     )
+    relationship_metrics: Dict[str, FeatureDriftMetric] = Field(
+        default_factory=dict,
+        description="Table projects only: relationship (dependency) drift tests keyed 'a<->b', decided in the "
+                    "same correction family as feature_metrics. Empty for every other endpoint."
+    )
     
     
     
@@ -335,11 +340,21 @@ class TableColumnChoice(BaseModel):
     monitor: bool
 
 
+class TableRelationshipChoice(BaseModel):
+    col_a: str
+    col_b: str
+    monitor: bool = True
+
+
 class TableFitRequest(BaseModel):
     stage_id: str = Field(description="From POST /tables/{project_id}/stage, once its profile job succeeded.")
     columns: List[TableColumnChoice] = Field(
         description="The confirmed schema: one entry per column. Columns left out are treated as "
                     "type 'ignore', not monitored.")
+    relationships: List[TableRelationshipChoice] = Field(
+        default_factory=list,
+        description="Column pairs to monitor for relationship drift (numeric/categorical columns only in this "
+                    "version). Usually the profile's proposals, edited by the user.")
     calibration_config: Optional[Dict[str, Any]] = None
     schema_policy: Optional[Dict[str, str]] = None
     alert_policy: Optional[Dict[str, int]] = None

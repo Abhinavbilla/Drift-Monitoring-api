@@ -9,6 +9,7 @@ import type {
   JobAccepted,
   LogEntry,
   TableColumnChoice,
+  TableRelationshipChoice,
   PredictResponse,
   Webhook,
 } from "./types";
@@ -157,8 +158,8 @@ export const api = {
   // -- unified table path (one table = one project; heavy steps run as jobs) --
   stageTable: (projectId: string, file: File, images?: File) =>
     request<JobAccepted>(`/tables/${projectId}/stage`, { method: "POST", body: tableForm(file, images), isForm: true }),
-  fitTable: (projectId: string, stageId: string, columns: TableColumnChoice[]) =>
-    request<JobAccepted>(`/tables/${projectId}/fit`, { method: "POST", body: { stage_id: stageId, columns } }),
+  fitTable: (projectId: string, stageId: string, columns: TableColumnChoice[], relationships: TableRelationshipChoice[]) =>
+    request<JobAccepted>(`/tables/${projectId}/fit`, { method: "POST", body: { stage_id: stageId, columns, relationships } }),
   analyzeTable: (projectId: string, file: File, images?: File) =>
     request<JobAccepted>(`/tables/${projectId}/analyze`, { method: "POST", body: tableForm(file, images), isForm: true }),
   getJob: <R,>(jobId: string) => request<Job<R>>(`/jobs/${jobId}`),

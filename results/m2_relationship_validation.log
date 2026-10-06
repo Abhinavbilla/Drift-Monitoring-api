@@ -1,0 +1,23 @@
+types: {'Type': 'categorical', 'Age': 'numeric', 'Breed1': 'numeric', 'Gender': 'categorical', 'Color1': 'categorical', 'MaturitySize': 'categorical', 'FurLength': 'categorical', 'Health': 'categorical', 'Quantity': 'categorical', 'Fee': 'numeric', 'State': 'categorical', 'PhotoAmt': 'numeric'}
+relationships (3): [('Gender', 'Quantity', 'cat_cat'), ('Breed1', 'Type', 'num_cat'), ('Age', 'Quantity', 'num_cat')]
+shuffled column: Breed1
+  aa n=300 done (35s)
+  aa n=1000 done (87s)
+  monotone n=300 done (129s)
+  monotone n=1000 done (185s)
+  mix n=300 done (227s)
+  mix n=1000 done (282s)
+  shuffle n=300 done (324s)
+  shuffle n=1000 done (380s)
+  shuffle25 n=300 done (422s)
+  shuffle25 n=1000 done (477s)
+{'scenario': 'aa', 'n': 300, 'draws': 100, 'p_any_relationship_alarm': np.float64(0.0), 'p_column_alarm_Breed1': np.float64(0.0), 'p_any_alarm': np.float64(0.0), 'attribution_to_shuffled_column': nan}
+{'scenario': 'aa', 'n': 1000, 'draws': 100, 'p_any_relationship_alarm': np.float64(0.01), 'p_column_alarm_Breed1': np.float64(0.0), 'p_any_alarm': np.float64(0.01), 'attribution_to_shuffled_column': 0.0}
+{'scenario': 'monotone', 'n': 300, 'draws': 100, 'p_any_relationship_alarm': np.float64(0.02), 'p_column_alarm_Age+Breed1': np.float64(1.0), 'p_any_alarm': np.float64(1.0), 'attribution_to_shuffled_column': 1.0}
+{'scenario': 'monotone', 'n': 1000, 'draws': 100, 'p_any_relationship_alarm': np.float64(0.01), 'p_column_alarm_Age+Breed1': np.float64(1.0), 'p_any_alarm': np.float64(1.0), 'attribution_to_shuffled_column': 0.0}
+{'scenario': 'mix', 'n': 300, 'draws': 100, 'p_any_relationship_alarm': np.float64(0.03), 'p_column_alarm_Breed1': np.float64(1.0), 'p_any_alarm': np.float64(1.0), 'attribution_to_shuffled_column': 1.0}
+{'scenario': 'mix', 'n': 1000, 'draws': 100, 'p_any_relationship_alarm': np.float64(0.01), 'p_column_alarm_Breed1': np.float64(1.0), 'p_any_alarm': np.float64(1.0), 'attribution_to_shuffled_column': 0.0}
+{'scenario': 'shuffle', 'n': 300, 'draws': 100, 'p_any_relationship_alarm': np.float64(1.0), 'p_column_alarm_Breed1': np.float64(0.0), 'p_any_alarm': np.float64(1.0), 'attribution_to_shuffled_column': 0.9803921568627451}
+{'scenario': 'shuffle', 'n': 1000, 'draws': 100, 'p_any_relationship_alarm': np.float64(1.0), 'p_column_alarm_Breed1': np.float64(0.0), 'p_any_alarm': np.float64(1.0), 'attribution_to_shuffled_column': 1.0}
+{'scenario': 'shuffle25', 'n': 300, 'draws': 100, 'p_any_relationship_alarm': np.float64(0.03), 'p_column_alarm_Breed1': np.float64(0.0), 'p_any_alarm': np.float64(0.03), 'attribution_to_shuffled_column': 1.0}
+{'scenario': 'shuffle25', 'n': 1000, 'draws': 100, 'p_any_relationship_alarm': np.float64(0.02), 'p_column_alarm_Breed1': np.float64(0.0), 'p_any_alarm': np.float64(0.02), 'attribution_to_shuffled_column': 1.0}

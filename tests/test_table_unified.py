@@ -112,12 +112,15 @@ def _confirmed(profile: dict, overrides: dict = None) -> list:
              "monitor": overrides.get(c["name"], c["proposed_type"]) != "ignore"} for c in profile["columns"]]
 
 
-def _fit(project: str, df: pd.DataFrame, zip_bytes=None, overrides=None) -> dict:
+def _fit(project: str, df: pd.DataFrame, zip_bytes=None, overrides=None, accept_proposed_relationships=False) -> dict:
     staged = _stage(project, df, zip_bytes)
     profile = _wait(staged["job_id"])
     assert profile["status"] == "succeeded", profile
+    relationships = [{"col_a": r["col_a"], "col_b": r["col_b"], "monitor": True}
+                     for r in profile["result"]["relationships"] if r["proposed"]] if accept_proposed_relationships else []
     resp = client.post(f"/tables/{project}/fit", headers=H, json={
-        "stage_id": staged["stage_id"], "columns": _confirmed(profile["result"], overrides)})
+        "stage_id": staged["stage_id"], "columns": _confirmed(profile["result"], overrides),
+        "relationships": relationships})
     assert resp.status_code == 202, resp.text
     fit = _wait(resp.json()["job_id"])
     assert fit["status"] == "succeeded", fit
@@ -411,3 +414,68 @@ def test_delete_project_removes_table_artifacts_and_blobs():
     assert client.delete(f"/projects/{project}", headers=H).status_code == 200
     assert not os.path.exists(project_dir)
     assert crud.get_table_version(internal, 1) is None
+
+
+# ---------------------------------------------------------
+# Relationship drift (milestone M2)
+# ---------------------------------------------------------
+def _rel_table(n: int, seed: int, shuffle_y: bool = False) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    x = rng.normal(50, 10, n)
+    y = 0.9 * (x - 50) / 10 + 0.45 * rng.normal(size=n)
+    breed = rng.choice(["lab", "beagle", "poodle"], n)
+    fee = np.array([{"lab": 100, "beagle": 150, "poodle": 200}[b] for b in breed]) + rng.normal(0, 10, n)
+    if shuffle_y:
+        y = rng.permutation(y)  # y's own distribution is untouched; only its link to x breaks
+    return pd.DataFrame({"x": x.round(3), "y": y.round(4), "breed": breed, "fee": fee.round(2)})
+
+
+def test_relationship_drift_end_to_end():
+    project = PREFIX + "relationships"
+    out = _fit(project, _rel_table(1500, 70), accept_proposed_relationships=True)
+    proposed = {(r["col_a"], r["col_b"]) for r in out["profile"]["relationships"] if r["proposed"]}
+    assert {("x", "y"), ("fee", "breed")} <= proposed
+    assert "x<->y" in out["fit"]["relationships"]
+
+    stored = client.get(f"/tables/{project}/baseline", headers=H).json()["relationships"]
+    assert {(r["col_a"], r["col_b"]) for r in stored if r["final_monitor"]} == proposed
+
+    same = _wait(_analyze(project, _rel_table(300, 71)).json()["job_id"])["result"]
+    assert all(r["status"] == "STABLE" for r in same["relationship_drift"].values()), same["relationship_drift"]
+    assert "x<->y" in same["family"]["members"]
+
+    job = _wait(_analyze(project, _rel_table(300, 72, shuffle_y=True)).json()["job_id"])
+    shuffled = job["result"]
+    assert shuffled["relationship_drift"]["x<->y"]["status"] == "DRIFT"
+    assert shuffled["column_drift"]["y"]["status"] == "STABLE"   # marginal unchanged: no column alarm
+    assert shuffled["relationship_drift"]["fee<->breed"]["status"] == "STABLE"
+    assert "x<->y" in shuffled["overall"]["triggered_by"]
+
+    conn = sqlite3.connect(crud.DB_PATH)
+    stored_run = conn.execute("SELECT relationship_metrics FROM analysis_runs WHERE job_id = ?", (job["job_id"],)).fetchone()
+    conn.close()
+    assert "x<->y" in stored_run[0]
+
+
+def test_relationship_validation_errors():
+    project = PREFIX + "rel_validation"
+    staged = _stage(project, _table(60, seed=80))
+    profile = _wait(staged["job_id"])["result"]
+    cols = _confirmed(profile)
+    fit = lambda rels: client.post(f"/tables/{project}/fit", headers=H,
+                                   json={"stage_id": staged["stage_id"], "columns": cols, "relationships": rels})
+    assert fit([{"col_a": "Age", "col_b": "Description"}]).status_code == 422          # text column
+    assert fit([{"col_a": "Age", "col_b": "PetID"}]).status_code == 422                # not monitored
+    assert fit([{"col_a": "Age", "col_b": "Fee"}, {"col_a": "Fee", "col_b": "Age"}]).status_code == 422  # duplicate
+
+
+def test_fit_keeps_distinct_records_that_share_values():
+    """Regression: dedup used to run on the monitored columns only, collapsing
+    distinct records (different IDs) that share low-cardinality values."""
+    rng = np.random.default_rng(90)
+    df = pd.DataFrame({"PetID": [f"id{i}" for i in range(400)],
+                       "size": rng.choice(["s", "m", "l"], 400), "kind": rng.choice(["dog", "cat"], 400)})
+    out = _fit(PREFIX + "dedup", df)
+    assert out["fit"]["duplicate_rows_dropped"] == 0
+    body = client.get(f"/tables/{PREFIX}dedup/baseline", headers=H).json()
+    assert body["reference_rows"] == 400

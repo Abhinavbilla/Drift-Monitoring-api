@@ -146,7 +146,8 @@ class DistributionDetector:
 
         return {_normalize_key(k): float(v) for k, v in zip(elements, counts / len(ref_data))}
 
-    def analyze_production_window(self, production_features: Dict[str, List[Any]]) -> Dict[str, Any]:
+    def analyze_production_window(self, production_features: Dict[str, List[Any]],
+                                  extra_tests: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Scan a fresh batch of production data to see if the model is going off the rails.
 
@@ -159,7 +160,14 @@ class DistributionDetector:
         values never differ between modes for the same data), then
         Holm/BH-corrected across every feature in this batch and passed
         through the two-gate (significance + materiality) decision.
+
+        extra_tests (table projects: relationship tests) are dicts with name,
+        p_value, effect_size, effect_floor, label. In calibrated mode they
+        join the SAME correction family as the features; in legacy mode
+        there is no family, so each is decided on its raw p. Results come
+        back under "extra_metrics". Without extra_tests nothing changes.
         """
+        extra_tests = extra_tests or []
         cfg = self.calibration_config
         is_calibrated = cfg is not None and cfg.decision_mode == "calibrated"
 
@@ -188,10 +196,14 @@ class DistributionDetector:
                 if result["drift_detected"]:
                     system_alert = True
                 drift_report[feature_name] = result
-            return {
-                "system_alert_triggered": system_alert,
+            extra = {t["name"]: self._gate_extra(t, t["p_value"], self.p_value_threshold, "none") for t in extra_tests}
+            report = {
+                "system_alert_triggered": system_alert or any(m["drift_detected"] for m in extra.values()),
                 "feature_metrics": drift_report,
             }
+            if extra_tests:
+                report["extra_metrics"] = extra
+            return report
 
         # --- CALIBRATED: two-gate decision with family-wise correction ---
         # Categorical features need an actual p-value (legacy PSI has none)
@@ -211,7 +223,10 @@ class DistributionDetector:
             p_values.append(p)
             feature_order.append(feature_name)
 
-        adjusted = adjust_p_values(p_values, cfg.multiple_testing)
+        adjusted_all = adjust_p_values(p_values + [t["p_value"] for t in extra_tests], cfg.multiple_testing)
+        adjusted, extra_adjusted = adjusted_all[:len(p_values)], adjusted_all[len(p_values):]
+        extra = {t["name"]: self._gate_extra(t, p_adj, cfg.alpha, cfg.multiple_testing)
+                 for t, p_adj in zip(extra_tests, extra_adjusted)}
 
         drift_report = {}
         system_alert = False
@@ -248,7 +263,23 @@ class DistributionDetector:
             if gate.drift_detected:
                 system_alert = True
 
-        return {
-            "system_alert_triggered": system_alert,
+        report = {
+            "system_alert_triggered": system_alert or any(m["drift_detected"] for m in extra.values()),
             "feature_metrics": drift_report,
         }
+        if extra_tests:
+            report["extra_metrics"] = extra
+        return report
+
+    @staticmethod
+    def _gate_extra(test: Dict[str, Any], p_adj: float, alpha: float, method: str) -> Dict[str, Any]:
+        gate = apply_two_gate(
+            effect_size=test["effect_size"], effect_floor=test["effect_floor"], p_value=test["p_value"],
+            p_value_adjusted=p_adj, alpha=alpha, decision_mode="calibrated",
+            threshold_used=f"p_adj<{alpha} [{test['label']} ({method})], effect>={test['effect_floor']}",
+        )
+        return {"statistic": test["effect_size"], "p_value": gate.p_value, "drift_detected": gate.drift_detected,
+                "effect_size": gate.effect_size, "effect_floor": gate.effect_floor,
+                "p_value_adjusted": gate.p_value_adjusted, "significant": gate.significant,
+                "material": gate.material, "decision_mode": gate.decision_mode,
+                "threshold_used": gate.threshold_used}

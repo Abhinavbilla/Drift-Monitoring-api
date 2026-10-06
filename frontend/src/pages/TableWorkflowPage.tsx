@@ -4,11 +4,16 @@ import { Badge, Button, Card, ErrorBanner, Field, FileInput, PageHeader, Success
 import { ApiError, api, waitForJob } from "../lib/api";
 import { TABULAR_ACCEPT } from "../lib/constants";
 import type {
-  ColumnProposal, Job, TableColumnChoice, TableColumnType, TableFitResult, TableProfile, TableReport,
+  ColumnProposal, Job, RelationshipProposal, TableColumnChoice, TableColumnType, TableFitResult, TableProfile,
+  TableRelationshipChoice, TableReport,
 } from "../lib/types";
 
 const TYPES: TableColumnType[] = ["numeric", "categorical", "text", "image", "ignore"];
 const STATUS_TONE = { DRIFT: "alert", STABLE: "ok", NOT_TESTED: "slate", DATA_ISSUES: "warn" } as const;
+const KIND_LABEL: Record<string, string> = {
+  num_num: "numeric ↔ numeric", cat_cat: "categorical ↔ categorical", num_cat: "numeric ↔ categorical",
+};
+const pairKey = (a: string, b: string) => [a, b].sort().join("<->");
 
 function errorText(e: unknown): string {
   return e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "Something went wrong.";
@@ -65,6 +70,64 @@ function ColumnReviewRow({ proposal, choice, onChange }: {
   );
 }
 
+function RelationshipReview({ proposals, columns, choices, onChange }: {
+  proposals: RelationshipProposal[];
+  columns: Record<string, TableColumnChoice>;
+  choices: Record<string, TableRelationshipChoice>;
+  onChange: (next: Record<string, TableRelationshipChoice>) => void;
+}) {
+  const eligible = Object.values(columns)
+    .filter((c) => c.monitor && (c.type === "numeric" || c.type === "categorical"))
+    .map((c) => c.name);
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const usable = (r: TableRelationshipChoice) => eligible.includes(r.col_a) && eligible.includes(r.col_b);
+  const reasons = Object.fromEntries(proposals.map((p) => [pairKey(p.col_a, p.col_b), p]));
+  const rows = Object.entries(choices).filter(([, r]) => usable(r));
+  const active = rows.filter(([, r]) => r.monitor).length;
+  const columnSelect = (value: string, set: (v: string) => void) => (
+    <select className="rounded-md border border-slate-300 px-2 py-1" value={value} onChange={(e) => set(e.target.value)}>
+      <option value="">column…</option>
+      {eligible.map((c) => <option key={c} value={c}>{c}</option>)}
+    </select>
+  );
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-slate-700">Relationships between columns</h3>
+      <p className="text-sm text-slate-500">
+        Checked pairs are watched for changes in how the two columns relate, even when each column looks normal on
+        its own. {active + eligible.length} tests in total share one false-alarm budget, so each extra pair makes
+        every test slightly less sensitive.
+      </p>
+      {rows.length === 0 && <p className="text-sm text-slate-400">No relationships proposed. Add one below.</p>}
+      <ul className="space-y-1 text-sm">
+        {rows.map(([key, r]) => (
+          <li key={key} className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={r.monitor}
+              onChange={(e) => onChange({ ...choices, [key]: { ...r, monitor: e.target.checked } })}
+              aria-label={`Monitor ${r.col_a} and ${r.col_b}`}
+            />
+            <span className="font-medium text-slate-800">{r.col_a} ↔ {r.col_b}</span>
+            <span className="text-slate-500">{reasons[key]?.reason ?? "added by you"}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        {columnSelect(a, setA)}
+        {columnSelect(b, setB)}
+        <Button variant="secondary" disabled={!a || !b || a === b} onClick={() => {
+          onChange({ ...choices, [pairKey(a, b)]: { col_a: a, col_b: b, monitor: true } });
+          setA("");
+          setB("");
+        }}>Add pair</Button>
+      </div>
+    </div>
+  );
+}
+
 function Report({ report }: { report: TableReport }) {
   const issues = Object.entries(report.schema_report).flatMap(([col, list]) => list.map((i) => ({ col, ...i })));
   return (
@@ -103,7 +166,43 @@ function Report({ report }: { report: TableReport }) {
             ))}
           </tbody>
         </table>
-        <p className="mt-2 text-xs text-slate-400">Relationship drift between columns arrives in the next milestone.</p>
+      </div>
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-slate-700">Relationship drift</h3>
+        {Object.keys(report.relationship_drift).length === 0 ? (
+          <p className="text-sm text-slate-400">No relationships are monitored for this baseline.</p>
+        ) : (
+          <table className="w-full text-left text-sm">
+            <thead className="text-xs uppercase text-slate-400">
+              <tr><th className="py-1">Pair</th><th>Kind</th><th>Before → now</th><th>Status</th><th>Details</th></tr>
+            </thead>
+            <tbody>
+              {Object.entries(report.relationship_drift).map(([pair, r]) => (
+                <tr key={pair} className="border-t border-slate-100 align-top">
+                  <td className="py-2 font-medium text-slate-800">{pair.replace("<->", " ↔ ")}</td>
+                  <td>{KIND_LABEL[r.kind] ?? r.kind}</td>
+                  <td>{r.reference_value != null && r.current_value != null
+                    ? `${r.statistic_name} ${r.reference_value.toFixed(2)} → ${r.current_value.toFixed(2)}` : "—"}</td>
+                  <td><Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge></td>
+                  <td className="text-xs text-slate-500">
+                    <details>
+                      <summary className="cursor-pointer text-brand-600">More</summary>
+                      {r.reason && <p>{r.reason}</p>}
+                      {r.explanation && <p>{r.explanation}</p>}
+                      {r.p_value_adjusted != null && <p>Adjusted p: {r.p_value_adjusted.toPrecision(3)}</p>}
+                    </details>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {(report.screening?.emerged_dependencies.length ?? 0) > 0 && (
+          <p className="mt-2 text-xs text-slate-500">
+            Not monitored, but now strongly related: {report.screening!.emerged_dependencies
+              .map((d) => `${d.col_a} ↔ ${d.col_b} (${d.reference} → ${d.current})`).join(", ")}. Consider re-fitting.
+          </p>
+        )}
       </div>
       {issues.length > 0 && (
         <div>
@@ -127,6 +226,7 @@ export function TableWorkflowPage() {
   const [batchZip, setBatchZip] = useState<File[]>([]);
   const [profile, setProfile] = useState<TableProfile | null>(null);
   const [choices, setChoices] = useState<Record<string, TableColumnChoice>>({});
+  const [relChoices, setRelChoices] = useState<Record<string, TableRelationshipChoice>>({});
   const [fitResult, setFitResult] = useState<TableFitResult | null>(null);
   const [report, setReport] = useState<TableReport | null>(null);
   const [job, setJob] = useState<Job<unknown> | null>(null);
@@ -154,11 +254,17 @@ export function TableWorkflowPage() {
     setChoices(Object.fromEntries(result.columns.map((c) => [
       c.name, { name: c.name, type: c.proposed_type, monitor: c.proposed_monitor },
     ])));
+    setRelChoices(Object.fromEntries(result.relationships.map((r) => [
+      pairKey(r.col_a, r.col_b), { col_a: r.col_a, col_b: r.col_b, monitor: r.proposed },
+    ])));
   });
 
   const lockBaseline = () => run(async () => {
     if (!profile) return;
-    const accepted = await api.fitTable(projectId, profile.stage_id, Object.values(choices));
+    const isPairable = (name: string) =>
+      choices[name]?.monitor && (choices[name].type === "numeric" || choices[name].type === "categorical");
+    const relationships = Object.values(relChoices).filter((r) => r.monitor && isPairable(r.col_a) && isPairable(r.col_b));
+    const accepted = await api.fitTable(projectId, profile.stage_id, Object.values(choices), relationships);
     setFitResult(await waitForJob<TableFitResult>(accepted.job_id, setJob));
     setProfile(null);
   });
@@ -214,6 +320,8 @@ export function TableWorkflowPage() {
               ))}
             </tbody>
           </table>
+          <RelationshipReview proposals={profile.relationships} columns={choices} choices={relChoices}
+                              onChange={setRelChoices} />
           <Button onClick={lockBaseline} disabled={busy}>Lock baseline</Button>
           <JobProgress job={job} />
         </Card>

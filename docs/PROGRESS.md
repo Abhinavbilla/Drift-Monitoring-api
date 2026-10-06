@@ -8,6 +8,35 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Unified table monitoring, milestone M2 (user-approved, 2026-10-06) — DONE.**
+numeric/categorical relationship drift. `drift/relationship_detector.py`:
+Spearman delta, log-linear [AC][AS][CS] G^2 (+ interaction-RMS effect),
+num<->cat mean mid-rank PIT shift with category-mix reweighting;
+split-null p-values at the exact batch size, K = max(1000, 2m/alpha);
+proposals at profile time (cap 25); informational emergence screen.
+Relationship tests join the column Holm family via
+`DistributionDetector.analyze_production_window(extra_tests=...)`; history
+(`analysis_runs.relationship_metrics`), webhooks and responses carry them.
+Fit/UI: relationship review step. Deviation from the plan, deliberate: nulls
+are computed at analyze time for the exact batch size instead of a fit-time
+size grid with conservative bracketing (exact and simpler; costs a few
+seconds per analysis). Bugs found by validation and fixed: (1) KS-on-PIT for
+num<->cat broke under heavy ties (null ~0.6) -> replaced by mean mid-rank
+shift (floor 0.05); (2) M1 fit deduplicated on MONITORED columns only,
+collapsing distinct records -> now all columns, like tabular. Measured (100
+draws/cell, see README): A/A any alarm 0-1%, marginal-only relationship
+alarms 1-3%, full shuffle detected 100%, 25% shuffle 2-3% (below floor).
+Live check on restarted server: same batch all STABLE; Breed1 shuffled ->
+only Breed1<->Type flagged. Tests: `tests/test_relationship_detector.py`
+(13), `tests/test_table_unified.py` (20); full suite 347 passed before the
+dedup fix, table tests re-run after it.
+OPEN (needs user decision): exact-duplicate removal at /fit (tabular AND
+table) drops legitimate repeated rows when a table has no identifier column
+and only discrete values -- consider deduplicating only when an ID column
+exists. Also: whether proposed relationships should stay pre-selected (the
+UI does that now; L criteria A/B/C were met).
+Next: M3 (text/image relationships + real-embedding nulls), needs approval.
+
 **Unified table monitoring, milestone M1 (user-approved, 2026-10-06) — DONE.**
 Plan: `docs/unified_table_plan.md` (A–S, approved per milestone; M2 needs
 its own approval). Implemented: `/tables/{id}/stage|fit|analyze|baseline`,
