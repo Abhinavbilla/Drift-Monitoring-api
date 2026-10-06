@@ -1839,9 +1839,10 @@ def fit_table(project_id: str, request: TableFitRequest, client: dict = Depends(
     pairs = set()
     for r in request.relationships:
         types = (monitored_types.get(r.col_a), monitored_types.get(r.col_b))
-        if r.col_a == r.col_b or any(t not in ("numeric", "categorical") for t in types):
-            raise ValidationError(f"Relationship {r.col_a} <-> {r.col_b}: both columns must be different, monitored, "
-                                  f"and numeric or categorical (text/image relationships come later).")
+        if r.col_a == r.col_b or None in types or table_monitor.pair_kind(*types) is None:
+            raise ValidationError(f"Relationship {r.col_a} <-> {r.col_b}: both columns must be different and "
+                                  f"monitored, and the pair must be numeric/categorical, text or image with a "
+                                  f"numeric/categorical column, or text with image (not text<->text or image<->image).")
         pair = frozenset((r.col_a, r.col_b))
         if pair in pairs:
             raise ValidationError(f"Relationship {r.col_a} <-> {r.col_b} is listed more than once.")

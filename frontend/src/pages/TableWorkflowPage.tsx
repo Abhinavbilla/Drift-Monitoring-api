@@ -12,6 +12,7 @@ const TYPES: TableColumnType[] = ["numeric", "categorical", "text", "image", "ig
 const STATUS_TONE = { DRIFT: "alert", STABLE: "ok", NOT_TESTED: "slate", DATA_ISSUES: "warn" } as const;
 const KIND_LABEL: Record<string, string> = {
   num_num: "numeric ↔ numeric", cat_cat: "categorical ↔ categorical", num_cat: "numeric ↔ categorical",
+  probe: "text/image predicts column", text_image: "text ↔ image pairing",
 };
 const pairKey = (a: string, b: string) => [a, b].sort().join("<->");
 
@@ -77,7 +78,7 @@ function RelationshipReview({ proposals, columns, choices, onChange }: {
   onChange: (next: Record<string, TableRelationshipChoice>) => void;
 }) {
   const eligible = Object.values(columns)
-    .filter((c) => c.monitor && (c.type === "numeric" || c.type === "categorical"))
+    .filter((c) => c.monitor && c.type !== "ignore")
     .map((c) => c.name);
   const [a, setA] = useState("");
   const [b, setB] = useState("");
@@ -159,6 +160,7 @@ function Report({ report }: { report: TableReport }) {
                     {r.reason && <p>{r.reason}</p>}
                     {r.threshold_used && <p>Rule: {r.threshold_used}</p>}
                     {r.p_value_adjusted != null && <p>Adjusted p: {r.p_value_adjusted.toPrecision(3)}</p>}
+                    {r.p_value != null && r.p_value_adjusted == null && <p>p: {r.p_value.toPrecision(3)}</p>}
                     <p>{r.in_family ? "Part of the Holm family" : "Decided outside the Holm family"}</p>
                   </details>
                 </td>
@@ -183,12 +185,20 @@ function Report({ report }: { report: TableReport }) {
                   <td>{KIND_LABEL[r.kind] ?? r.kind}</td>
                   <td>{r.reference_value != null && r.current_value != null
                     ? `${r.statistic_name} ${r.reference_value.toFixed(2)} → ${r.current_value.toFixed(2)}` : "—"}</td>
-                  <td><Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge></td>
+                  <td>
+                    <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
+                    {r.report_only && <span className="ml-1 text-xs text-slate-400">report-only</span>}
+                  </td>
                   <td className="text-xs text-slate-500">
                     <details>
                       <summary className="cursor-pointer text-brand-600">More</summary>
                       {r.reason && <p>{r.reason}</p>}
                       {r.explanation && <p>{r.explanation}</p>}
+                      {r.report_only && <p>Experimental: shown for information, does not trigger alerts yet.</p>}
+                      {r.confounded_by && r.confounded_by.length > 0 && (
+                        <p>Also drifted on its own: {r.confounded_by.join(", ")} — the pairing result may reflect that.</p>
+                      )}
+                      {r.p_value != null && r.p_value_adjusted == null && <p>p: {r.p_value.toPrecision(3)}</p>}
                       {r.p_value_adjusted != null && <p>Adjusted p: {r.p_value_adjusted.toPrecision(3)}</p>}
                     </details>
                   </td>

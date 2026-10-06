@@ -479,3 +479,30 @@ def test_fit_keeps_distinct_records_that_share_values():
     assert out["fit"]["duplicate_rows_dropped"] == 0
     body = client.get(f"/tables/{PREFIX}dedup/baseline", headers=H).json()
     assert body["reference_rows"] == 400
+
+
+# ---------------------------------------------------------
+# Text/image relationships (milestone M3, report-only)
+# ---------------------------------------------------------
+def _breed_text_table(n: int, seed: int, shuffle_text: bool = False) -> pd.DataFrame:
+    rng = random.Random(seed)
+    breeds = [rng.choice(BREEDS) for _ in range(n)]
+    desc = [f"{b} {' '.join(rng.choice(WORDS) for _ in range(6))} {i}" for i, b in enumerate(breeds)]
+    if shuffle_text:
+        rng.shuffle(desc)  # each text keeps its words; it just no longer describes its own row's breed
+    return pd.DataFrame({"PetID": [f"T{seed}x{i}" for i in range(n)], "Breed": breeds, "Description": desc})
+
+
+def test_text_probe_relationship_is_report_only():
+    project = PREFIX + "probe"
+    out = _fit(project, _breed_text_table(240, 100), accept_proposed_relationships=True)
+    proposed = {(r["col_a"], r["col_b"], r["kind"]) for r in out["profile"]["relationships"] if r["proposed"]}
+    assert ("Description", "Breed", "probe") in proposed
+    assert "Description<->Breed" in out["fit"]["relationships"]
+
+    report = _wait(_analyze(project, _breed_text_table(120, 101, shuffle_text=True)).json()["job_id"])["result"]
+    probe = report["relationship_drift"]["Description<->Breed"]
+    assert probe["status"] == "DRIFT" and probe["report_only"] and probe["in_family"] is False
+    assert probe["current_value"] < probe["reference_value"]
+    assert "Description<->Breed" not in report["overall"]["triggered_by"]
+    assert isinstance(report["column_drift"]["Description"]["p_value"], float)  # real-embedding null p

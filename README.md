@@ -508,7 +508,7 @@ print(response.json())
 
 ## API Reference
 
-### Unified table monitoring (milestones M1–M2)
+### Unified table monitoring (milestones M1–M3)
 
 One table = one project. A single table can mix **numeric, categorical, text and image** columns; image columns hold filenames resolved against an uploaded ZIP (or base64/data-URI values in JSON). Every heavy step runs as a background job, so clients poll `GET /jobs/{job_id}`. Design and roadmap: [`docs/unified_table_plan.md`](docs/unified_table_plan.md).
 
@@ -541,6 +541,27 @@ What M1 does and does not do, plainly:
   | Same, 25% of rows shuffled | 3% / 2% | 0% / 0% |
 
   Flagged relationships involved the shuffled column 98–100% of the time. The 25% shuffle is not caught: its effect (about 0.03) is below the 0.05 materiality floor, by design. The relationship set came from the real profiler, which typed the integer breed code `Breed1` as numeric; one dataset only. Limitations: Spearman misses non-monotone dependence, and the numeric↔categorical test tracks relative position, not within-category spread.
+- **Text/image columns (milestone M3).** Each text/image column test now reports a p-value from this project's own reference embeddings: disjoint splits at the batch size, PCA-64, 200 draws, and a Gaussian tail beyond the draws. Step 2(e)'s synthetic grid was measured over-confident, which is why this replaces it. The decision is still the AUC > 0.65 rule, outside the Holm family, until the change below is approved.
+- **Relationships involving text/image (M3), report-only:**
+  - probes: a text/image column predicts a numeric or categorical column, scored by balanced accuracy or by Spearman of the predictions;
+  - text↔image matching: does each row's image still go with its own text.
+
+  They are proposed at profile time; text/image columns are embedded once there and the vectors reused by the fit. They're shown with a status, but stay outside the family and **never alert** yet. A probe whose source column also drifted is marked `confounded_by`.
+- **Measured for M3** (`scripts/validate_m3_embeddings.py`, cached PetFinder embeddings, seeded; `results/m3_embedding_validation.json`):
+  - **PCA-64 vs raw embeddings:** the same or better detection (image, 25% cats: 10% vs 4%; 50% cats: 100% vs 98%), and 0% false alarms on unchanged data for both.
+  - **Calibration (reference 1,000, 100 draws per cell):** with no drift, P(p < 0.05) was 1–5% in all four text/image cells, inside the 95% interval around 5%. A batch with 25% cats was detected 100% of the time at p < 0.05; the AUC > 0.65 rule caught it 6–10% of the time.
+  - **Probes and matching (reference 1,000, batch 200, 50 draws):**
+
+    | Test | No change | Category mix shifted | Pairing shuffled |
+    |---|---|---|---|
+    | text→Type, image→Type (categorical) | 0–2% | 0% | 100% |
+    | text↔image matching | 0% | 0% | 100% |
+    | text→Age (numeric) | 6% | **26%** | 100% |
+
+    The numeric probe is not robust to a population-mix shift (cats and dogs differ in age), so it stays report-only for good.
+
+  Live check (restarted server, 400 real pets with photos): shuffling descriptions between pets flagged exactly the three Description relationships and nothing else.
+- **Not implemented (optional in the plan):** the experimental whole-row joint signal; the existing `/joint` endpoint is unchanged.
 - **Duplicate rows:** the fit removes only rows identical in every column, the same rule as the tabular `/fit`. A table without an identifier column can still lose legitimate repeated rows this way, which affects the tabular endpoints too; see `docs/PROGRESS.md`.
 - History, alert state machine, webhooks and idempotency all work for table projects; the original tabular/text/image/joint endpoints are unchanged.
 - Image ZIPs are read in memory, never extracted; unsafe paths, symlinks, encrypted entries, oversized and suspiciously compressed entries are rejected and counted.

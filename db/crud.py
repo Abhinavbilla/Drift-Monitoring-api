@@ -1545,11 +1545,11 @@ def insert_table_version_artifacts(project_id: str, version: int, schema_rows: L
             )
         conn.executemany(
             "INSERT INTO table_relationships (project_id, version, col_a, col_b, kind, proposed, proposal_reason, "
-            "proposal_strength, final_monitor, decided_by, reference_state, materiality_floor, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "proposal_strength, final_monitor, decided_by, reference_state, materiality_floor, probe_blob, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(project_id, version, r["col_a"], r["col_b"], r["kind"], int(r["proposed"]), r.get("proposal_reason"),
               r.get("proposal_strength"), int(r["final_monitor"]), r.get("decided_by"),
-              json.dumps(r.get("reference_state") or {}), r.get("materiality_floor"), now)
+              json.dumps(r.get("reference_state") or {}), r.get("materiality_floor"), r.get("probe_blob"), now)
              for r in relationships or []],
         )
         conn.commit()

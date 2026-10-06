@@ -1,6 +1,6 @@
 # Unified Table Monitoring — Implementation Plan (A–S)
 
-Status: **M1 and M2 approved and implemented (2026-10-06). M3–M4 await approval.**
+Status: **M1–M3 approved and implemented (2026-10-06). M4 awaits approval.**
 Written 2026-10-06 from the user's specification plus six agreed corrections:
 (1) relationship detectors invariant to marginal drift, (2) batch-size-matched,
 disjoint null distributions, (3) real-embedding nulls for text/image so they can

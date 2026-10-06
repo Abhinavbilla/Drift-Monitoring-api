@@ -77,14 +77,19 @@ def get_bytes(key: str) -> bytes:
         return f.read()
 
 
-def put_array(key: str, arr: np.ndarray) -> int:
+def get_array(key: str) -> np.ndarray:
+    return np.load(io.BytesIO(get_bytes(key)), allow_pickle=False)
+
+
+def put_arrays(key: str, **arrays: np.ndarray) -> int:
     buf = io.BytesIO()
-    np.save(buf, arr, allow_pickle=False)
+    np.savez(buf, **arrays)
     return put_bytes(key, buf.getvalue())
 
 
-def get_array(key: str) -> np.ndarray:
-    return np.load(io.BytesIO(get_bytes(key)), allow_pickle=False)
+def get_arrays(key: str) -> dict:
+    with np.load(io.BytesIO(get_bytes(key)), allow_pickle=False) as z:
+        return {k: z[k] for k in z.files}
 
 
 def delete(key: Optional[str]) -> None:

@@ -1,0 +1,234 @@
+part1 {
+ "summary": [
+  {
+   "modality": "text",
+   "f": 0.0,
+   "detect_raw": 0.0,
+   "detect_pca": 0.0,
+   "mean_auc_raw": 0.49933635000000004,
+   "mean_auc_pca": 0.4954475
+  },
+  {
+   "modality": "text",
+   "f": 0.25,
+   "detect_raw": 0.06,
+   "detect_pca": 0.08,
+   "mean_auc_raw": 0.6092119,
+   "mean_auc_pca": 0.604347
+  },
+  {
+   "modality": "text",
+   "f": 0.5,
+   "detect_raw": 1.0,
+   "detect_pca": 1.0,
+   "mean_auc_raw": 0.7271774499999999,
+   "mean_auc_pca": 0.72552615
+  },
+  {
+   "modality": "image",
+   "f": 0.0,
+   "detect_raw": 0.0,
+   "detect_pca": 0.0,
+   "mean_auc_raw": 0.4944814,
+   "mean_auc_pca": 0.48868085
+  },
+  {
+   "modality": "image",
+   "f": 0.25,
+   "detect_raw": 0.04,
+   "detect_pca": 0.1,
+   "mean_auc_raw": 0.59528165,
+   "mean_auc_pca": 0.61228185
+  },
+  {
+   "modality": "image",
+   "f": 0.5,
+   "detect_raw": 0.98,
+   "detect_pca": 1.0,
+   "mean_auc_raw": 0.7182476499999999,
+   "mean_auc_pca": 0.73842195
+  }
+ ],
+ "decision_use_pca": true
+} 89s
+part2 {
+ "summary": [
+  {
+   "modality": "text",
+   "n": 50,
+   "cat_fraction": 0.0,
+   "draws": 100,
+   "p_lt_005": 0.02,
+   "wilson": [
+    0.006,
+    0.07
+   ],
+   "tail_used": 0.0,
+   "calibrated": true
+  },
+  {
+   "modality": "text",
+   "n": 200,
+   "cat_fraction": 0.0,
+   "draws": 100,
+   "p_lt_005": 0.01,
+   "wilson": [
+    0.002,
+    0.054
+   ],
+   "tail_used": 0.0,
+   "calibrated": true
+  },
+  {
+   "modality": "text",
+   "n": 200,
+   "cat_fraction": 0.25,
+   "draws": 50,
+   "p_lt_005": 1.0,
+   "wilson": [
+    0.929,
+    1
+   ],
+   "tail_used": 0.82
+  },
+  {
+   "modality": "image",
+   "n": 50,
+   "cat_fraction": 0.0,
+   "draws": 100,
+   "p_lt_005": 0.05,
+   "wilson": [
+    0.022,
+    0.112
+   ],
+   "tail_used": 0.0,
+   "calibrated": true
+  },
+  {
+   "modality": "image",
+   "n": 200,
+   "cat_fraction": 0.0,
+   "draws": 100,
+   "p_lt_005": 0.04,
+   "wilson": [
+    0.016,
+    0.098
+   ],
+   "tail_used": 0.0,
+   "calibrated": true
+  },
+  {
+   "modality": "image",
+   "n": 200,
+   "cat_fraction": 0.25,
+   "draws": 50,
+   "p_lt_005": 1.0,
+   "wilson": [
+    0.929,
+    1
+   ],
+   "tail_used": 0.9
+  }
+ ],
+ "calibration_gate_passed": true
+} 759s
+part3 {
+ "summary": [
+  {
+   "test": "text->Type",
+   "scenario": "aa",
+   "draws": 50,
+   "alarm_rate": 0.02,
+   "mean_reference": 0.8943939999999999,
+   "mean_current": 0.8937060000000001
+  },
+  {
+   "test": "text->Type",
+   "scenario": "mix",
+   "draws": 50,
+   "alarm_rate": 0.0,
+   "mean_reference": 0.8908360000000001,
+   "mean_current": 0.8966139999999999
+  },
+  {
+   "test": "text->Type",
+   "scenario": "shuffle",
+   "draws": 50,
+   "alarm_rate": 1.0,
+   "mean_reference": 0.8935940000000001,
+   "mean_current": 0.4967660000000001
+  },
+  {
+   "test": "image->Type",
+   "scenario": "aa",
+   "draws": 50,
+   "alarm_rate": 0.0,
+   "mean_reference": 0.964772,
+   "mean_current": 0.965988
+  },
+  {
+   "test": "image->Type",
+   "scenario": "mix",
+   "draws": 50,
+   "alarm_rate": 0.0,
+   "mean_reference": 0.9625559999999999,
+   "mean_current": 0.9688939999999999
+  },
+  {
+   "test": "image->Type",
+   "scenario": "shuffle",
+   "draws": 50,
+   "alarm_rate": 1.0,
+   "mean_reference": 0.9636600000000002,
+   "mean_current": 0.508418
+  },
+  {
+   "test": "text->Age",
+   "scenario": "aa",
+   "draws": 50,
+   "alarm_rate": 0.06,
+   "mean_reference": 0.528932,
+   "mean_current": 0.5348120000000001
+  },
+  {
+   "test": "text->Age",
+   "scenario": "mix",
+   "draws": 50,
+   "alarm_rate": 0.26,
+   "mean_reference": 0.523282,
+   "mean_current": 0.47566400000000003
+  },
+  {
+   "test": "text->Age",
+   "scenario": "shuffle",
+   "draws": 50,
+   "alarm_rate": 1.0,
+   "mean_reference": 0.52652,
+   "mean_current": 0.010685999999999998
+  },
+  {
+   "test": "text<->image",
+   "scenario": "aa",
+   "draws": 50,
+   "alarm_rate": 0.0,
+   "mean_reference": 0.712064,
+   "mean_current": 0.71914
+  },
+  {
+   "test": "text<->image",
+   "scenario": "mix",
+   "draws": 50,
+   "alarm_rate": 0.0,
+   "mean_reference": 0.7076339999999999,
+   "mean_current": 0.66558
+  },
+  {
+   "test": "text<->image",
+   "scenario": "shuffle",
+   "draws": 50,
+   "alarm_rate": 1.0,
+   "mean_reference": 0.7088080000000001,
+   "mean_current": 0.49661
+  }
+ ]
+} 999s

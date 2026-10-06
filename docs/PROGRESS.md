@@ -8,6 +8,29 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Unified table monitoring, milestone M3 (user-approved, 2026-10-06) — DONE.**
+`drift/embedding_tests.py`: PCA, tail-aware split-null p, column DCT with a
+real-embedding null, probes (embedding -> categorical: balanced accuracy;
+-> numeric: Spearman of ridge predictions on target ranks), text<->image
+matching (ridge image->text, own-vs-other cosine AUC). Profile now embeds
+proposed text/image columns once (cached in the stage, deleted with it) and
+proposes probes/matching; fit reuses the cache, stores embeddings with
+row_ids (npz), PCA and probe arrays (never pickles). Analyze: text/image
+column p_value from the project's own null; probes/matching REPORT-ONLY
+(outside the family, never alert, `confounded_by` flag). Gate results (see
+README): PCA-64 adopted (rule met); calibration PASSED (A/A 1-5%, 25%-cat
+power 100% vs 6-10% for AUC>0.65); categorical probes + matching passed
+A/mix/shuffle; numeric probe failed the mix scenario (26%). Not built:
+optional joint whole-row signal (plan said optional) -- deliberate.
+Tests: `tests/test_embedding_tests.py` (7), table tests 21; full suite 356.
+Live: shuffled descriptions -> only Description relationships flagged.
+DECISIONS FOR THE USER (not applied): (1) put text/image column tests in the
+Holm family on the calibrated p; the AUC floor 0.65 would cancel most of the
+power gain, 0.55 keeps it (false alarms are controlled by p, not the floor);
+(2) promote categorical probes + matching from report-only to alerting;
+numeric probes stay report-only. Also still open from M2: dedup without an
+ID column.
+
 **Unified table monitoring, milestone M2 (user-approved, 2026-10-06) — DONE.**
 numeric/categorical relationship drift. `drift/relationship_detector.py`:
 Spearman delta, log-linear [AC][AS][CS] G^2 (+ interaction-RMS effect),

@@ -10,6 +10,10 @@ image columns get per-column embedding baselines and the existing Domain
 Classifier Test, decided by the legacy AUC rule and kept OUTSIDE the Holm
 family until their nulls are calibrated (M3). Relationship tests between
 numeric/categorical columns (M2) join the numeric/categorical Holm family.
+M3: text/image column tests get a p-value from a real-embedding null, and
+probes (text/image -> numeric/categorical) and text<->image matching watch
+relationships involving embeddings. Both stay outside the Holm family and do
+not alert ("report-only") until their validation gate is approved.
 """
 
 import io
@@ -23,6 +27,7 @@ import jobs
 from adapters.image import ImageAdapter
 from adapters.text import TextAdapter
 from db import blob_store, crud
+from drift import embedding_tests as et
 from drift import relationship_detector as rel
 from drift.calibration import CalibrationConfig
 from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES
@@ -38,6 +43,30 @@ MONITORED_TYPES = ("numeric", "categorical", "text", "image")
 _TEST_BY_TYPE = {"numeric": "KS", "categorical": "PSI", "text": "DCT", "image": "DCT"}
 _REL_LABEL = {"num_num": "Spearman split-null", "cat_cat": "log-linear G2 split-null",
               "num_cat": "conditional PIT split-null"}
+_EMBEDDING = ("text", "image")
+_NUMCAT = ("numeric", "categorical")
+MAX_EMBEDDING_PROPOSALS = 15
+
+
+def pair_kind(type_a: str, type_b: str) -> Optional[str]:
+    """Relationship kind for two column types, or None if unsupported (e.g. text<->text)."""
+    if type_a in _NUMCAT and type_b in _NUMCAT:
+        return rel.kind_for(type_a, type_b)
+    if {type_a, type_b} == {"text", "image"}:
+        return "text_image"
+    if (type_a in _EMBEDDING) != (type_b in _EMBEDDING):
+        return "probe"
+    return None
+
+
+def ordered(col_a: str, type_a: str, col_b: str, type_b: str) -> Tuple[str, str]:
+    """One canonical order per pair: embedding column first for probes, text first for text<->image."""
+    kind = pair_kind(type_a, type_b)
+    if kind == "probe":
+        return (col_a, col_b) if type_a in _EMBEDDING else (col_b, col_a)
+    if kind == "text_image":
+        return (col_a, col_b) if type_a == "text" else (col_b, col_a)
+    return rel.ordered_pair(col_a, type_a, col_b, type_b)
 
 
 # ---------------------------------------------------------
@@ -63,56 +92,54 @@ def _open_stage(stage: Optional[dict], allowed_status: Tuple[str, ...]) -> Tuple
     return df, archive
 
 
-def _embed_text(values: pd.Series) -> Tuple[np.ndarray, np.ndarray, Dict[str, int]]:
-    """(embeddings of valid rows, row indices of valid rows, invalid counts)."""
-    is_valid = values.map(lambda v: v is not None and not (isinstance(v, float) and v != v) and str(v).strip() != "")
-    idx = np.flatnonzero(is_valid.to_numpy())
-    texts = [str(v) for v in values.iloc[idx]]
+def _embed_text(values: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
+    """(embeddings of the valid rows in order, a status per row)."""
+    statuses = np.array(["ok" if v is not None and not (isinstance(v, float) and v != v) and str(v).strip()
+                         else "empty_or_null" for v in values.tolist()])
+    texts = [str(v) for v, st in zip(values.tolist(), statuses) if st == "ok"]
     adapter = TextAdapter()
     chunks = [adapter.transform(texts[i:i + EMBED_CHUNK]) for i in range(0, len(texts), EMBED_CHUNK)]
-    emb = np.vstack(chunks) if chunks else np.empty((0, 384), dtype=np.float32)
-    invalid = int((~is_valid).sum())
-    return emb, idx, ({"empty_or_null": invalid} if invalid else {})
+    return (np.vstack(chunks) if chunks else np.empty((0, 384), dtype=np.float32)), statuses
 
 
-def _embed_images(values: pd.Series, archive: Optional[ImageArchive]) -> Tuple[np.ndarray, np.ndarray, Dict[str, int], List[int]]:
-    """(embeddings of valid rows, their row indices, invalid counts by status,
-    first 20 invalid row positions). Images are validated and embedded in
-    chunks, never all decoded in memory at once."""
+def _embed_images(values: pd.Series, archive: Optional[ImageArchive]) -> Tuple[np.ndarray, np.ndarray]:
+    """(embeddings of the valid rows in order, a status per row). Images are
+    validated and embedded in chunks, never all decoded in memory at once."""
     adapter = ImageAdapter()
-    embs, idx, counts, bad_rows = [], [], {}, []
-    pending_raw, pending_idx = [], []
-
-    def flush():
-        if pending_raw:
-            embs.append(adapter.transform(list(pending_raw)))
-            idx.extend(pending_idx)
-            pending_raw.clear()
-            pending_idx.clear()
-
-    for pos, value in enumerate(values.tolist()):
+    embs, pending, statuses = [], [], []
+    for value in values.tolist():
         status, raw = load_image(value, archive)
-        if status != "ok":
-            counts[status] = counts.get(status, 0) + 1
-            if len(bad_rows) < 20:
-                bad_rows.append(pos)
-            continue
-        pending_raw.append(raw)
-        pending_idx.append(pos)
-        if len(pending_raw) >= EMBED_CHUNK:
-            flush()
-    flush()
-    emb = np.vstack(embs) if embs else np.empty((0, 512), dtype=np.float32)
-    return emb, np.asarray(idx, dtype=int), counts, bad_rows
+        statuses.append(status)
+        if status == "ok":
+            pending.append(raw)
+            if len(pending) >= EMBED_CHUNK:
+                embs.append(adapter.transform(pending))
+                pending = []
+    if pending:
+        embs.append(adapter.transform(pending))
+    return (np.vstack(embs) if embs else np.empty((0, 512), dtype=np.float32)), np.array(statuses)
 
 
-def _embed_column(col_type: str, values: pd.Series, archive) -> Tuple[np.ndarray, Dict[str, Any]]:
-    if col_type == "text":
-        emb, idx, counts = _embed_text(values)
-        bad_rows: List[int] = []
-    else:
-        emb, idx, counts, bad_rows = _embed_images(values, archive)
-    return emb, {"valid": int(len(idx)), "invalid": counts, "invalid_rows_sample": bad_rows}
+def _embed_column(col_type: str, values: pd.Series, archive) -> Tuple[np.ndarray, np.ndarray]:
+    return _embed_text(values) if col_type == "text" else _embed_images(values, archive)
+
+
+def _quality(statuses: np.ndarray) -> Dict[str, Any]:
+    bad = np.flatnonzero(statuses != "ok")
+    counts = dict(zip(*np.unique(statuses[bad], return_counts=True))) if len(bad) else {}
+    return {"valid": int(len(statuses) - len(bad)), "invalid": {str(k): int(v) for k, v in counts.items()},
+            "invalid_rows_sample": bad[:20].tolist()}
+
+
+def _target_values(values: pd.Series, target_type: str, levels: Optional[dict]) -> np.ndarray:
+    """Cleaned target values for a probe; None/NaN where unusable (incl. unseen categories)."""
+    clean = rel.clean_column(values.tolist(), target_type)
+    if target_type == "categorical" and levels is not None:
+        mask = rel.complete_rows(clean)
+        out = np.full(len(clean), None, dtype=object)
+        out[mask] = rel.map_levels(clean[mask], levels)
+        return out
+    return clean
 
 
 def _cap_rows(n: int) -> np.ndarray:
@@ -140,15 +167,75 @@ def run_profile(job: dict) -> dict:
         relationships = rel.propose_relationships({
             p["name"]: (p["proposed_type"], rel.clean_column(df[p["name"]].tolist(), p["proposed_type"]))
             for p in columns if p["proposed_type"] in ("numeric", "categorical")})
+        cache = _cache_embeddings(job, stage, df, columns, archive)
+        relationships += _propose_embedding_relationships(df, columns, cache)
         zip_info = None if archive is None else {"image_entries": len(archive.by_path), "rejected": archive.rejected}
     finally:
         if archive:
             archive.close()
     result = {"stage_id": stage["id"], "n_rows": len(df), "columns": columns, "relationships": relationships,
-              "image_zip": zip_info,
-              "expires_at": stage["expires_at"]}
+              "image_zip": zip_info, "expires_at": stage["expires_at"],
+              "embedding_cache": {c: {"key": v["key"], "type": v["type"]} for c, v in cache.items()}}
     crud.update_stage(stage["id"], status="profiled", profile=result)
     return result
+
+
+def _cache_embeddings(job: dict, stage: dict, df: pd.DataFrame, columns: List[dict], archive) -> Dict[str, dict]:
+    """Embeds proposed text/image columns once, at profile time: the vectors
+    feed relationship proposals and are reused by the fit (deleted with the stage)."""
+    cache = {}
+    targets = [p for p in columns if p["proposed_type"] in _EMBEDDING and p["proposed_monitor"]]
+    for i, p in enumerate(targets):
+        jobs.progress(job["id"], 40 + int(40 * i / len(targets)), f"Embedding column '{p['name']}'")
+        emb, statuses = _embed_column(p["proposed_type"], df[p["name"]], archive)
+        key = blob_store.new_key(stage["project_id"], "staged", "npz")
+        blob_store.put_arrays(key, emb=emb.astype(np.float16), status=statuses)
+        cache[p["name"]] = {"key": key, "type": p["proposed_type"], "emb": emb, "status": statuses}
+    return cache
+
+
+def _propose_embedding_relationships(df: pd.DataFrame, columns: List[dict], cache: Dict[str, dict]) -> List[dict]:
+    types = {p["name"]: p["proposed_type"] for p in columns if p["proposed_monitor"]}
+    projected = {}
+    for col, c in cache.items():
+        if len(c["emb"]) > et.MIN_ROWS:
+            projected[col] = (et.project(c["emb"], et.fit_pca(c["emb"])), np.flatnonzero(c["status"] == "ok"))
+    candidates = []
+    for source, (x, rows) in projected.items():
+        for target, t_type in types.items():
+            if t_type not in _NUMCAT:
+                continue
+            y_all = rel.clean_column(df[target].iloc[rows].tolist(), t_type)
+            if t_type == "categorical":
+                ok = rel.complete_rows(y_all)
+                y_all = np.where(ok, y_all, None)
+                if ok.sum():
+                    y_all[ok] = rel.map_levels(y_all[ok], rel.build_levels(y_all[ok]))
+            mask = rel.complete_rows(y_all)
+            strength = et.probe_strength(x[mask], y_all[mask].astype(str if t_type == "categorical" else float), t_type)
+            if strength is not None:
+                threshold = et.PROPOSE_MIN[f"probe_{t_type}"]
+                what = "balanced accuracy above chance" if t_type == "categorical" else "Spearman of predictions"
+                candidates.append({"col_a": source, "col_b": target, "kind": "probe", "strength": round(strength, 3),
+                                   "proposed": strength >= threshold,
+                                   "reason": f"{source} predicts {target} ({what} = {strength:.2f} in the reference)"})
+    texts = [c for c in projected if cache[c]["type"] == "text"]
+    images = [c for c in projected if cache[c]["type"] == "image"]
+    for t in texts:
+        for im in images:
+            both = np.intersect1d(projected[t][1], projected[im][1])
+            xt = projected[t][0][np.searchsorted(projected[t][1], both)]
+            xi = projected[im][0][np.searchsorted(projected[im][1], both)]
+            auc = et.cross_fitted_matching(xi, xt)
+            if auc is not None:
+                strength = auc - 0.5
+                candidates.append({"col_a": t, "col_b": im, "kind": "text_image", "strength": round(strength, 3),
+                                   "proposed": strength >= et.PROPOSE_MIN["text_image"],
+                                   "reason": f"images and texts match each other (AUC {auc:.2f} in the reference)"})
+    candidates.sort(key=lambda c: -c["strength"])
+    for i, c in enumerate(candidates):
+        c["proposed"] = c["proposed"] and i < MAX_EMBEDDING_PROPOSALS
+    return candidates
 
 
 # ---------------------------------------------------------
@@ -167,22 +254,32 @@ def run_fit(job: dict, persist_fit: Callable[..., Any], split_high_cardinality: 
         # tabular /fit). Deduplicating on the monitored columns alone collapsed
         # distinct records that merely share low-cardinality values.
         rows_before = len(df)
-        df = df.drop_duplicates().reset_index(drop=True)
+        df = df.drop_duplicates()
+        kept = df.index.to_numpy()  # original row positions, to reuse profile-time embeddings
+        df = df.reset_index(drop=True)
         duplicate_rows_dropped = rows_before - len(df)
+        cache = (stage["profile"] or {}).get("embedding_cache") or {}
 
         # Embed text/image columns FIRST: a failure here must not leave a
         # half-written baseline version behind.
-        embedded: Dict[str, Tuple[np.ndarray, Dict[str, Any]]] = {}
+        embedded: Dict[str, Tuple[np.ndarray, np.ndarray, Dict[str, Any]]] = {}
         for i, col in enumerate(by_type["text"] + by_type["image"]):
             jobs.progress(job["id"], 10 + int(60 * i / max(1, len(by_type["text"]) + len(by_type["image"]))),
                           f"Embedding column '{col}'")
-            emb, quality = _embed_column(monitored[col], df[col], archive)
+            if col in cache and cache[col]["type"] == monitored[col]:
+                arrays = blob_store.get_arrays(cache[col]["key"])
+                rank = np.cumsum(arrays["status"] == "ok") - 1
+                statuses = arrays["status"][kept]
+                emb = arrays["emb"][rank[kept][statuses == "ok"]].astype(np.float32)
+            else:
+                emb, statuses = _embed_column(monitored[col], df[col], archive)
+            quality = _quality(statuses)
             if quality["valid"] < HARD_MIN_SAMPLES:
                 raise jobs.JobError(
                     f"Column '{col}' has only {quality['valid']} usable {monitored[col]} value(s) "
                     f"(need at least {HARD_MIN_SAMPLES}); invalid: {quality['invalid']}. "
                     f"Fix the data or turn monitoring off for this column.")
-            embedded[col] = (emb, quality)
+            embedded[col] = (emb, np.flatnonzero(statuses == "ok"), quality)
     finally:
         if archive:
             archive.close()
@@ -208,14 +305,20 @@ def run_fit(job: dict, persist_fit: Callable[..., Any], split_high_cardinality: 
         if col in inferred:  # high-cardinality categoricals were excluded above
             column_baselines.append({"column_name": col, "col_type": monitored[col],
                                      "state": {"source": "baselines"}})
-    for col, (emb, quality) in embedded.items():
+    stored: Dict[str, dict] = {}
+    for col, (emb, valid_rows, quality) in embedded.items():
         keep = _cap_rows(len(emb))
-        key = blob_store.new_key(project, "embeddings", "npy")
-        bytes_stored += blob_store.put_array(key, emb[keep].astype(np.float16))
+        ref = emb[keep]
+        pca = et.fit_pca(ref)
+        key, pca_key = blob_store.new_key(project, "embeddings", "npz"), blob_store.new_key(project, "pca", "npz")
+        bytes_stored += blob_store.put_arrays(key, emb=ref.astype(np.float16), row_ids=valid_rows[keep])
+        bytes_stored += blob_store.put_arrays(pca_key, **pca)
+        stored[col] = {"x": et.project(ref, pca), "row_ids": valid_rows[keep]}
         model = TextAdapter.model_name if monitored[col] == "text" else ImageAdapter.model_name
         column_baselines.append({"column_name": col, "col_type": monitored[col], "embeddings_blob": key,
                                  "state": {"model_name": model, "embedding_dim": int(emb.shape[1]),
-                                           "n_ref": int(len(keep)), "quality": quality}})
+                                           "n_ref": int(len(keep)), "quality": quality, "pca_blob": pca_key,
+                                           "pca_dim": int(pca["components"].shape[0])}})
 
     reference_rows, rows = None, None
     numcat = [c for c in by_type["numeric"] + by_type["categorical"] if c in inferred]
@@ -233,7 +336,8 @@ def run_fit(job: dict, persist_fit: Callable[..., Any], split_high_cardinality: 
                           "dedup_dropped": duplicate_rows_dropped}
 
     relationship_rows, relationships_dropped = _relationship_rows(
-        payload.get("relationships", []), monitored, inferred, rows, stage, job["owner_email"])
+        payload.get("relationships", []), monitored, inferred, rows, stage, job["owner_email"], df, stored, project)
+    bytes_stored += sum(r.pop("bytes", 0) for r in relationship_rows)
 
     proposals = {p["name"]: p for p in (stage["profile"] or {}).get("columns", [])}
     schema_rows = []
@@ -262,13 +366,14 @@ def run_fit(job: dict, persist_fit: Callable[..., Any], split_high_cardinality: 
         "relationships_dropped": relationships_dropped,
         "duplicate_rows_dropped": duplicate_rows_dropped,
         "cleaning_summary": fit_resp.cleaning_summary,
-        "data_quality": {c: q for c, (_, q) in embedded.items()},
+        "data_quality": {c: q for c, (_, _, q) in embedded.items()},
         "bytes_stored": bytes_stored,
     }
 
 
 def _relationship_rows(choices: List[dict], monitored: Dict[str, str], inferred: Dict[str, str],
-                       rows: Optional[pd.DataFrame], stage: dict, owner: str) -> Tuple[List[dict], List[str]]:
+                       rows: Optional[pd.DataFrame], stage: dict, owner: str, df: pd.DataFrame,
+                       stored: Dict[str, dict], project: str) -> Tuple[List[dict], List[str]]:
     """Confirmed relationships with their reference state, plus proposals the
     user rejected (kept for the audit trail, final_monitor=False)."""
     proposals = {(r["col_a"], r["col_b"]): r for r in (stage["profile"] or {}).get("relationships", [])}
@@ -276,16 +381,24 @@ def _relationship_rows(choices: List[dict], monitored: Dict[str, str], inferred:
     for c in choices:
         if c["monitor"]:
             ta, tb = monitored[c["col_a"]], monitored[c["col_b"]]
-            chosen[rel.ordered_pair(c["col_a"], ta, c["col_b"], tb)] = rel.kind_for(ta, tb)
+            chosen[ordered(c["col_a"], ta, c["col_b"], tb)] = pair_kind(ta, tb)
     out, dropped = [], []
     for (a, b), kind in chosen.items():
+        p = proposals.get((a, b), {})
+        base = {"col_a": a, "col_b": b, "kind": kind, "proposed": bool(p.get("proposed")),
+                "proposal_reason": p.get("reason"), "proposal_strength": p.get("strength"),
+                "final_monitor": True, "decided_by": owner}
+        if kind in ("probe", "text_image"):
+            fitted = _fit_embedding_relationship(kind, a, b, monitored, df, stored, project)
+            if fitted is None:
+                dropped.append(rel.pair_name(a, b))
+            else:
+                out.append({**base, **fitted, "materiality_floor": et.FLOORS[kind]})
+            continue
         if rows is None or a not in inferred or b not in inferred:  # e.g. a high-cardinality column was excluded
             dropped.append(rel.pair_name(a, b))
             continue
-        p = proposals.get((a, b), {})
-        out.append({"col_a": a, "col_b": b, "kind": kind, "proposed": bool(p.get("proposed")),
-                    "proposal_reason": p.get("reason"), "proposal_strength": p.get("strength"),
-                    "final_monitor": True, "decided_by": owner, "materiality_floor": rel.DEFAULT_FLOORS[kind],
+        out.append({**base, "materiality_floor": rel.DEFAULT_FLOORS[kind],
                     "reference_state": rel.reference_state(kind, rows[a].to_numpy(), rows[b].to_numpy())})
     for (a, b), p in proposals.items():
         if p["proposed"] and (a, b) not in chosen:
@@ -294,11 +407,45 @@ def _relationship_rows(choices: List[dict], monitored: Dict[str, str], inferred:
     return out, dropped
 
 
+def _fit_embedding_relationship(kind: str, a: str, b: str, monitored: Dict[str, str], df: pd.DataFrame,
+                                stored: Dict[str, dict], project: str) -> Optional[dict]:
+    """Fits a probe (a = text/image column, b = numeric/categorical target) or a
+    text<->image matching map on the reference; None if there's too little data."""
+    key = blob_store.new_key(project, "probe", "npz")
+    if kind == "probe":
+        if a not in stored:
+            return None
+        t_type = monitored[b]
+        x, row_ids = stored[a]["x"], stored[a]["row_ids"]
+        raw = rel.clean_column(df[b].iloc[row_ids].tolist(), t_type)
+        levels = rel.build_levels(raw[rel.complete_rows(raw)]) if t_type == "categorical" else None
+        y = _target_values(df[b].iloc[row_ids], t_type, levels)
+        mask = rel.complete_rows(y)
+        y = y[mask].astype(str if t_type == "categorical" else float)
+        score = et.cross_fitted_score(x[mask], y, t_type)
+        if score is None:
+            return None
+        nbytes = blob_store.put_arrays(key, emb_rows=np.flatnonzero(mask), y_ref=y,
+                                       **et.fit_probe(x[mask], y, t_type))
+        return {"probe_blob": key, "bytes": nbytes,
+                "reference_state": {"target_type": t_type, "levels": levels, "ref_score": score, "n_ref": int(len(y))}}
+    if a not in stored or b not in stored:
+        return None
+    both = np.intersect1d(stored[a]["row_ids"], stored[b]["row_ids"])
+    it, ii = np.searchsorted(stored[a]["row_ids"], both), np.searchsorted(stored[b]["row_ids"], both)
+    xt, xi = stored[a]["x"][it], stored[b]["x"][ii]
+    score = et.cross_fitted_matching(xi, xt)
+    if score is None:
+        return None
+    nbytes = blob_store.put_arrays(key, rows_text=it, rows_image=ii, **et.fit_matching(xi, xt))
+    return {"probe_blob": key, "bytes": nbytes, "reference_state": {"ref_score": score, "n_ref": int(len(both))}}
+
+
 def _relationship_tests(job: dict, table: dict, monitored: Dict[str, str], df: pd.DataFrame,
                         ref_rows: Optional[pd.DataFrame],
                         n_column_tests: int) -> Tuple[List[dict], Dict[str, dict], Optional[int]]:
     """(tests for the correction family, per-pair details for the report, null draws used)."""
-    confirmed = [r for r in table["relationships"] if r["final_monitor"]]
+    confirmed = [r for r in table["relationships"] if r["final_monitor"] and r["kind"] in rel.MIN_ROWS]
     if not confirmed or ref_rows is None:
         return [], {}, None
     project, version = job["project_id"], job["payload"]["version"]
@@ -349,6 +496,7 @@ def run_analyze(job: dict, run_analysis: Callable[..., Any]) -> dict:
     extra_issues: List[dict] = []
     data_quality: Dict[str, dict] = {}
     not_tested: Dict[str, str] = {}
+    embedding_state: Dict[str, dict] = {}  # projected reference/batch vectors, reused by probes
     try:
         for col in df.columns:
             if col not in schema:
@@ -360,7 +508,8 @@ def run_analyze(job: dict, run_analysis: Callable[..., Any]) -> dict:
                 not_tested[col] = "Column missing from this batch."
                 continue
             jobs.progress(job["id"], 10 + int(60 * i / max(1, len(embedding_cols))), f"Embedding column '{col}'")
-            cur, quality = _embed_column(monitored[col], df[col], archive)
+            cur, statuses = _embed_column(monitored[col], df[col], archive)
+            quality = _quality(statuses)
             if quality["invalid"]:
                 data_quality[col] = quality
                 extra_issues.append({"column": col, "severity_key": "default",
@@ -369,12 +518,18 @@ def run_analyze(job: dict, run_analysis: Callable[..., Any]) -> dict:
             if quality["valid"] < HARD_MIN_SAMPLES:
                 not_tested[col] = f"Only {quality['valid']} usable value(s); need at least {HARD_MIN_SAMPLES}."
                 continue
-            ref = blob_store.get_array(col_baselines[col]["embeddings_blob"]).astype(np.float32)
-            res = EmbeddingDriftDetector(auc_threshold=DCT_AUC_THRESHOLD).analyze(ref, cur)
+            ref_x, pca, ref_row_ids = _load_reference_embeddings(col_baselines[col])
+            bat_x = et.project(cur, pca)
+            res = et.dct_test(EmbeddingDriftDetector()._compute_auc, ref_x, bat_x, et.NULL_DRAWS,
+                              zlib.crc32(f"{project}|{version}|{col}|{len(bat_x)}".encode()))
+            embedding_state[col] = {"ref_x": ref_x, "bat_x": bat_x, "bat_rows": np.flatnonzero(statuses == "ok"),
+                                    "p_value": res["p_value"]}
             extra_metrics[col] = {
-                "statistic": res["statistic"], "p_value": None, "drift_detected": res["drift_detected"],
-                "effect_size": res["statistic"], "effect_floor": DCT_AUC_THRESHOLD, "decision_mode": "legacy",
-                "threshold_used": f"AUC>{DCT_AUC_THRESHOLD} (DCT; outside the Holm family until calibrated)",
+                "statistic": res["auc"], "p_value": res["p_value"], "drift_detected": res["auc"] > DCT_AUC_THRESHOLD,
+                "effect_size": res["auc"], "effect_floor": DCT_AUC_THRESHOLD, "decision_mode": "legacy",
+                "threshold_used": f"AUC>{DCT_AUC_THRESHOLD} on PCA-{ref_x.shape[1]} embeddings (decided outside the "
+                                  f"Holm family; p_value is from this project's own reference null"
+                                  + (", Gaussian tail" if res["tail_extrapolated"] else "") + ")",
             }
     finally:
         if archive:
@@ -404,11 +559,66 @@ def run_analyze(job: dict, run_analysis: Callable[..., Any]) -> dict:
         batch_size=len(df), report_kind="table", job_id=job["id"],
         extra_family_tests=rel_tests, family_null_draws=null_draws,
     )
+    alpha = CalibrationConfig.from_dict((crud.get_baseline_version(project, version) or {}).get("calibration_config")).alpha
+    rel_details.update(_embedding_relationship_tests(table, monitored, df, embedding_state, project, version, alpha))
     jobs.discard_stage(stage, "consumed")
     report = build_report(resp, monitored, version, len(df), data_quality, not_tested, rel_details)
     report["screening"] = {"emerged_dependencies": screening,
                            "note": "Informational only: never alerts and is not part of the Holm family."}
     return report
+
+
+def _load_reference_embeddings(col_baseline: dict) -> Tuple[np.ndarray, dict, Optional[np.ndarray]]:
+    """(projected reference, PCA, row ids). M1 baselines stored a bare .npy and
+    no PCA; for those the PCA is fitted on the fly (deterministic)."""
+    key = col_baseline["embeddings_blob"]
+    if key.endswith(".npy"):
+        emb, row_ids = blob_store.get_array(key).astype(np.float32), None
+    else:
+        arrays = blob_store.get_arrays(key)
+        emb, row_ids = arrays["emb"].astype(np.float32), arrays["row_ids"]
+    pca_key = col_baseline["state"].get("pca_blob")
+    pca = blob_store.get_arrays(pca_key) if pca_key else et.fit_pca(emb)
+    return et.project(emb, pca), pca, row_ids
+
+
+def _embedding_relationship_tests(table: dict, monitored: Dict[str, str], df: pd.DataFrame,
+                                  emb: Dict[str, dict], project: str, version: int, alpha: float) -> Dict[str, dict]:
+    """Report-only results for probes and text<->image matching: shown in the
+    report with a status, but outside the Holm family and never alerting."""
+    out = {}
+    for r in table["relationships"]:
+        if not r["final_monitor"] or r["kind"] not in ("probe", "text_image"):
+            continue
+        a, b, name, state = r["col_a"], r["col_b"], rel.pair_name(r["col_a"], r["col_b"]), r["reference_state"]
+        seed = zlib.crc32(f"{project}|{version}|{name}".encode())
+        params = blob_store.get_arrays(r["probe_blob"])
+        if a not in emb or (r["kind"] == "text_image" and b not in emb) or (r["kind"] == "probe" and b not in df.columns):
+            out[name] = {"kind": r["kind"], "testable": False, "reason": "A column is missing or untested in this batch."}
+            continue
+        if r["kind"] == "probe":
+            y = _target_values(df[b].iloc[emb[a]["bat_rows"]], state["target_type"], state.get("levels"))
+            mask = rel.complete_rows(y)
+            res = et.probe_test(emb[a]["ref_x"][params["emb_rows"]], params["y_ref"], emb[a]["bat_x"][mask],
+                                y[mask].astype(str if state["target_type"] == "categorical" else float),
+                                state["target_type"], params,
+                                state["ref_score"], et.NULL_DRAWS, seed)
+            sources = [a]
+        else:
+            both = np.intersect1d(emb[a]["bat_rows"], emb[b]["bat_rows"])
+            xt = emb[a]["bat_x"][np.searchsorted(emb[a]["bat_rows"], both)]
+            xi = emb[b]["bat_x"][np.searchsorted(emb[b]["bat_rows"], both)]
+            res = et.matching_test(emb[b]["ref_x"][params["rows_image"]], emb[a]["ref_x"][params["rows_text"]],
+                                   xi, xt, params, state["ref_score"], et.NULL_DRAWS, seed)
+            sources = [a, b]
+        res["kind"] = r["kind"]
+        if res["testable"]:
+            res["report_only"] = True
+            res["drift_detected"] = bool(res["p_value"] < alpha and res["effect"] >= r["materiality_floor"])
+            res["effect_floor"] = r["materiality_floor"]
+            res["confounded_by"] = [c for c in sources if emb[c]["p_value"] < alpha]
+        out[name] = res
+    return out
 
 
 def build_report(resp, monitored: Dict[str, str], version: int, n_rows: int,
@@ -432,14 +642,21 @@ def build_report(resp, monitored: Dict[str, str], version: int, n_rows: int,
         if in_family:
             members.append(col)
         elif col_type in ("text", "image"):
-            excluded.append({"test": col, "why": "Embedding test decided by the legacy AUC rule until its null "
-                                                 "distribution is calibrated (planned for M3)."})
+            excluded.append({"test": col, "why": "Embedding test decided by the AUC rule outside the family until "
+                                                 "its real-embedding calibration is approved; its p_value is shown."})
     relationship_drift = {}
     rel_metrics = {k: (v.model_dump() if hasattr(v, "model_dump") else dict(v))
                    for k, v in resp.relationship_metrics.items()}
     for name, d in (rel_details or {}).items():
         base = {k: d.get(k) for k in ("kind", "statistic_name", "reference_value", "current_value", "explanation",
                                       "excluded_unseen", "approximate_null", "null_draws")}
+        if d.get("report_only"):
+            relationship_drift[name] = {**base, "p_value": d["p_value"], "effect_size": d["effect"],
+                                        "effect_floor": d["effect_floor"], "tail_extrapolated": d["tail_extrapolated"],
+                                        "confounded_by": d["confounded_by"], "in_family": False, "report_only": True,
+                                        "status": "DRIFT" if d["drift_detected"] else "STABLE"}
+            excluded.append({"test": name, "why": "Report-only: probe/matching tests do not alert until validated."})
+            continue
         m = rel_metrics.get(name)
         if m is None:
             relationship_drift[name] = {**base, "status": "NOT_TESTED", "in_family": False, "reason": d.get("reason")}
@@ -459,7 +676,7 @@ def build_report(resp, monitored: Dict[str, str], version: int, n_rows: int,
         "overall": {"status": status, "alert": resp.system_alert_triggered, "sustained_alert": resp.sustained_alert,
                     "alert_state": resp.alert_state, "transition": resp.transition,
                     "triggered_by": [c for c, r in {**column_drift, **relationship_drift}.items()
-                                     if r["status"] == "DRIFT"]},
+                                     if r["status"] == "DRIFT" and not r.get("report_only")]},
         "column_drift": column_drift,
         "relationship_drift": relationship_drift,
         "schema_report": resp.schema_report,

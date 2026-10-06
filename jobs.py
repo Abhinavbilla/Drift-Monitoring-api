@@ -65,6 +65,8 @@ def discard_stage(stage: dict, status: str) -> None:
     sample values), and records why."""
     blob_store.delete(stage.get("table_blob"))
     blob_store.delete(stage.get("zip_blob"))
+    for cached in ((stage.get("profile") or {}).get("embedding_cache") or {}).values():
+        blob_store.delete(cached["key"])
     crud.update_stage(stage["id"], status=status, table_blob=None, zip_blob=None, profile=None)
     crud.clear_profile_job_results(stage["id"])
 

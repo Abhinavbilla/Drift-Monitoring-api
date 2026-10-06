@@ -150,7 +150,7 @@ export interface ColumnProposal {
 export interface RelationshipProposal {
   col_a: string;
   col_b: string;
-  kind: "num_num" | "cat_cat" | "num_cat";
+  kind: "num_num" | "cat_cat" | "num_cat" | "probe" | "text_image";
   strength: number;
   proposed: boolean;
   reason: string;
@@ -205,8 +205,11 @@ export interface RelationshipDrift {
   reference_value: number | null;
   current_value: number | null;
   explanation?: string;
+  p_value?: number | null;
   p_value_adjusted?: number | null;
   in_family: boolean;
+  report_only?: boolean;
+  confounded_by?: string[];
   reason?: string;
 }
 
