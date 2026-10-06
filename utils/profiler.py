@@ -1,5 +1,6 @@
 import pandas as pd
 import re
+import warnings
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -196,3 +197,139 @@ def profile_columns(df: pd.DataFrame) -> List[Dict[str, Any]]:
         })
 
     return profiles
+
+# ---------------------------------------------------------
+# Unified table profiling (docs/unified_table_plan.md, Phase 1)
+# ---------------------------------------------------------
+# profile_table() proposes one of five types per column, with a monitor
+# recommendation, confidence, evidence and reason. Numeric/categorical/ignore
+# proposals come straight from profile_columns() above (unchanged), so the
+# table path classifies those columns exactly like the existing tabular
+# path; string columns additionally get image / URL / identifier / date /
+# free-text detection. `confidence` is a heuristic agreement score in [0, 1],
+# not a calibrated probability. The human confirms or edits every proposal.
+_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+_HEX_ID_RE = re.compile(r"^(?:[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}|[0-9a-f]{16,})$",
+                        re.IGNORECASE)
+_SAMPLE_SIZE = 2000
+
+
+def _proposal(ptype: str, monitor: bool, confidence: float, reason: str, alternative: Optional[str] = None):
+    return {"proposed_type": ptype, "proposed_monitor": monitor, "confidence": round(float(confidence), 2),
+            "reason": reason, "alternative_type": alternative}
+
+
+def _string_evidence(strs: pd.Series) -> Dict[str, float]:
+    lengths = strs.str.len()
+    tokens = strs.str.split().str.len()
+    non_space = strs.str.replace(r"\s", "", regex=True)
+    letters = non_space.str.count(r"[^\W\d_]")
+    total_chars = non_space.str.len().sum()
+    return {
+        "mean_length": round(float(lengths.mean()), 1),
+        "mean_tokens": round(float(tokens.mean()), 2),
+        "alpha_ratio": round(float(letters.sum() / total_chars), 3) if total_chars else 0.0,
+    }
+
+
+def _string_column_proposal(strs: pd.Series, ev: Dict[str, Any], archive) -> Optional[Dict[str, Any]]:
+    """Proposal for a non-numeric string column, or None to fall back to profile_columns()."""
+    from ingest.images import IMAGE_EXTENSIONS, decode_inline  # local: keeps profiler importable on its own
+
+    head = strs.head(50)
+    inline_ratio = float(head.map(lambda v: decode_inline(v) is not None).mean())
+    if inline_ratio >= 0.8:
+        return _proposal("image", True, inline_ratio, "Values are embedded base64/data-URI images.")
+
+    ext_ratio = float(strs.str.lower().str.strip().str.endswith(IMAGE_EXTENSIONS).mean())
+    if archive is not None:
+        match_ratio = float(strs.map(lambda v: archive.resolve(v)[0] == "ok").mean())
+        ev["image_match_ratio"] = round(match_ratio, 3)
+        if match_ratio >= 0.5:
+            return _proposal("image", True, match_ratio,
+                             f"{match_ratio:.0%} of values match files in the image ZIP.")
+        if ext_ratio >= 0.8:
+            return _proposal("image", False, 0.5,
+                             f"Values look like image filenames but only {match_ratio:.0%} match files in the "
+                             f"image ZIP -- check the ZIP before monitoring this column.")
+    elif ext_ratio >= 0.8:
+        return _proposal("image", False, 0.6,
+                         "Values look like image filenames, but no image ZIP was uploaded -- upload one to "
+                         "monitor this column.")
+
+    if float(strs.str.match(_URL_RE).mean()) >= 0.8:
+        return _proposal("ignore", False, 0.95, "Remote URLs -- fetching them is not supported.")
+
+    if (ev["mean_tokens"] <= 1.2 and ev["unique_ratio"] >= 0.95) or float(strs.str.match(_HEX_ID_RE).mean()) >= 0.8:
+        return _proposal("ignore", False, 0.95, "Identifier-like: unique single-token values.")
+
+    has_digits = float(strs.str.contains(r"\d").mean())
+    if has_digits >= 0.9 and ev["mean_tokens"] <= 3:
+        sample = strs.head(200)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
+        if float(parsed.notna().mean()) >= 0.9:
+            return _proposal("ignore", False, 0.9, "Date/time values (always drift trivially over time).")
+
+    criteria = [ev["mean_tokens"] >= 3, ev["mean_length"] >= 15, ev["alpha_ratio"] >= 0.5,
+                ev["unique_ratio"] >= 0.5 or ev["n_unique"] > 50]
+    if ev["mean_tokens"] >= 3 and sum(criteria) >= 3:
+        if ev["n_unique"] <= 50:
+            if ev["mean_tokens"] >= 5 and ev["mean_length"] >= 40:
+                return _proposal("text", True, 0.6,
+                                 "Repeated multi-word sentences -- could also be categorical templates; review.",
+                                 alternative="categorical")
+            return None
+        return _proposal("text", True, 0.6 + 0.1 * sum(criteria),
+                         "High uniqueness + multi-word strings + substantial average length.")
+    return None
+
+
+def _proposal_from_profile(p: Dict[str, Any], ev: Dict[str, Any]) -> Dict[str, Any]:
+    status, reason = p["monitor"], p["reason"]
+    if status is True:
+        return _proposal("numeric", True, ev.get("numeric_fraction", 1.0),
+                         f"Successful numeric coercion ({ev.get('numeric_fraction', 1.0):.0%} of values). {reason}")
+    if status == "Categorical":
+        return _proposal("categorical", True, 0.95 if ev["n_unique"] <= 20 else 0.8,
+                         f"Repeated limited-cardinality values. {reason}")
+    if status == "Review":
+        guess = {"continuous": "numeric", "categorical": "categorical"}.get(p["best_guess"], "ignore")
+        return _proposal(guess, guess != "ignore", 0.5, f"{reason} Best guess: {guess}.")
+    return _proposal("ignore", False, 0.95, reason)
+
+
+def profile_table(df: pd.DataFrame, archive=None) -> List[Dict[str, Any]]:
+    """One proposal per column: name, proposed_type, proposed_monitor,
+    confidence, reason, alternative_type, evidence (aggregates only, safe to
+    persist) and sample_values (up to 5 truncated values -- shown to the
+    owner during review, never persisted). `archive` is an optional
+    ingest.images.ImageArchive used to recognize filename columns."""
+    n_rows = len(df)
+    base = {p["name"]: p for p in profile_columns(df)}
+    proposals = []
+    for col in df.columns:
+        p = base[col]
+        non_null = df[col].dropna()
+        n_unique = int(non_null.astype(str).nunique()) if len(non_null) else 0
+        ev: Dict[str, Any] = {
+            "n_rows": n_rows,
+            "null_rate": round(1 - len(non_null) / n_rows, 4) if n_rows else 1.0,
+            "n_unique": n_unique,
+            "unique_ratio": round(n_unique / len(non_null), 4) if len(non_null) else 0.0,
+            "dominant_ratio": p["dominant_ratio"],
+        }
+        proposal = None
+        if len(non_null):
+            sample = non_null.sample(min(_SAMPLE_SIZE, len(non_null)), random_state=42)
+            ev["numeric_fraction"] = round(float(pd.to_numeric(sample, errors="coerce").notna().mean()), 3)
+            if not p["is_numeric"] and not p["is_datetime"] and ev["numeric_fraction"] <= NUMERIC_COERCION_THRESHOLD:
+                strs = sample.astype(str)
+                ev.update(_string_evidence(strs))
+                proposal = _string_column_proposal(strs, ev, archive)
+        if proposal is None:
+            proposal = _proposal_from_profile(p, ev)
+        samples = [str(v)[:80] for v in pd.unique(non_null.astype(str))[:5]] if len(non_null) else []
+        proposals.append({"name": col, **proposal, "evidence": ev, "sample_values": samples})
+    return proposals

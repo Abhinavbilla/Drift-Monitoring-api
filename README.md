@@ -508,6 +508,29 @@ print(response.json())
 
 ## API Reference
 
+### Unified table monitoring (new, milestone M1)
+
+One table = one project. A single table can mix **numeric, categorical, text and image** columns; image columns hold filenames resolved against an uploaded ZIP (or base64/data-URI values in JSON). Every heavy step runs as a background job, so clients poll `GET /jobs/{job_id}`. Design and roadmap: [`docs/unified_table_plan.md`](docs/unified_table_plan.md).
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/tables/{project_id}/stage` | POST | Multipart `file` (any supported table format) + optional `images` ZIP. Starts a profile job that proposes, per column: type (`numeric`/`categorical`/`text`/`image`/`ignore`), monitor yes/no, confidence (a heuristic score, not a probability), evidence and reason. Staged files are deleted after the fit or after 24 h |
+| `/jobs/{job_id}` | GET | Job status, progress, and on success its result (profile, fit summary, or analysis report). Owner only |
+| `/tables/{project_id}/fit` | POST | `{stage_id, columns: [{name, type, monitor}], calibration_config?, schema_policy?, alert_policy?, model_version_label?}`: the human-confirmed schema. Locks a new baseline version |
+| `/tables/{project_id}/analyze` | POST | Multipart production `file` + optional `images` ZIP; optional `baseline_version` and `Idempotency-Key`. Result: per-column drift, schema issues (including missing/corrupt images and empty text), data quality, and which tests formed the Holm family |
+| `/tables/{project_id}/baseline` | GET | The confirmed schema of a version: what the profiler proposed, what the user chose, who decided, and whether each column is monitored |
+| `/tables/stages/{stage_id}` | DELETE | Discard a staged upload's raw files immediately |
+
+What M1 does and does not do, plainly:
+- **Numeric/categorical columns** use exactly the existing tabular detectors (KS, PSI, calibrated two-gate, Holm). A numeric/categorical-only table produces the same results as `/fit/upload` + `/analyze/upload` (a regression test asserts identical metrics).
+- **Text/image columns** use the existing Domain Classifier Test with the legacy `AUC > 0.65` rule, reported as **outside the Holm family**, because their p-values were measured over-confident in Step 2 (e). Calibrating them is milestone M3.
+- **Relationship drift between columns is not implemented yet** (milestone M2). "No column drifted" does not mean "no data drift": a change in how columns relate to each other is not checked by M1.
+- History, alert state machine, webhooks and idempotency all work for table projects; the original tabular/text/image/joint endpoints are unchanged.
+- Image ZIPs are read in memory, never extracted; unsafe paths, symlinks, encrypted entries, oversized and suspiciously compressed entries are rejected and counted.
+- Measured live on this machine (120 PetFinder rows with photos): profile 1 s, fit 10 s, analysis of 100 rows 4 s. Larger tables and slower hosts will take proportionally longer.
+
+### Per-modality endpoints
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/fit/{project_id}` | POST | Lock a tabular baseline from training data (JSON body) |

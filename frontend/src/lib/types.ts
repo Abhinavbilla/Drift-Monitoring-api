@@ -115,3 +115,79 @@ export interface BaselineInfo {
   feature_types: Record<string, string>;
   modality: Modality;
 }
+
+// -- unified table path --
+export type TableColumnType = "numeric" | "categorical" | "text" | "image" | "ignore";
+
+export interface JobAccepted {
+  job_id: string;
+  stage_id: string | null;
+  expires_at: string | null;
+  replay: boolean;
+}
+
+export interface Job<R> {
+  job_id: string;
+  kind: "profile" | "fit" | "analyze";
+  status: "queued" | "running" | "succeeded" | "failed" | "interrupted";
+  progress: number;
+  progress_message: string | null;
+  result: R | null;
+  error: string | null;
+}
+
+export interface ColumnProposal {
+  name: string;
+  proposed_type: TableColumnType;
+  proposed_monitor: boolean;
+  confidence: number;
+  reason: string;
+  alternative_type: TableColumnType | null;
+  evidence: Record<string, number>;
+  sample_values: string[];
+}
+
+export interface TableProfile {
+  stage_id: string;
+  n_rows: number;
+  columns: ColumnProposal[];
+  image_zip: { image_entries: number; rejected: Record<string, number> } | null;
+}
+
+export interface TableColumnChoice {
+  name: string;
+  type: TableColumnType;
+  monitor: boolean;
+}
+
+export interface TableFitResult {
+  version: number;
+  message: string;
+  monitored: Record<string, string[]>;
+  not_monitored: string[];
+  duplicate_rows_dropped: number;
+  data_quality: Record<string, { valid: number; invalid: Record<string, number> }>;
+}
+
+export interface ColumnDrift {
+  type: TableColumnType;
+  test: string;
+  status: "DRIFT" | "STABLE" | "NOT_TESTED";
+  statistic?: number;
+  p_value?: number | null;
+  p_value_adjusted?: number | null;
+  effect_floor?: number | null;
+  in_family: boolean;
+  threshold_used?: string | null;
+  reason?: string;
+}
+
+export interface TableReport {
+  baseline_version: number;
+  n_rows: number;
+  overall: { status: "DRIFT" | "STABLE" | "DATA_ISSUES"; alert: boolean; alert_state: string | null; triggered_by: string[] };
+  column_drift: Record<string, ColumnDrift>;
+  schema_report: Record<string, { issue: string; severity: string }[]>;
+  data_quality: Record<string, { valid: number; invalid: Record<string, number> }>;
+  family: { method: string; members: string[]; excluded: { test: string; why: string }[] };
+}

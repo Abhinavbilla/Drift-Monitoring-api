@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Literal, Optional
 
 class FitBaselineRequest(BaseModel):
     reference_data: Dict[str, List[Any]]                        # continuous columns
@@ -324,3 +324,31 @@ class WebhookResponse(BaseModel):
         description="Only present in the response to POST /webhooks/{project_id} (webhook creation) "
                     "-- never returned again afterward, including from GET. Store it now."
     )
+
+
+# ---------------------------------------------------------
+# Unified table path (docs/unified_table_plan.md)
+# ---------------------------------------------------------
+class TableColumnChoice(BaseModel):
+    name: str
+    type: Literal["numeric", "categorical", "text", "image", "ignore"]
+    monitor: bool
+
+
+class TableFitRequest(BaseModel):
+    stage_id: str = Field(description="From POST /tables/{project_id}/stage, once its profile job succeeded.")
+    columns: List[TableColumnChoice] = Field(
+        description="The confirmed schema: one entry per column. Columns left out are treated as "
+                    "type 'ignore', not monitored.")
+    calibration_config: Optional[Dict[str, Any]] = None
+    schema_policy: Optional[Dict[str, str]] = None
+    alert_policy: Optional[Dict[str, int]] = None
+    model_version_label: Optional[str] = None
+
+
+class JobAcceptedResponse(BaseModel):
+    job_id: str
+    stage_id: Optional[str] = None
+    expires_at: Optional[str] = None
+    replay: bool = Field(default=False, description="True when an Idempotency-Key matched an earlier analysis; "
+                                                     "job_id is that earlier job.")

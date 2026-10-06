@@ -3,6 +3,7 @@ import { useAuth } from "../lib/auth";
 
 const projectTabs = [
   { to: "", label: "Overview", end: true },
+  { to: "table", label: "Table Monitoring" },
   { to: "fit", label: "Fit Baseline" },
   { to: "analyze", label: "Analyze" },
   { to: "predict", label: "Predict" },

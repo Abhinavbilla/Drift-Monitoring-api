@@ -17,12 +17,17 @@ DB_PATH = "drift.db"
 MAX_CATEGORICAL_CARDINALITY = 50
 
 def get_connection():
-    return sqlite3.connect(DB_PATH)
+    # timeout: the table-job worker thread writes concurrently with
+    # request handlers, so wait for a lock instead of failing immediately.
+    return sqlite3.connect(DB_PATH, timeout=30)
 
 def init_db():
     """Initializes the database tables."""
     conn = get_connection()
     cursor = conn.cursor()
+    # WAL lets readers proceed while the job worker writes. Persistent on
+    # the DB file once set, so this is a no-op after the first startup.
+    cursor.execute("PRAGMA journal_mode=WAL")
 
     # UPDATED: Added owner_email TEXT to link projects to specific users
     cursor.execute('''
@@ -234,11 +239,104 @@ def init_db():
         ("alert_k", "ALTER TABLE projects ADD COLUMN alert_k INTEGER DEFAULT 1"),
         ("alert_m", "ALTER TABLE projects ADD COLUMN alert_m INTEGER DEFAULT 1"),
         ("windows_considered", "ALTER TABLE analysis_runs ADD COLUMN windows_considered INTEGER"),
+        # Unified table path (M1): which workflow produced the run, and the job that ran it.
+        ("report_kind", "ALTER TABLE analysis_runs ADD COLUMN report_kind TEXT DEFAULT 'tabular'"),
+        ("job_id", "ALTER TABLE analysis_runs ADD COLUMN job_id TEXT"),
     ]:
         try:
             cursor.execute(ddl)
         except sqlite3.OperationalError:
             pass  # column already exists
+
+    # ---- Unified table path (docs/unified_table_plan.md, section F) ----
+    # Large artifacts (embeddings, staged uploads, row-aligned reference
+    # rows) live in db/blob_store.py; these tables hold only keys/metadata.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS staged_uploads (
+            id TEXT PRIMARY KEY,
+            owner_email TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            status TEXT NOT NULL,
+            table_blob TEXT, zip_blob TEXT, table_filename TEXT,
+            table_bytes INTEGER, zip_bytes INTEGER,
+            profile TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            owner_email TEXT NOT NULL,
+            owner_name TEXT,
+            project_id TEXT NOT NULL,
+            public_project_id TEXT,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            progress INTEGER DEFAULT 0,
+            progress_message TEXT,
+            stage_id TEXT,
+            payload TEXT,
+            idempotency_key TEXT,
+            payload_hash TEXT,
+            result TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs (status, created_at)')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS table_schemas (
+            project_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            column_name TEXT NOT NULL,
+            ordinal INTEGER,
+            proposed_type TEXT, proposed_monitor INTEGER, confidence REAL,
+            evidence TEXT, reason TEXT, alternative_type TEXT,
+            final_type TEXT NOT NULL, final_monitor INTEGER NOT NULL,
+            decided_by TEXT, decided_at TEXT,
+            PRIMARY KEY (project_id, version, column_name)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS table_column_baselines (
+            project_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            column_name TEXT NOT NULL,
+            col_type TEXT NOT NULL,
+            state TEXT,
+            embeddings_blob TEXT,
+            null_blob TEXT,
+            PRIMARY KEY (project_id, version, column_name)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS table_reference_rows (
+            project_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            rows_blob TEXT,
+            n_rows INTEGER,
+            sample_seed INTEGER,
+            dedup_dropped INTEGER,
+            PRIMARY KEY (project_id, version)
+        )
+    ''')
+    # Populated from M2 (relationship engine); created now so the version
+    # layout is final and M2 needs no further schema change.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS table_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL, version INTEGER NOT NULL,
+            col_a TEXT NOT NULL, col_b TEXT NOT NULL, kind TEXT NOT NULL,
+            proposed INTEGER, proposal_reason TEXT, proposal_strength REAL,
+            final_monitor INTEGER, decided_by TEXT,
+            reference_state TEXT, materiality_floor REAL,
+            null_blob TEXT, probe_blob TEXT, created_at TEXT
+        )
+    ''')
 
     conn.commit()
     conn.close()
@@ -880,7 +978,7 @@ def insert_analysis_run(
     project: str, baseline_version: Optional[int], ts: str, batch_size: int,
     idempotency_key: Optional[str], payload_hash: Optional[str], decision_mode: Optional[str],
     system_alert: bool, sustained_alert: Optional[bool], feature_results: dict,
-    schema_report: Optional[dict],
+    schema_report: Optional[dict], report_kind: str = "tabular", job_id: Optional[str] = None,
 ) -> int:
     """Step 5 item 2: one row per /analyze call. feature_results/schema_report
     are the already-aggregated statistics dicts the response itself returns
@@ -889,14 +987,16 @@ def insert_analysis_run(
     cursor = conn.cursor()
     cursor.execute(
         "INSERT INTO analysis_runs (project, baseline_version, ts, batch_size, idempotency_key, "
-        "payload_hash, decision_mode, system_alert, sustained_alert, feature_results, schema_report) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "payload_hash, decision_mode, system_alert, sustained_alert, feature_results, schema_report, "
+        "report_kind, job_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             project, baseline_version, ts, batch_size, idempotency_key, payload_hash, decision_mode,
             1 if system_alert else 0,
             None if sustained_alert is None else (1 if sustained_alert else 0),
             json.dumps(feature_results) if feature_results is not None else None,
             json.dumps(schema_report) if schema_report is not None else None,
+            report_kind, job_id,
         ),
     )
     run_id = cursor.lastrowid
@@ -1231,3 +1331,250 @@ def list_webhook_deliveries(webhook_id: str) -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     return [_row_to_delivery(r) for r in rows]
+
+
+# ---------------------------------------------------------
+# Unified table path (docs/unified_table_plan.md): staged uploads, jobs,
+# and per-version table artifacts. Large payloads live in db/blob_store.py;
+# rows here hold only keys and metadata.
+# ---------------------------------------------------------
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _rows_as_dicts(cursor) -> List[Dict[str, Any]]:
+    cols = [d[0] for d in cursor.description]
+    return [dict(zip(cols, r)) for r in cursor.fetchall()]
+
+
+def _update_row(table: str, key_col: str, key: str, allowed: set, fields: Dict[str, Any]) -> None:
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"Cannot update {table} column(s) {sorted(unknown)}")
+    if not fields:
+        return
+    conn = get_connection()
+    conn.execute(
+        f"UPDATE {table} SET {', '.join(f'{c} = ?' for c in fields)} WHERE {key_col} = ?",
+        (*fields.values(), key),
+    )
+    conn.commit()
+    conn.close()
+
+
+def create_stage(stage_id: str, owner_email: str, project_id: str, purpose: str, table_blob: str,
+                 zip_blob: Optional[str], table_filename: str, table_bytes: int, zip_bytes: int,
+                 expires_at: str) -> None:
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO staged_uploads (id, owner_email, project_id, purpose, status, table_blob, zip_blob, "
+        "table_filename, table_bytes, zip_bytes, created_at, expires_at) "
+        "VALUES (?, ?, ?, ?, 'uploaded', ?, ?, ?, ?, ?, ?, ?)",
+        (stage_id, owner_email, project_id, purpose, table_blob, zip_blob, table_filename,
+         table_bytes, zip_bytes, _now_iso(), expires_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_stage(stage_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    rows = _rows_as_dicts(conn.execute("SELECT * FROM staged_uploads WHERE id = ?", (stage_id,)))
+    conn.close()
+    if not rows:
+        return None
+    row = rows[0]
+    row["profile"] = json.loads(row["profile"]) if row["profile"] else None
+    return row
+
+
+def update_stage(stage_id: str, **fields) -> None:
+    if fields.get("profile") is not None:
+        fields["profile"] = json.dumps(fields["profile"])
+    _update_row("staged_uploads", "id", stage_id, {"status", "profile", "table_blob", "zip_blob"}, fields)
+
+
+def list_expired_stages(now_iso: str) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    rows = _rows_as_dicts(conn.execute(
+        "SELECT id, table_blob, zip_blob FROM staged_uploads "
+        "WHERE expires_at < ? AND status NOT IN ('expired', 'deleted', 'consumed')",
+        (now_iso,),
+    ))
+    conn.close()
+    return rows
+
+
+def create_job(job_id: str, owner_email: str, owner_name: str, project_id: str, public_project_id: str,
+               kind: str, stage_id: Optional[str], payload: Optional[dict],
+               idempotency_key: Optional[str] = None, payload_hash: Optional[str] = None) -> None:
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO jobs (id, owner_email, owner_name, project_id, public_project_id, kind, status, "
+        "stage_id, payload, idempotency_key, payload_hash, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
+        (job_id, owner_email, owner_name, project_id, public_project_id, kind, stage_id,
+         json.dumps(payload) if payload is not None else None, idempotency_key, payload_hash, _now_iso()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _decode_job(row: Dict[str, Any]) -> Dict[str, Any]:
+    for k in ("payload", "result"):
+        row[k] = json.loads(row[k]) if row.get(k) else None
+    return row
+
+
+def get_job(job_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    rows = _rows_as_dicts(conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)))
+    conn.close()
+    return _decode_job(rows[0]) if rows else None
+
+
+def claim_next_job() -> Optional[Dict[str, Any]]:
+    """Atomically moves the oldest queued job to 'running' and returns it --
+    the conditional UPDATE guarantees two claimers never take the same job."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT id FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1").fetchone()
+        if not row:
+            return None
+        cur = conn.execute(
+            "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'",
+            (_now_iso(), row[0]),
+        )
+        conn.commit()
+        if cur.rowcount != 1:
+            return None
+    finally:
+        conn.close()
+    return get_job(row[0])
+
+
+def update_job(job_id: str, **fields) -> None:
+    if fields.get("result") is not None:
+        fields["result"] = json.dumps(fields["result"])
+    _update_row("jobs", "id", job_id,
+                {"status", "progress", "progress_message", "result", "error", "finished_at"}, fields)
+
+
+def clear_profile_job_results(stage_id: str) -> None:
+    """A profile job's result holds sample values; they must not outlive the stage."""
+    conn = get_connection()
+    conn.execute("UPDATE jobs SET result = NULL WHERE stage_id = ? AND kind = 'profile'", (stage_id,))
+    conn.commit()
+    conn.close()
+
+
+def mark_running_jobs_interrupted() -> int:
+    """Startup recovery: a job left 'running' belonged to a process that
+    died (restart, spin-down) -- it will never finish, so say so."""
+    conn = get_connection()
+    cur = conn.execute(
+        "UPDATE jobs SET status = 'interrupted', finished_at = ?, "
+        "error = 'Interrupted by a server restart before it finished. Please resubmit.' "
+        "WHERE status = 'running'",
+        (_now_iso(),),
+    )
+    conn.commit()
+    conn.close()
+    return cur.rowcount
+
+
+def find_job_by_idempotency_key(project_id: str, kind: str, key: str, cutoff_iso: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    rows = _rows_as_dicts(conn.execute(
+        "SELECT * FROM jobs WHERE project_id = ? AND kind = ? AND idempotency_key = ? AND created_at >= ? "
+        "AND status NOT IN ('failed', 'interrupted') ORDER BY created_at DESC LIMIT 1",
+        (project_id, kind, key, cutoff_iso),
+    ))
+    conn.close()
+    return _decode_job(rows[0]) if rows else None
+
+
+def set_baseline_modality(project_id: str, version: int, modality: str) -> None:
+    """Marks both the active `baselines` row and its archived version, so
+    activating that version later restores the same kind."""
+    conn = get_connection()
+    conn.execute("UPDATE baselines SET modality = ? WHERE project_id = ?", (modality, project_id))
+    conn.execute("UPDATE baseline_versions SET modality = ? WHERE project_id = ? AND version = ?",
+                 (modality, project_id, version))
+    conn.commit()
+    conn.close()
+
+
+def insert_table_version_artifacts(project_id: str, version: int, schema_rows: List[Dict[str, Any]],
+                                   column_baselines: List[Dict[str, Any]],
+                                   reference_rows: Optional[Dict[str, Any]]) -> None:
+    """All per-version table artifacts in one transaction, so a version is
+    never left with a schema but no column baselines (or vice versa)."""
+    now = _now_iso()
+    conn = get_connection()
+    try:
+        conn.executemany(
+            "INSERT INTO table_schemas (project_id, version, column_name, ordinal, proposed_type, "
+            "proposed_monitor, confidence, evidence, reason, alternative_type, final_type, final_monitor, "
+            "decided_by, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(project_id, version, r["column_name"], r["ordinal"], r.get("proposed_type"),
+              None if r.get("proposed_monitor") is None else int(r["proposed_monitor"]),
+              r.get("confidence"), json.dumps(r.get("evidence") or {}), r.get("reason"),
+              r.get("alternative_type"), r["final_type"], int(r["final_monitor"]),
+              r.get("decided_by"), now) for r in schema_rows],
+        )
+        conn.executemany(
+            "INSERT INTO table_column_baselines (project_id, version, column_name, col_type, state, "
+            "embeddings_blob) VALUES (?, ?, ?, ?, ?, ?)",
+            [(project_id, version, c["column_name"], c["col_type"], json.dumps(c.get("state") or {}),
+              c.get("embeddings_blob")) for c in column_baselines],
+        )
+        if reference_rows is not None:
+            conn.execute(
+                "INSERT INTO table_reference_rows (project_id, version, rows_blob, n_rows, sample_seed, "
+                "dedup_dropped) VALUES (?, ?, ?, ?, ?, ?)",
+                (project_id, version, reference_rows["rows_blob"], reference_rows["n_rows"],
+                 reference_rows["sample_seed"], reference_rows["dedup_dropped"]),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_table_version(project_id: str, version: int) -> Optional[Dict[str, Any]]:
+    """Everything stored for one table baseline version, or None if that
+    version isn't a table version."""
+    conn = get_connection()
+    schema = _rows_as_dicts(conn.execute(
+        "SELECT * FROM table_schemas WHERE project_id = ? AND version = ? ORDER BY ordinal", (project_id, version)))
+    if not schema:
+        conn.close()
+        return None
+    columns = _rows_as_dicts(conn.execute(
+        "SELECT * FROM table_column_baselines WHERE project_id = ? AND version = ?", (project_id, version)))
+    ref_rows = _rows_as_dicts(conn.execute(
+        "SELECT * FROM table_reference_rows WHERE project_id = ? AND version = ?", (project_id, version)))
+    relationships = _rows_as_dicts(conn.execute(
+        "SELECT * FROM table_relationships WHERE project_id = ? AND version = ?", (project_id, version)))
+    conn.close()
+    for r in schema:
+        r["evidence"] = json.loads(r["evidence"]) if r["evidence"] else {}
+        r["proposed_monitor"] = None if r["proposed_monitor"] is None else bool(r["proposed_monitor"])
+        r["final_monitor"] = bool(r["final_monitor"])
+    for c in columns:
+        c["state"] = json.loads(c["state"]) if c["state"] else {}
+    return {"schema": schema, "columns": columns,
+            "reference_rows": ref_rows[0] if ref_rows else None, "relationships": relationships}
+
+
+def delete_table_project_data(project_id: str) -> None:
+    """Rows only -- the caller deletes the project's blobs via BlobStore.delete_prefix."""
+    conn = get_connection()
+    for table in ("table_schemas", "table_column_baselines", "table_reference_rows",
+                  "table_relationships", "staged_uploads", "jobs"):
+        conn.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
+    conn.commit()
+    conn.close()

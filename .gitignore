@@ -28,3 +28,8 @@ datasets/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime data: table-path blobs (embeddings, staged uploads) are sensitive
+data/
+uvicorn.log
+frontend/vite.log

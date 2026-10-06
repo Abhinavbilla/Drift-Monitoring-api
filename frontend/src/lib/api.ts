@@ -5,7 +5,10 @@ import type {
   FitResponse,
   HealthResponse,
   HistoryResponse,
+  Job,
+  JobAccepted,
   LogEntry,
+  TableColumnChoice,
   PredictResponse,
   Webhook,
 } from "./types";
@@ -150,4 +153,31 @@ export const api = {
       headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {},
     });
   },
+
+  // -- unified table path (one table = one project; heavy steps run as jobs) --
+  stageTable: (projectId: string, file: File, images?: File) =>
+    request<JobAccepted>(`/tables/${projectId}/stage`, { method: "POST", body: tableForm(file, images), isForm: true }),
+  fitTable: (projectId: string, stageId: string, columns: TableColumnChoice[]) =>
+    request<JobAccepted>(`/tables/${projectId}/fit`, { method: "POST", body: { stage_id: stageId, columns } }),
+  analyzeTable: (projectId: string, file: File, images?: File) =>
+    request<JobAccepted>(`/tables/${projectId}/analyze`, { method: "POST", body: tableForm(file, images), isForm: true }),
+  getJob: <R,>(jobId: string) => request<Job<R>>(`/jobs/${jobId}`),
 };
+
+function tableForm(file: File, images?: File): FormData {
+  const form = new FormData();
+  form.append("file", file);
+  if (images) form.append("images", images);
+  return form;
+}
+
+/** Polls a job until it finishes; resolves with its result or throws its error. */
+export async function waitForJob<R>(jobId: string, onProgress?: (job: Job<R>) => void): Promise<R> {
+  for (;;) {
+    const job = await api.getJob<R>(jobId);
+    onProgress?.(job);
+    if (job.status === "succeeded") return job.result as R;
+    if (job.status === "failed" || job.status === "interrupted") throw new ApiError(422, job.error || "Job failed.");
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}

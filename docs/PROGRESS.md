@@ -8,6 +8,33 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Unified table monitoring, milestone M1 (user-approved, 2026-10-06) — DONE.**
+Plan: `docs/unified_table_plan.md` (A–S, approved per milestone; M2 needs
+its own approval). Implemented: `/tables/{id}/stage|fit|analyze|baseline`,
+`GET /jobs/{id}`, `DELETE /tables/stages/{id}`; `jobs.py` (one in-process
+worker thread, FIFO, restart recovery, 24 h stage expiry sweep, sanitized
+errors); `db/blob_store.py` (filesystem under `DRIFT_DATA_DIR`, default
+`data/blobs`); `ingest/images.py` (safe ZIP index + per-row image status);
+`utils/profiler.profile_table` (built on the unchanged `profile_columns`);
+`drift/table_monitor.py` (job handlers). New tables: `staged_uploads`,
+`jobs`, `table_schemas`, `table_column_baselines`, `table_reference_rows`
+(row-aligned Parquet for M2), `table_relationships` (empty until M2);
+`analysis_runs` gained `report_kind`, `job_id`. SQLite now WAL + 30 s busy
+timeout. `.xls` fixed (`xlrd` added; no real .xls fixture tested). Frontend:
+"Table Monitoring" tab (`TableWorkflowPage.tsx`). Key decisions: numeric/
+categorical reuse `_resolve_and_persist_fit` / `_run_tabular_analysis`
+(equivalence test proves identical metrics); text/image use legacy DCT
+outside the Holm family; idempotency for table analyses lives at the job
+level (file hash), not in analysis_runs. Verified: new
+`tests/test_table_unified.py` (17), full suite 332 passed; live run on the
+restarted server with 120 real PetFinder rows + photos (profile 1 s, fit
+10 s, analyze 4 s; dogs-vs-cats flagged text AUC 0.97 / image 0.998).
+Observed, not fixed: the same live run's dogs-vs-dogs batch flagged `Fee`
+and `Breed1` via the EXISTING categorical PSI test (known small-N PSI
+sensitivity; slices were sequential rows, not random). Not verified: the
+React page in a real browser (typechecks only). Next: M2 (relationship
+engine) after user approval.
+
 **Tabular /fit cleaning improvements (2026-10-05) — DONE.** Categorical
 values are whitespace-stripped (case untouched); a column over the
 categorical cardinality cap is now excluded instead of aborting the whole

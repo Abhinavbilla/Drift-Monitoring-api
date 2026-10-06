@@ -31,8 +31,11 @@ from models import (
     FitJointBaselineRequest, AnalyzeJointBatchRequest,
     ActivateBaselineVersionRequest,
     RegisterWebhookRequest, WebhookResponse,
+    TableFitRequest, JobAcceptedResponse,
 )
-from db import crud
+import jobs
+from db import blob_store, crud
+from drift import table_monitor
 from drift.detector import compute_iqr_anomalies, DistributionDetector
 from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES
 from drift.calibration import (
@@ -322,6 +325,7 @@ async def lifespan(app: FastAPI):
     # Initialize main tables via your crud module
     crud.init_db()
     webhooks.start_webhook_sweep_thread()  # Step 5 Part 2 -- no-op after the first call
+    jobs.start_worker()  # unified table path -- also a no-op after the first call
     yield
 
 app = FastAPI(
@@ -612,9 +616,7 @@ def profile_dataset(request: ProfileRequest, client: dict = Depends(verify_acces
     except Exception as e:
         # If anything goes wrong, return a clean 500 error instead of crashing
         raise HTTPException(status_code=500, detail=str(e))
-    
 
-    #endpoint 1 fit:
 
 def _split_out_high_cardinality_columns(
     categorical_features: Dict[str, list], inferred_feature_types: Dict[str, str],
@@ -1259,9 +1261,15 @@ def analyze_production_batch(
 
 
 def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
-                           background_tasks: BackgroundTasks,
+                           background_tasks: Optional[BackgroundTasks],
                            idempotency_key: Optional[str] = None,
-                           baseline_version: Optional[int] = None) -> AnalyzeBatchResponse:
+                           baseline_version: Optional[int] = None,
+                           extra_metrics: Optional[Dict[str, dict]] = None,
+                           extra_issues: Optional[List[dict]] = None,
+                           payload_hash: Optional[str] = None,
+                           batch_size: Optional[int] = None,
+                           report_kind: str = "tabular",
+                           job_id: Optional[str] = None) -> AnalyzeBatchResponse:
     """Shared tail of /analyze/{project_id} (JSON body) and
     /analyze/{project_id}/upload (multipart file) -- both converge on the
     same flat {feature_name: [values...]} shape. project_id is the
@@ -1271,7 +1279,16 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     Step 5 item 5: baseline_version (optional query param) analyzes
     against a SPECIFIC archived baseline version instead of whichever is
     currently active; omitted, this is byte-identical to pre-item-5
-    behavior (the active version via crud.get_baseline)."""
+    behavior (the active version via crud.get_baseline).
+
+    Unified table path (drift/table_monitor.py) passes the extras:
+    extra_metrics (text/image column results, decided outside the Holm
+    family, merged after the detector so the numeric/categorical family is
+    untouched), extra_issues (schema issues the tabular check can't see,
+    severities resolved from the same schema_policy), a payload_hash of the
+    uploaded files, the real batch_size, and report_kind/job_id for history.
+    background_tasks=None (job thread) sends the drift email inline.
+    With no extras this function behaves exactly as before."""
     internal_id = client["internal_project_id"]
     if baseline_version is not None:
         state = crud.get_baseline_version(internal_id, baseline_version)
@@ -1294,9 +1311,10 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     # -> 409 (a caller reusing a key for new data is almost certainly a
     # bug, not an intentional replay). An expired (>7 day old) key is
     # treated as never having been used.
-    payload_hash = hashlib.sha256(
-        json.dumps(production_data, sort_keys=True, default=str).encode()
-    ).hexdigest()
+    if payload_hash is None:
+        payload_hash = hashlib.sha256(
+            json.dumps(production_data, sort_keys=True, default=str).encode()
+        ).hexdigest()
     if idempotency_key:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=IDEMPOTENCY_KEY_TTL_DAYS)).isoformat()
         existing = crud.find_analysis_run_by_idempotency_key(internal_id, idempotency_key, cutoff)
@@ -1339,13 +1357,27 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
 
     report = detector.analyze_production_window(cleaned_production_data)
 
+    if extra_issues:
+        policy = _resolve_schema_policy(state.get("schema_policy"))
+        for issue in extra_issues:
+            issue = dict(issue)
+            column, severity_key = issue.pop("column"), issue.pop("severity_key")
+            severity = policy.get(severity_key, policy["default"])
+            if severity != "ignore":
+                schema_report.setdefault(column, []).append({**issue, "severity": severity})
+    if extra_metrics:
+        report["feature_metrics"].update(extra_metrics)
+        report["system_alert_triggered"] = report["system_alert_triggered"] or any(
+            m["drift_detected"] for m in extra_metrics.values())
+
     # Step 5 item 2: one history row per /analyze call, statistics only
     # (never the raw production_data itself -- payload_hash is a one-way
     # digest of the ORIGINAL payload, used above for item 3's idempotency
     # replay detection, not for recovering the data). baseline_version
     # (item 5) is the version actually used -- explicit or the resolved
     # active one. sustained_alert is NULL until item 6 populates it.
-    batch_size = len(next(iter(production_data.values()), []))
+    if batch_size is None:
+        batch_size = len(next(iter(production_data.values()), []))
     run_ts = datetime.now(timezone.utc).isoformat()
     run_id = crud.insert_analysis_run(
         project=internal_id,
@@ -1359,6 +1391,8 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         sustained_alert=None,
         feature_results=report["feature_metrics"],
         schema_report=schema_report,
+        report_kind=report_kind,
+        job_id=job_id,
     )
 
     # Step 5 item 6: alert policy {k, m} (default 1,1 = today's behavior).
@@ -1402,12 +1436,16 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
         drifted_features = [f for f, metrics in report["feature_metrics"].items() if metrics["drift_detected"]]
 
         # Add the email dispatch to the background queue so the API responds instantly
-        background_tasks.add_task(
-            send_drift_email,
-            project_id=project_id,
-            owner_email=client["email"],
-            flagged_features=drifted_features
-        )
+        # (already in a background job thread when background_tasks is None).
+        if background_tasks is None:
+            send_drift_email(project_id=project_id, owner_email=client["email"], flagged_features=drifted_features)
+        else:
+            background_tasks.add_task(
+                send_drift_email,
+                project_id=project_id,
+                owner_email=client["email"],
+                flagged_features=drifted_features
+            )
     # ==========================================
 
     return AnalyzeBatchResponse(
@@ -1675,6 +1713,189 @@ def analyze_joint_batch(
     )
 
 # ---------------------------------------------------------
+# UNIFIED TABLE PATH (docs/unified_table_plan.md, milestone M1)
+# ---------------------------------------------------------
+# One table (numeric/categorical/text/image columns, plus an optional image
+# ZIP) = one project. Flow: stage (upload + profile job) -> human confirms
+# the schema -> fit job -> analyze job(s). Every heavy step is a background
+# job (jobs.py); clients poll GET /jobs/{job_id}.
+MAX_ZIP_UPLOAD_BYTES = int(os.getenv("DRIFT_MAX_ZIP_UPLOAD_BYTES", str(500 * 1024 * 1024)))
+
+
+def _stage_upload(client: dict, file: UploadFile, images: Optional[UploadFile], purpose: str) -> dict:
+    """Streams the table (and optional image ZIP) into the blob store and
+    records a staged upload. Returns the stage dict plus a combined sha256."""
+    project = client["internal_project_id"]
+    if images is not None and not (images.filename or "").lower().endswith(".zip"):
+        raise ValidationError("images must be a .zip file.")
+    table_key = blob_store.new_key(project, "staged", "bin")
+    zip_key = blob_store.new_key(project, "staged", "zip") if images is not None else None
+    try:
+        table_bytes, table_sha = blob_store.put_stream(table_key, file.file, MAX_UPLOAD_SIZE_BYTES)
+        zip_bytes, zip_sha = (blob_store.put_stream(zip_key, images.file, MAX_ZIP_UPLOAD_BYTES)
+                              if zip_key else (0, ""))
+    except blob_store.BlobTooLarge:
+        blob_store.delete(table_key)
+        blob_store.delete(zip_key)
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                            detail=f"Upload exceeds the size limit ({MAX_UPLOAD_SIZE_BYTES // 2**20}MB table, "
+                                   f"{MAX_ZIP_UPLOAD_BYTES // 2**20}MB image ZIP).")
+    if table_bytes == 0:
+        blob_store.delete(table_key)
+        blob_store.delete(zip_key)
+        raise ValidationError("Uploaded file is empty.")
+    stage_id = secrets.token_hex(16)
+    expires_at = jobs.stage_expiry()
+    crud.create_stage(stage_id, client["email"], project, purpose, table_key, zip_key,
+                      file.filename or "upload.csv", table_bytes, zip_bytes, expires_at)
+    return {"id": stage_id, "expires_at": expires_at, "table_blob": table_key, "zip_blob": zip_key,
+            "sha256": hashlib.sha256(f"{table_sha}:{zip_sha}".encode()).hexdigest()}
+
+
+def _owned_or_404(row: Optional[dict], client: dict, what: str) -> dict:
+    # 404 (not 403) for someone else's stage/job, so existence isn't revealed.
+    if row is None or row["owner_email"] != client["email"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{what} not found")
+    return row
+
+
+@app.post("/tables/{project_id}/stage", response_model=JobAcceptedResponse, status_code=202, tags=["Tables"])
+def stage_table(
+    project_id: str,
+    file: UploadFile = File(..., description="The training table: CSV, TSV, Excel, JSON/JSONL, Parquet, ARFF, "
+                                              "or a gzip/zip-compressed CSV."),
+    images: Optional[UploadFile] = File(None, description="Optional ZIP of the images an image column refers to."),
+    client: dict = Depends(verify_project_access),
+):
+    """Uploads a training table (+ optional image ZIP) and starts profiling.
+    The job result proposes a type, monitor flag, confidence, evidence and
+    reason for every column; nothing is monitored until POST /fit confirms.
+    Staged files are deleted after the fit, or after 24 hours."""
+    stage = _stage_upload(client, file, images, "fit")
+    job_id = jobs.enqueue(client["email"], client.get("name"), client["internal_project_id"], project_id,
+                          "profile", stage["id"])
+    return JobAcceptedResponse(job_id=job_id, stage_id=stage["id"], expires_at=stage["expires_at"])
+
+
+@app.get("/jobs/{job_id}", tags=["Tables"])
+def get_job_status(job_id: str, client: dict = Depends(verify_access)):
+    job = _owned_or_404(crud.get_job(job_id), client, "Job")
+    return {
+        "job_id": job["id"], "kind": job["kind"], "status": job["status"], "project_id": job["public_project_id"],
+        "progress": job["progress"], "progress_message": job["progress_message"],
+        "result": job["result"], "error": job["error"],
+        "created_at": job["created_at"], "finished_at": job["finished_at"],
+    }
+
+
+@app.delete("/tables/stages/{stage_id}", tags=["Tables"])
+def delete_stage(stage_id: str, client: dict = Depends(verify_access)):
+    """Discards a staged upload's raw files now instead of waiting for expiry."""
+    stage = _owned_or_404(crud.get_stage(stage_id), client, "Staged upload")
+    jobs.discard_stage(stage, "deleted")
+    return {"status": "deleted", "stage_id": stage_id}
+
+
+@app.post("/tables/{project_id}/fit", response_model=JobAcceptedResponse, status_code=202, tags=["Tables"])
+def fit_table(project_id: str, request: TableFitRequest, client: dict = Depends(verify_project_access)):
+    """Locks a new baseline version from a profiled stage and the confirmed
+    schema. Runs as a job; its result reports the version, what is
+    monitored, and every data-quality issue found."""
+    stage = _owned_or_404(crud.get_stage(request.stage_id), client, "Staged upload")
+    if stage["project_id"] != client["internal_project_id"] or stage["purpose"] != "fit":
+        raise HTTPException(status_code=404, detail="Staged upload not found")
+    if stage["status"] != "profiled":
+        raise HTTPException(status_code=409, detail=f"Staged upload is '{stage['status']}', not ready to fit "
+                                                    f"(it must finish profiling and not be used or expired).")
+    proposals = {p["name"]: p for p in stage["profile"]["columns"]}
+    names = [c.name for c in request.columns]
+    unknown = sorted(set(names) - set(proposals))
+    if unknown:
+        raise ValidationError(f"columns names unknown column(s) {unknown}.")
+    if len(set(names)) != len(names):
+        raise ValidationError("columns lists a column more than once.")
+    monitored = [c for c in request.columns if c.monitor and c.type != "ignore"]
+    if not monitored:
+        raise ValidationError("Choose at least one column to monitor.")
+    for c in monitored:
+        p = proposals[c.name]
+        if c.type == "image" and not stage["zip_blob"] and not (p["proposed_type"] == "image" and p["proposed_monitor"]):
+            raise ValidationError(f"Column '{c.name}' is marked image but no image ZIP was uploaded and its values "
+                                  f"aren't embedded images.")
+    if request.calibration_config is not None:
+        try:
+            CalibrationConfig.from_dict(request.calibration_config)
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Invalid calibration_config: {e}")
+    validate_schema_policy(request.schema_policy)
+    validate_alert_policy(request.alert_policy)
+    job_id = jobs.enqueue(client["email"], client.get("name"), client["internal_project_id"], project_id,
+                          "fit", stage["id"], payload=request.model_dump())
+    return JobAcceptedResponse(job_id=job_id, stage_id=stage["id"])
+
+
+@app.post("/tables/{project_id}/analyze", response_model=JobAcceptedResponse, status_code=202, tags=["Tables"])
+def analyze_table(
+    project_id: str,
+    file: UploadFile = File(..., description="A production batch with the same columns as the training table."),
+    images: Optional[UploadFile] = File(None, description="Optional ZIP of this batch's images."),
+    client: dict = Depends(verify_project_access),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    baseline_version: Optional[int] = None,
+):
+    """Compares a production batch against a table baseline (the active
+    version unless baseline_version is given). Runs as a job; its result is
+    the combined report: column drift, schema issues, data quality, and
+    which tests formed the Holm family."""
+    internal_id = client["internal_project_id"]
+    version = baseline_version or crud.get_active_baseline_version(internal_id)
+    if version is None or crud.get_table_version(internal_id, version) is None:
+        raise HTTPException(status_code=404, detail="Table baseline not found. Fit one with /tables/{project_id}/fit.")
+    stage = _stage_upload(client, file, images, "analyze")
+    if idempotency_key:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=IDEMPOTENCY_KEY_TTL_DAYS)).isoformat()
+        existing = crud.find_job_by_idempotency_key(internal_id, "analyze", idempotency_key, cutoff)
+        if existing:
+            jobs.discard_stage(crud.get_stage(stage["id"]), "deleted")
+            if existing["payload_hash"] != stage["sha256"]:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                    detail="Idempotency-Key was already used with a different payload.")
+            return JobAcceptedResponse(job_id=existing["id"], replay=True)
+    job_id = jobs.enqueue(client["email"], client.get("name"), internal_id, project_id, "analyze", stage["id"],
+                          payload={"version": version}, idempotency_key=idempotency_key,
+                          payload_hash=stage["sha256"])
+    return JobAcceptedResponse(job_id=job_id, stage_id=stage["id"])
+
+
+@app.get("/tables/{project_id}/baseline", tags=["Tables"])
+def get_table_baseline(project_id: str, version: Optional[int] = None, client: dict = Depends(verify_project_access)):
+    """The confirmed schema of a table baseline version: what the profiler
+    proposed, what the user chose, whether each column is monitored, plus
+    per-column baseline summaries."""
+    internal_id = client["internal_project_id"]
+    _require_existing_project(internal_id)
+    version = version or crud.get_active_baseline_version(internal_id)
+    table = crud.get_table_version(internal_id, version) if version else None
+    if table is None:
+        raise HTTPException(status_code=404, detail="Table baseline not found")
+    return {
+        "project_id": project_id, "version": version,
+        "schema": [{k: r[k] for k in ("column_name", "ordinal", "proposed_type", "proposed_monitor", "confidence",
+                                       "evidence", "reason", "alternative_type", "final_type", "final_monitor",
+                                       "decided_by", "decided_at")} for r in table["schema"]],
+        "columns": [{"column_name": c["column_name"], "type": c["col_type"], "state": c["state"]}
+                    for c in table["columns"]],
+        "reference_rows": table["reference_rows"]["n_rows"] if table["reference_rows"] else 0,
+        "relationships": [],
+    }
+
+
+jobs.register("profile", table_monitor.run_profile)
+jobs.register("fit", lambda job: table_monitor.run_fit(job, _resolve_and_persist_fit, _split_out_high_cardinality_columns))
+jobs.register("analyze", lambda job: table_monitor.run_analyze(job, _run_tabular_analysis))
+
+
+# ---------------------------------------------------------
 # ENDPOINT 4: SYSTEM HEALTH CHECK (BURST ALERTS)
 # ---------------------------------------------------------
 @app.get("/health/{project_id}", response_model=HealthCheckResponse, tags=["Analytics"])
@@ -1737,6 +1958,9 @@ def _delete_project_data(project_id: str) -> str:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     finally:
         conn.close()
+    # Table artifacts: embeddings and staged uploads are sensitive -- delete the files too.
+    crud.delete_table_project_data(clean_project_id)
+    blob_store.delete_project(clean_project_id)
     return clean_project_id
 
 

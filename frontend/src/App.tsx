@@ -12,6 +12,7 @@ import { PredictPage } from "./pages/PredictPage";
 import { ProjectOverviewPage } from "./pages/ProjectOverviewPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { ProtectedRoute } from "./routes/ProtectedRoute";
+import { TableWorkflowPage } from "./pages/TableWorkflowPage";
 import { WebhooksPage } from "./pages/WebhooksPage";
 
 const queryClient = new QueryClient({
@@ -29,6 +30,7 @@ export default function App() {
               <Route element={<AppShell />}>
                 <Route path="/" element={<ProjectsPage />} />
                 <Route path="/projects/:projectId" element={<ProjectOverviewPage />} />
+                <Route path="/projects/:projectId/table" element={<TableWorkflowPage />} />
                 <Route path="/projects/:projectId/fit" element={<FitPage />} />
                 <Route path="/projects/:projectId/analyze" element={<AnalyzePage />} />
                 <Route path="/projects/:projectId/predict" element={<PredictPage />} />
