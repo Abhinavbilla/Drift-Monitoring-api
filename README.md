@@ -338,6 +338,7 @@ Every number here comes from a run whose raw output is committed under `results/
 | What | Dataset | Headline |
 |---|---|---|
 | Tabular column drift | NYC Citi Bike 2016 (4.5 M rows) | precision 1.000, recall 0.939, F1 0.969 on real production batches |
+| Calibrated (two-gate + Holm) vs single-threshold decisions | NYC Citi Bike 2016 | no-change false alarms 0–1% vs 2–27% on identical batches |
 | Text/image column drift (old synthetic-grid calibration) | PetFinder.my | conservative: recall ~0.68; synthetic p-values over-confident (led to the fix below) |
 | Real-embedding calibration | PetFinder.my | false alarms 1–5% (target 5%); 25%-off-population batches detected 100% vs 6–10% before |
 | Relationship drift (numeric/categorical) | PetFinder.my | no-change alarms 0–1%; a shuffled column detected 100%; its own column never flagged |
@@ -375,6 +376,36 @@ For this dataset, 15,000–20,000 rows per batch sits at the knee of the curve. 
 The validation also found two real bugs, both fixed before these numbers were recorded:
 - **Category key types:** categorical keys were stored as strings but arrived as integers, so lookups silently said "no drift".
 - **Ground truth:** the chi-square ground truth mislabeled `gender_id`.
+
+### Calibrated decisions on Citi Bike (why tabular defaults to two gates + Holm)
+
+The same Citi Bike data, re-run with the decision rule used today. A feature is flagged only if it's significant after Holm correction across all features **and** its effect clears a floor (KS D ≥ 0.05, PSI ≥ 0.2). The comparison is against the original single-threshold rule. Batches are byte-identical between the two runs; only the decision logic differs. Scripts: `scripts/step2_calibrated_rerun.py` and `scripts/step2_*`; reports in `results/step2_side_by_side.md`, `results/step2_aa_multidraw_report.md`, `results/step2_hardening_batch_size_simulation.md`, `results/step2_item5_glm.md`.
+
+**No-change false alarms** (Apr–Jun 2016 side-by-side; batches drawn from the reference period; 100 per cell; reference 5,000 or 50,000 rows; batches 1,000–20,000 rows):
+
+| Rule | Batches where any feature alarmed |
+|---|---|
+| Single threshold (7 uncorrected tests) | 2%–27% per cell |
+| Two-gate + Holm | 0%–1% per cell |
+
+**Real drift (Apr–Jun vs Jan–Mar):**
+- At matched thresholds, precision rose from 0.33–0.73 (single threshold) to 0.87–1.00 (two-gate), with recall ≥ 0.979.
+- The single threshold's false positives were the four coordinate features. Their shifts are statistically significant at these sizes but below the 0.05 effect floor.
+- Caveat: the ground truth here uses the same 0.05 cut-off as the floor, so this mostly shows the floor removing sub-threshold alarms, not general accuracy.
+
+**Across independent reference draws** (1,200 no-change trials: 10 disjoint reference draws × 2 reference sizes × 3 batch sizes × 20 batches):
+- The full two-gate rule alarmed 0–2.5% on average per cell.
+- **Significance alone alarmed up to 57.5%** (reference 5,000, batch 20,000), because each finite reference differs slightly from the true population, and big batches detect that.
+- That's why the materiality floor exists.
+
+**Recommended batch size** (simulation, 2,000 trials per cell, floor 0.05): the redefined `recommended_batch_size` (7,252 rows for a 5,000-row reference; 3,146 for 50,000):
+- **no true drift:** observed D exceeded the floor 0% of the time, vs 4.7–5.5% under the old definition (869 / 751 rows);
+- **true D = 0.02:** 0.5–0.6%, vs about 26%;
+- **true D = 0.05:** still caught 99.3–99.8% of the time.
+
+**Feature and reference effects** (binomial model over 42,000 power-curve trials, standard errors clustered by reference draw):
+- At the same effect size, features differ in detectability by up to 33 percentage points (`pickup_longitude` vs `dropoff_latitude`).
+- Reference size matters by at most about 7 points. That effect isn't significant once correlated trials are accounted for (cluster-robust p = 0.124).
 
 ### Text/image column drift with the old synthetic-grid p-value (PetFinder.my)
 
