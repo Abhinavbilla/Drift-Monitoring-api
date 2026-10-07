@@ -31,8 +31,11 @@ clustered listings break exchangeability); shuffles detected 99-100% with
 mis-designed (left the monitored pair intact). Full suite 362 passed. Live:
 shuffled descriptions -> alert from Description<->Type and
 Description<->Photo; numeric probe shown report-only.
-STILL OPEN for the user: exact-duplicate removal without an ID column
-(tabular + table); rotating the leaked OAuth secrets.
+RESOLVED 2026-10-07 (user decision): duplicate rows are removed only when
+an identifier-like column exists (`utils.profiler.remove_duplicate_records`,
+both tabular endpoints and the table fit); otherwise kept and reported as
+`identical_rows_kept`. Full suite 363 passed.
+STILL OPEN: rotating the leaked OAuth secrets.
 
 **Unified table monitoring, milestone M3 (user-approved, 2026-10-06) — DONE.**
 `drift/embedding_tests.py`: PCA, tail-aware split-null p, column DCT with a

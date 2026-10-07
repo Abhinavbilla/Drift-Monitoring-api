@@ -47,7 +47,7 @@ from adapters.tabular import TabularAdapter
 from adapters.text import TextAdapter
 from adapters.image import ImageAdapter
 from adapters.joint import JointAdapter, build_joint_classifier
-from utils.profiler import profile_columns, coerce_numeric_column
+from utils.profiler import profile_columns, coerce_numeric_column, remove_duplicate_records
 from utils.validation import (
     ValidationError,
     validate_tabular_columns,
@@ -722,14 +722,12 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
     # (reproduced in tests/test_cross_user_isolation.py's FIT_PROBE case).
     detailed_profiles = profile_columns(combined_df)
 
-    # 5b. Drop exact duplicate rows before fitting (not before profiling,
-    # see above) -- a duplicated row artificially inflates how often its
-    # values appear, which skews fences and categorical frequencies
-    # without adding any real information. Reported in the response,
-    # not silent.
-    rows_before_dedup = len(combined_df)
-    combined_df = combined_df.drop_duplicates().reset_index(drop=True)
-    duplicate_rows_dropped = rows_before_dedup - len(combined_df)
+    # 5b. Drop duplicate RECORDS before fitting (not before profiling, see
+    # above) -- only when an identifier column shows identical rows really are
+    # the same record; otherwise they're kept and reported
+    # (utils.profiler.remove_duplicate_records). Never silent.
+    combined_df, duplicate_rows_dropped, identical_rows_kept = remove_duplicate_records(combined_df)
+    combined_df = combined_df.reset_index(drop=True)
 
     # 6. ADAPTER: Route each column to the correct monitoring engine
     inferred_feature_types = {}
@@ -822,6 +820,7 @@ def fit_model_baseline(project_id: str, request: FitBaselineRequest, client: dic
         combined_df, request.calibration_config, client, request.schema_policy,
         request.model_version_label, request.alert_policy,
         profiler_excluded_columns=profiler_excluded_columns, duplicate_rows_dropped=duplicate_rows_dropped,
+        identical_rows_kept=identical_rows_kept,
     )
 
 
@@ -834,6 +833,7 @@ def _resolve_and_persist_fit(
     alert_policy_request: Optional[Dict[str, int]] = None,
     profiler_excluded_columns: Optional[Dict[str, str]] = None,
     duplicate_rows_dropped: int = 0,
+    identical_rows_kept: int = 0,
 ) -> FitBaselineResponse:
     """Shared tail of /fit/{project_id} (JSON body) and
     /fit/{project_id}/upload (multipart file) -- both endpoints build
@@ -934,7 +934,10 @@ def _resolve_and_persist_fit(
     if sample_warning:
         message += f" Warning: {sample_warning}"
     if duplicate_rows_dropped:
-        message += f" Removed {duplicate_rows_dropped} exact duplicate row(s) before fitting."
+        message += f" Removed {duplicate_rows_dropped} duplicate record(s) before fitting."
+    if identical_rows_kept:
+        message += (f" Kept {identical_rows_kept} identical row(s): with no identifier column they may be "
+                    f"different records that share values.")
     if cleaning_summary:
         dropped_note = ", ".join(f"{col}: {info['dropped_non_numeric']} dropped" for col, info in cleaning_summary.items())
         message += f" Note: non-numeric values were dropped during cleaning ({dropped_note})."
@@ -969,6 +972,7 @@ def _resolve_and_persist_fit(
         version=new_version,
         excluded_columns=excluded_columns,
         duplicate_rows_dropped=duplicate_rows_dropped,
+        identical_rows_kept=identical_rows_kept,
     )
 MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024  # 200MB
 
@@ -1015,9 +1019,8 @@ async def fit_model_baseline_upload(
     # fit_model_baseline (JSON endpoint) for why order here matters.
     detailed_profiles = profile_columns(combined_df)
 
-    rows_before_dedup = len(combined_df)
-    combined_df = combined_df.drop_duplicates().reset_index(drop=True)
-    duplicate_rows_dropped = rows_before_dedup - len(combined_df)
+    combined_df, duplicate_rows_dropped, identical_rows_kept = remove_duplicate_records(combined_df)
+    combined_df = combined_df.reset_index(drop=True)
     inferred_feature_types = {}
     profiler_excluded_columns: Dict[str, str] = {}
     for p in detailed_profiles:
@@ -1086,6 +1089,7 @@ async def fit_model_baseline_upload(
         combined_df, parsed_calibration_config, client, parsed_schema_policy, model_version_label,
         parsed_alert_policy,
         profiler_excluded_columns=profiler_excluded_columns, duplicate_rows_dropped=duplicate_rows_dropped,
+        identical_rows_kept=identical_rows_kept,
     )
 
 

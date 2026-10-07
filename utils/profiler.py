@@ -333,3 +333,24 @@ def profile_table(df: pd.DataFrame, archive=None) -> List[Dict[str, Any]]:
         samples = [str(v)[:80] for v in pd.unique(non_null.astype(str))[:5]] if len(non_null) else []
         proposals.append({"name": col, **proposal, "evidence": ev, "sample_values": samples})
     return proposals
+
+
+def remove_duplicate_records(df: pd.DataFrame) -> Tuple[pd.DataFrame, int, int]:
+    """(frame, rows dropped, identical rows kept).
+
+    Rows identical in every column are only treated as duplicate RECORDS when
+    the table has an identifier-like column (non-float, no nulls, unique across
+    the distinct rows, at least 20 of them): then a repeated row really is the
+    same record twice. Without one, identical rows can be different records
+    that share values (common with only low-cardinality columns), so they are
+    kept and reported instead of silently thinning the reference. Index labels
+    of kept rows are preserved, so callers can map back to original rows."""
+    distinct = df.drop_duplicates()
+    repeated = len(df) - len(distinct)
+    if repeated == 0:
+        return df, 0, 0
+    has_id = len(distinct) >= 20 and any(
+        not pd.api.types.is_float_dtype(distinct[c]) and distinct[c].notna().all()
+        and distinct[c].astype(str).nunique() == len(distinct)
+        for c in distinct.columns)
+    return (distinct, repeated, 0) if has_id else (df, 0, repeated)

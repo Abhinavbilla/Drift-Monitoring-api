@@ -33,7 +33,7 @@ from drift.calibration import CalibrationConfig
 from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES
 from ingest import readers
 from ingest.images import ArchiveError, ImageArchive, load_image
-from utils.profiler import profile_table
+from utils.profiler import profile_table, remove_duplicate_records
 
 N_MAX_REFERENCE = 5000      # seeded sample cap for embeddings and the row-aligned store
 REFERENCE_SAMPLE_SEED = 42
@@ -250,14 +250,12 @@ def run_fit(job: dict, persist_fit: Callable[..., Any], split_high_cardinality: 
         monitored = {n: c["type"] for n, c in choices.items() if c["monitor"] and c["type"] in MONITORED_TYPES}
         by_type = {t: [n for n, ct in monitored.items() if ct == t] for t in MONITORED_TYPES}
 
-        # Only rows identical in EVERY column are duplicates (same rule as the
-        # tabular /fit). Deduplicating on the monitored columns alone collapsed
-        # distinct records that merely share low-cardinality values.
-        rows_before = len(df)
-        df = df.drop_duplicates()
+        # Same rule as the tabular /fit (utils.profiler.remove_duplicate_records):
+        # identical rows are dropped only when an identifier column says they are
+        # the same record.
+        df, duplicate_rows_dropped, identical_rows_kept = remove_duplicate_records(df)
         kept = df.index.to_numpy()  # original row positions, to reuse profile-time embeddings
         df = df.reset_index(drop=True)
-        duplicate_rows_dropped = rows_before - len(df)
         cache = (stage["profile"] or {}).get("embedding_cache") or {}
 
         # Embed text/image columns FIRST: a failure here must not leave a
@@ -293,7 +291,7 @@ def run_fit(job: dict, persist_fit: Callable[..., Any], split_high_cardinality: 
         job["public_project_id"], inferred, continuous, categorical, df, payload.get("calibration_config"),
         _client_from_job(job), payload.get("schema_policy"), payload.get("model_version_label"),
         payload.get("alert_policy"), profiler_excluded_columns=excluded,
-        duplicate_rows_dropped=duplicate_rows_dropped,
+        duplicate_rows_dropped=duplicate_rows_dropped, identical_rows_kept=identical_rows_kept,
     )
     project, version = job["project_id"], fit_resp.version
     crud.set_baseline_modality(project, version, "table")
@@ -365,6 +363,7 @@ def run_fit(job: dict, persist_fit: Callable[..., Any], split_high_cardinality: 
         "relationships": [rel.pair_name(r["col_a"], r["col_b"]) for r in relationship_rows if r["final_monitor"]],
         "relationships_dropped": relationships_dropped,
         "duplicate_rows_dropped": duplicate_rows_dropped,
+        "identical_rows_kept": identical_rows_kept,
         "cleaning_summary": fit_resp.cleaning_summary,
         "data_quality": {c: q for c, (_, _, q) in embedded.items()},
         "bytes_stored": bytes_stored,

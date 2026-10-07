@@ -131,6 +131,11 @@ class FitBaselineResponse(BaseModel):
                     "monotonic/index-like sequence, or over the categorical cardinality cap. Always "
                     "reported here instead of silently vanishing from inferred_feature_types."
     )
+    identical_rows_kept: int = Field(
+        default=0,
+        description="Rows identical in every column that were KEPT because the table has no identifier "
+                    "column, so they may be different records that share values."
+    )
     duplicate_rows_dropped: int = Field(
         default=0,
         description="Exact duplicate rows removed before fitting -- a duplicated row would otherwise "

@@ -84,13 +84,26 @@ class TestCategoricalWhitespaceNormalization:
 
 
 class TestDuplicateRowRemoval:
-    def test_exact_duplicate_rows_removed_and_reported(self):
+    def test_identical_rows_kept_without_an_identifier(self):
+        """Decision 2026-10-07: with no identifier column, identical rows may be
+        different records, so they're kept (and reported), not dropped."""
         pid = "test_tabclean_dedup"
-        x = [1.0, 2.0, 3.0, 4.0, 5.0] * 20  # 100 rows, only 5 unique rows
+        x = [1.0, 2.0, 3.0, 4.0, 5.0] * 20  # 100 rows, only 5 distinct
         resp = client.post(f"/fit/{pid}", json={"reference_data": {"x": x}}, headers=HEADERS)
         assert resp.status_code == 200
-        assert resp.json()["duplicate_rows_dropped"] == 95
-        assert "duplicate row" in resp.json()["message"]
+        assert resp.json()["duplicate_rows_dropped"] == 0
+        assert resp.json()["identical_rows_kept"] == 95
+        assert "identical row" in resp.json()["message"]
+
+    def test_duplicate_records_removed_when_an_identifier_exists(self):
+        pid = "test_tabclean_dedup_id"
+        ids = [f"r{i}" for i in range(50)] * 2
+        x = _x(seed=3)[:50] * 2
+        resp = client.post(f"/fit/{pid}", json={"reference_data": {"x": x}, "categorical_data": {"id": ids}},
+                           headers=HEADERS)
+        assert resp.status_code == 200
+        assert resp.json()["duplicate_rows_dropped"] == 50
+        assert "duplicate record" in resp.json()["message"]
 
     def test_no_duplicates_reports_zero(self):
         pid = "test_tabclean_nodedup"
@@ -110,7 +123,7 @@ class TestDuplicateRowRemoval:
         assert "x" in resp.json()["inferred_feature_types"]
         assert resp.json()["excluded_columns"] == {}
         state = crud.get_baseline(_internal(pid))
-        assert len(state["reference_data"]["x"]) == 5  # still deduplicated for storage
+        assert len(state["reference_data"]["x"]) == 100  # no identifier column: identical rows kept
 
 
 class TestHighCardinalityColumnExcludedNotRejected:
