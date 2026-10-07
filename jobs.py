@@ -15,6 +15,7 @@ reach the DB, so only the exception type plus a safe message is stored.
 
 import logging
 import threading
+import traceback
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -86,7 +87,9 @@ def run_job(job: dict) -> None:
         crud.update_job(job["id"], status="succeeded", progress=100, result=result,
                         finished_at=datetime.now(timezone.utc).isoformat())
     except Exception as exc:  # every failure must end the job, never kill the worker
-        log.exception("Job %s (%s) failed", job["id"], job["kind"])
+        # Log the stack but not the exception message: pandas/PIL messages can echo cell values.
+        log.error("Job %s (%s) failed with %s\n%s", job["id"], job["kind"], type(exc).__name__,
+                  "".join(traceback.format_tb(exc.__traceback__)))
         crud.update_job(job["id"], status="failed", error=_safe_error(exc),
                         finished_at=datetime.now(timezone.utc).isoformat())
 

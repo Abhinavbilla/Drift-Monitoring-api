@@ -66,6 +66,7 @@ export interface HistoryRun {
   system_alert: boolean;
   sustained_alert: boolean | null;
   feature_metrics: Record<string, FeatureMetric>;
+  relationship_metrics?: Record<string, FeatureMetric>;
   schema_report: Record<string, SchemaIssue[]> | null;
 }
 

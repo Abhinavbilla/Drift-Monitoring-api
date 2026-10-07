@@ -10,10 +10,10 @@ image columns get per-column embedding baselines and the existing Domain
 Classifier Test, decided by the legacy AUC rule and kept OUTSIDE the Holm
 family until their nulls are calibrated (M3). Relationship tests between
 numeric/categorical columns (M2) join the numeric/categorical Holm family.
-M3: text/image column tests get a p-value from a real-embedding null, and
-probes (text/image -> numeric/categorical) and text<->image matching watch
-relationships involving embeddings. Both stay outside the Holm family and do
-not alert ("report-only") until their validation gate is approved.
+M3: text/image column tests use a p-value from a real-embedding null and join
+the Holm family (AUC materiality floor 0.55). Probes into categorical columns
+and text<->image matching join it too; probes into numeric columns stay
+report-only (they failed the population-mix check in the M3 gate).
 """
 
 import io
@@ -38,7 +38,7 @@ from utils.profiler import profile_table
 N_MAX_REFERENCE = 5000      # seeded sample cap for embeddings and the row-aligned store
 REFERENCE_SAMPLE_SEED = 42
 EMBED_CHUNK = 64
-DCT_AUC_THRESHOLD = 0.65
+DCT_AUC_FLOOR = 0.55  # materiality floor; significance comes from the calibrated p (approved after the M3 gate)
 MONITORED_TYPES = ("numeric", "categorical", "text", "image")
 _TEST_BY_TYPE = {"numeric": "KS", "categorical": "PSI", "text": "DCT", "image": "DCT"}
 _REL_LABEL = {"num_num": "Spearman split-null", "cat_cat": "log-linear G2 split-null",
@@ -492,7 +492,8 @@ def run_analyze(job: dict, run_analysis: Callable[..., Any]) -> dict:
 
     stage = crud.get_stage(job["stage_id"])
     df, archive = _open_stage(stage, ("uploaded",))
-    extra_metrics: Dict[str, dict] = {}
+    column_tests: List[dict] = []
+    dct_details: Dict[str, dict] = {}
     extra_issues: List[dict] = []
     data_quality: Dict[str, dict] = {}
     not_tested: Dict[str, str] = {}
@@ -524,13 +525,10 @@ def run_analyze(job: dict, run_analysis: Callable[..., Any]) -> dict:
                               zlib.crc32(f"{project}|{version}|{col}|{len(bat_x)}".encode()))
             embedding_state[col] = {"ref_x": ref_x, "bat_x": bat_x, "bat_rows": np.flatnonzero(statuses == "ok"),
                                     "p_value": res["p_value"]}
-            extra_metrics[col] = {
-                "statistic": res["auc"], "p_value": res["p_value"], "drift_detected": res["auc"] > DCT_AUC_THRESHOLD,
-                "effect_size": res["auc"], "effect_floor": DCT_AUC_THRESHOLD, "decision_mode": "legacy",
-                "threshold_used": f"AUC>{DCT_AUC_THRESHOLD} on PCA-{ref_x.shape[1]} embeddings (decided outside the "
-                                  f"Holm family; p_value is from this project's own reference null"
-                                  + (", Gaussian tail" if res["tail_extrapolated"] else "") + ")",
-            }
+            column_tests.append({"name": col, "group": "column", "p_value": res["p_value"],
+                                 "effect_size": res["auc"], "effect_floor": DCT_AUC_FLOOR,
+                                 "label": f"DCT AUC, PCA-{ref_x.shape[1]}, own-reference null"})
+            dct_details[col] = {k: res[k] for k in ("tail_extrapolated", "approximate_null", "null_draws")}
     finally:
         if archive:
             archive.close()
@@ -540,8 +538,11 @@ def run_analyze(job: dict, run_analysis: Callable[..., Any]) -> dict:
     production_data = {c: df[c].tolist() for c in numcat if c in df.columns}
     ref_rows = (pd.read_parquet(io.BytesIO(blob_store.get_bytes(table["reference_rows"]["rows_blob"])))
                 if table["reference_rows"] else None)
-    rel_tests, rel_details, null_draws = _relationship_tests(job, table, monitored, df, ref_rows,
-                                                             len(production_data))
+    alpha = CalibrationConfig.from_dict((crud.get_baseline_version(project, version) or {}).get("calibration_config")).alpha
+    emb_tests, emb_details = _embedding_relationship_tests(table, monitored, df, embedding_state, project, version, alpha)
+    rel_tests, rel_details, null_draws = _relationship_tests(
+        job, table, monitored, df, ref_rows, len(production_data) + len(column_tests) + len(emb_tests))
+    rel_details.update(emb_details)
     screening = []
     if ref_rows is not None:
         present = [c for c in numcat if c in df.columns and c in ref_rows.columns]
@@ -555,14 +556,12 @@ def run_analyze(job: dict, run_analysis: Callable[..., Any]) -> dict:
         # the uploaded files' hash; re-checking here against analysis_runs would compare
         # a different hash and could reject a legitimate job.
         background_tasks=None, idempotency_key=None, baseline_version=version,
-        extra_metrics=extra_metrics, extra_issues=extra_issues, payload_hash=job["payload_hash"],
+        extra_issues=extra_issues, payload_hash=job["payload_hash"],
         batch_size=len(df), report_kind="table", job_id=job["id"],
-        extra_family_tests=rel_tests, family_null_draws=null_draws,
+        extra_family_tests=column_tests + rel_tests + emb_tests, family_null_draws=null_draws,
     )
-    alpha = CalibrationConfig.from_dict((crud.get_baseline_version(project, version) or {}).get("calibration_config")).alpha
-    rel_details.update(_embedding_relationship_tests(table, monitored, df, embedding_state, project, version, alpha))
     jobs.discard_stage(stage, "consumed")
-    report = build_report(resp, monitored, version, len(df), data_quality, not_tested, rel_details)
+    report = build_report(resp, monitored, version, len(df), data_quality, not_tested, rel_details, dct_details)
     report["screening"] = {"emerged_dependencies": screening,
                            "note": "Informational only: never alerts and is not part of the Holm family."}
     return report
@@ -582,11 +581,12 @@ def _load_reference_embeddings(col_baseline: dict) -> Tuple[np.ndarray, dict, Op
     return et.project(emb, pca), pca, row_ids
 
 
-def _embedding_relationship_tests(table: dict, monitored: Dict[str, str], df: pd.DataFrame,
-                                  emb: Dict[str, dict], project: str, version: int, alpha: float) -> Dict[str, dict]:
-    """Report-only results for probes and text<->image matching: shown in the
-    report with a status, but outside the Holm family and never alerting."""
-    out = {}
+def _embedding_relationship_tests(table: dict, monitored: Dict[str, str], df: pd.DataFrame, emb: Dict[str, dict],
+                                  project: str, version: int, alpha: float) -> Tuple[List[dict], Dict[str, dict]]:
+    """(family tests, details). Probes into categorical columns and text<->image
+    matching join the Holm family; probes into numeric columns are report-only:
+    shown with a status, never alerting."""
+    tests, out = [], {}
     for r in table["relationships"]:
         if not r["final_monitor"] or r["kind"] not in ("probe", "text_image"):
             continue
@@ -613,23 +613,28 @@ def _embedding_relationship_tests(table: dict, monitored: Dict[str, str], df: pd
             sources = [a, b]
         res["kind"] = r["kind"]
         if res["testable"]:
-            res["report_only"] = True
-            res["drift_detected"] = bool(res["p_value"] < alpha and res["effect"] >= r["materiality_floor"])
             res["effect_floor"] = r["materiality_floor"]
             res["confounded_by"] = [c for c in sources if emb[c]["p_value"] < alpha]
+            if r["kind"] == "probe" and state["target_type"] == "numeric":
+                res["report_only"] = True
+                res["drift_detected"] = bool(res["p_value"] < alpha and res["effect"] >= r["materiality_floor"])
+            else:
+                tests.append({"name": name, "group": "relationship", "p_value": res["p_value"],
+                              "effect_size": res["effect"], "effect_floor": r["materiality_floor"],
+                              "label": "probe split-null" if r["kind"] == "probe" else "matching split-null"})
         out[name] = res
-    return out
+    return tests, out
 
 
 def build_report(resp, monitored: Dict[str, str], version: int, n_rows: int,
                  data_quality: Dict[str, dict], not_tested: Dict[str, str],
-                 rel_details: Optional[Dict[str, dict]] = None) -> dict:
+                 rel_details: Optional[Dict[str, dict]] = None, dct_details: Optional[Dict[str, dict]] = None) -> dict:
     metrics = {k: (v.model_dump() if hasattr(v, "model_dump") else dict(v)) for k, v in resp.feature_metrics.items()}
     calibrated = any(m.get("decision_mode") == "calibrated" for m in metrics.values())
     column_drift, members, excluded = {}, [], []
     for col, col_type in monitored.items():
         m = metrics.get(col)
-        in_family = calibrated and col_type in ("numeric", "categorical") and m is not None
+        in_family = calibrated and m is not None
         if m is None:
             reason = not_tested.get(col) or next(
                 (i["issue"] for i in resp.schema_report.get(col, [])), "Not tested in this batch.")
@@ -637,25 +642,23 @@ def build_report(resp, monitored: Dict[str, str], version: int, n_rows: int,
                                  "in_family": False, "reason": reason}
             excluded.append({"test": col, "why": reason})
             continue
-        column_drift[col] = {"type": col_type, "test": _TEST_BY_TYPE[col_type], **m, "in_family": in_family,
-                             "status": "DRIFT" if m["drift_detected"] else "STABLE"}
+        column_drift[col] = {"type": col_type, "test": _TEST_BY_TYPE[col_type], **m, **(dct_details or {}).get(col, {}),
+                             "in_family": in_family, "status": "DRIFT" if m["drift_detected"] else "STABLE"}
         if in_family:
             members.append(col)
-        elif col_type in ("text", "image"):
-            excluded.append({"test": col, "why": "Embedding test decided by the AUC rule outside the family until "
-                                                 "its real-embedding calibration is approved; its p_value is shown."})
     relationship_drift = {}
     rel_metrics = {k: (v.model_dump() if hasattr(v, "model_dump") else dict(v))
                    for k, v in resp.relationship_metrics.items()}
     for name, d in (rel_details or {}).items():
         base = {k: d.get(k) for k in ("kind", "statistic_name", "reference_value", "current_value", "explanation",
-                                      "excluded_unseen", "approximate_null", "null_draws")}
+                                      "excluded_unseen", "approximate_null", "null_draws", "confounded_by",
+                                      "tail_extrapolated")}
         if d.get("report_only"):
             relationship_drift[name] = {**base, "p_value": d["p_value"], "effect_size": d["effect"],
-                                        "effect_floor": d["effect_floor"], "tail_extrapolated": d["tail_extrapolated"],
-                                        "confounded_by": d["confounded_by"], "in_family": False, "report_only": True,
+                                        "effect_floor": d["effect_floor"], "in_family": False, "report_only": True,
                                         "status": "DRIFT" if d["drift_detected"] else "STABLE"}
-            excluded.append({"test": name, "why": "Report-only: probe/matching tests do not alert until validated."})
+            excluded.append({"test": name, "why": "Report-only: probes into numeric columns are not robust to "
+                                                  "population-mix shifts (M3 gate), so they never alert."})
             continue
         m = rel_metrics.get(name)
         if m is None:

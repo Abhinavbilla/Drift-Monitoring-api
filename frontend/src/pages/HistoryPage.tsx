@@ -6,6 +6,13 @@ import {
 } from "recharts";
 import { Badge, Card, EmptyState, ErrorBanner, PageHeader, Spinner } from "../components/ui";
 import { api, ApiError } from "../lib/api";
+import type { HistoryRun } from "../lib/types";
+
+function drifted(run: HistoryRun): string[] {
+  const names = (metrics: Record<string, { drift_detected: boolean }> = {}) =>
+    Object.entries(metrics).filter(([, m]) => m.drift_detected).map(([name]) => name.replace("<->", " ↔ "));
+  return [...names(run.feature_metrics), ...names(run.relationship_metrics)];
+}
 
 export function HistoryPage() {
   const { projectId = "" } = useParams();
@@ -85,6 +92,7 @@ export function HistoryPage() {
                 <th className="px-5 py-3">Batch size</th>
                 <th className="px-5 py-3">Decision mode</th>
                 <th className="px-5 py-3">Alert</th>
+                <th className="px-5 py-3">Drifted</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -97,6 +105,7 @@ export function HistoryPage() {
                   <td className="px-5 py-2.5">
                     {run.system_alert ? <Badge tone="alert">Alert</Badge> : <Badge tone="ok">Clear</Badge>}
                   </td>
+                  <td className="px-5 py-2.5 text-xs text-slate-600">{drifted(run).join(", ") || "—"}</td>
                 </tr>
               ))}
             </tbody>

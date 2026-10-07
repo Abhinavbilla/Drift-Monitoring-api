@@ -581,6 +581,7 @@ def get_analysis_history(
         "system_alert": run["system_alert"],
         "sustained_alert": run["sustained_alert"],
         "feature_metrics": _narrowed_metrics(run),
+        "relationship_metrics": run["relationship_metrics"],
         "schema_report": run["schema_report"],
     } for run in page]
 
@@ -1264,7 +1265,6 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
                            background_tasks: Optional[BackgroundTasks],
                            idempotency_key: Optional[str] = None,
                            baseline_version: Optional[int] = None,
-                           extra_metrics: Optional[Dict[str, dict]] = None,
                            extra_issues: Optional[List[dict]] = None,
                            payload_hash: Optional[str] = None,
                            batch_size: Optional[int] = None,
@@ -1284,14 +1284,13 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     behavior (the active version via crud.get_baseline).
 
     Unified table path (drift/table_monitor.py) passes the extras:
-    extra_metrics (text/image column results, decided outside the Holm
-    family, merged after the detector so the numeric/categorical family is
-    untouched), extra_issues (schema issues the tabular check can't see,
+    extra_issues (schema issues the tabular check can't see,
     severities resolved from the same schema_policy), a payload_hash of the
     uploaded files, the real batch_size, and report_kind/job_id for history.
-    extra_family_tests (relationship tests) join the features' correction
-    family; family_null_draws raises the PSI bootstrap draws so PSI p-values
-    have enough resolution for the larger family.
+    extra_family_tests (text/image column tests, group "column"; relationship
+    tests, group "relationship") join the features' correction family;
+    family_null_draws raises the PSI bootstrap draws so PSI p-values have
+    enough resolution for the larger family.
     background_tasks=None (job thread) sends the drift email inline.
     With no extras this function behaves exactly as before."""
     internal_id = client["internal_project_id"]
@@ -1364,7 +1363,10 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
     )
 
     report = detector.analyze_production_window(cleaned_production_data, extra_family_tests)
-    relationship_metrics = report.pop("extra_metrics", {})
+    extras = report.pop("extra_metrics", {})
+    groups = {t["name"]: t.get("group", "relationship") for t in extra_family_tests or []}
+    report["feature_metrics"].update({k: v for k, v in extras.items() if groups[k] == "column"})
+    relationship_metrics = {k: v for k, v in extras.items() if groups[k] == "relationship"}
 
     if extra_issues:
         policy = _resolve_schema_policy(state.get("schema_policy"))
@@ -1374,10 +1376,6 @@ def _run_tabular_analysis(project_id: str, production_data: dict, client: dict,
             severity = policy.get(severity_key, policy["default"])
             if severity != "ignore":
                 schema_report.setdefault(column, []).append({**issue, "severity": severity})
-    if extra_metrics:
-        report["feature_metrics"].update(extra_metrics)
-        report["system_alert_triggered"] = report["system_alert_triggered"] or any(
-            m["drift_detected"] for m in extra_metrics.values())
 
     # Step 5 item 2: one history row per /analyze call, statistics only
     # (never the raw production_data itself -- payload_hash is a one-way

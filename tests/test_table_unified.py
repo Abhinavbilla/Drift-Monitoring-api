@@ -276,7 +276,7 @@ def test_analyze_reports_columns_and_invalid_images(fitted):
     report = job["result"]
     assert set(report["column_drift"]) == {"Age", "Fee", "Breed", "Description", "Photo"}
     assert report["column_drift"]["Photo"]["test"] == "DCT"
-    assert report["column_drift"]["Photo"]["in_family"] is False
+    assert report["column_drift"]["Photo"]["in_family"] is True  # calibrated real-embedding null (M3 decision)
     assert report["column_drift"]["Age"]["in_family"] is True  # calibrated tabular default
     assert report["data_quality"]["Photo"]["invalid"] == {"corrupt": 1, "missing": 1}
     assert any(i["issue"] == "invalid_images" for i in report["schema_report"]["Photo"])
@@ -490,10 +490,12 @@ def _breed_text_table(n: int, seed: int, shuffle_text: bool = False) -> pd.DataF
     desc = [f"{b} {' '.join(rng.choice(WORDS) for _ in range(6))} {i}" for i, b in enumerate(breeds)]
     if shuffle_text:
         rng.shuffle(desc)  # each text keeps its words; it just no longer describes its own row's breed
-    return pd.DataFrame({"PetID": [f"T{seed}x{i}" for i in range(n)], "Breed": breeds, "Description": desc})
+    weight = [{"labrador": 30, "beagle": 10, "poodle": 20, "terrier": 8}[b] + rng.gauss(0, 1) for b in breeds]
+    return pd.DataFrame({"PetID": [f"T{seed}x{i}" for i in range(n)], "Breed": breeds, "Description": desc,
+                         "Weight": [round(w, 2) for w in weight]})
 
 
-def test_text_probe_relationship_is_report_only():
+def test_text_probes_categorical_alerts_numeric_is_report_only():
     project = PREFIX + "probe"
     out = _fit(project, _breed_text_table(240, 100), accept_proposed_relationships=True)
     proposed = {(r["col_a"], r["col_b"], r["kind"]) for r in out["profile"]["relationships"] if r["proposed"]}
@@ -502,7 +504,10 @@ def test_text_probe_relationship_is_report_only():
 
     report = _wait(_analyze(project, _breed_text_table(120, 101, shuffle_text=True)).json()["job_id"])["result"]
     probe = report["relationship_drift"]["Description<->Breed"]
-    assert probe["status"] == "DRIFT" and probe["report_only"] and probe["in_family"] is False
+    assert probe["status"] == "DRIFT" and probe["in_family"] and not probe.get("report_only")
     assert probe["current_value"] < probe["reference_value"]
-    assert "Description<->Breed" not in report["overall"]["triggered_by"]
+    assert "Description<->Breed" in report["overall"]["triggered_by"]
+    numeric = report["relationship_drift"]["Description<->Weight"]
+    assert numeric["report_only"] and numeric["in_family"] is False
+    assert "Description<->Weight" not in report["overall"]["triggered_by"]
     assert isinstance(report["column_drift"]["Description"]["p_value"], float)  # real-embedding null p

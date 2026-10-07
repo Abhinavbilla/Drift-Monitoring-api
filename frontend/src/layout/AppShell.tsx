@@ -4,13 +4,14 @@ import { useAuth } from "../lib/auth";
 const projectTabs = [
   { to: "", label: "Overview", end: true },
   { to: "table", label: "Table Monitoring" },
-  { to: "fit", label: "Fit Baseline" },
-  { to: "analyze", label: "Analyze" },
-  { to: "predict", label: "Predict" },
   { to: "history", label: "History" },
   { to: "baselines", label: "Baselines" },
   { to: "webhooks", label: "Webhooks" },
   { to: "logs", label: "Audit Log" },
+  // Per-modality pages from before the unified table workflow; kept for existing projects.
+  { to: "fit", label: "Legacy: Fit" },
+  { to: "analyze", label: "Legacy: Analyze" },
+  { to: "predict", label: "Legacy: Predict" },
 ];
 
 function Logo() {

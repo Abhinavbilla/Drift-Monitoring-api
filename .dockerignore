@@ -21,3 +21,6 @@ tests/
 .venv
 venv
 env
+datasets/
+frontend/node_modules/
+frontend/dist/

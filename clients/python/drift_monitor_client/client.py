@@ -21,8 +21,11 @@ connection failures and 500/502/503/504 responses (a confirmed non-5xx
 response, including a 4xx, is never retried).
 """
 
+import contextlib
 import io
 import json
+import os
+import time
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -172,6 +175,64 @@ class DriftClient:
                                   headers=self._idempotency_headers(idempotency_key))
         self._raise_for_status(resp)
         return resp.json()
+
+    # ---------------------------------------------------------
+    # unified table monitoring (one table = one project; runs as server jobs)
+    # ---------------------------------------------------------
+    def wait_for_job(self, job_id: str, poll_seconds: float = 1.0, timeout_seconds: float = 1800) -> Dict[str, Any]:
+        """Polls a job until it finishes; returns its result or raises DriftClientError."""
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            resp = self.session.get(f"{self.base_url}/jobs/{job_id}", timeout=self.timeout)
+            self._raise_for_status(resp)
+            job = resp.json()
+            if job["status"] == "succeeded":
+                return job["result"]
+            if job["status"] in ("failed", "interrupted"):
+                raise DriftClientError(422, job["error"] or f"Job {job['status']}.")
+            if time.monotonic() > deadline:
+                raise DriftClientError(408, f"Job {job_id} still {job['status']} after {timeout_seconds}s.")
+            time.sleep(poll_seconds)
+
+    def _post_table(self, url: str, name: str, df: pd.DataFrame, images_zip: Optional[str], **kwargs) -> str:
+        """Uploads a table (+ optional image ZIP, streamed from disk) and returns the job id."""
+        with contextlib.ExitStack() as stack:
+            files = {"file": (f"{name}.parquet", self._to_parquet_bytes(df), "application/octet-stream")}
+            if images_zip:
+                files["images"] = (os.path.basename(images_zip), stack.enter_context(open(images_zip, "rb")),
+                                   "application/zip")
+            resp = self.session.post(url, files=files, timeout=self.timeout, **kwargs)
+        self._raise_for_status(resp)
+        return resp.json()["job_id"]
+
+    def profile_table(self, project_id: str, df: pd.DataFrame, images_zip: Optional[str] = None) -> Dict[str, Any]:
+        """Uploads a training table (plus an optional ZIP of the images its
+        image column names) and returns the profile: a proposed type, monitor
+        flag, confidence and reason per column, and proposed relationships."""
+        return self.wait_for_job(self._post_table(f"{self.base_url}/tables/{project_id}/stage", project_id, df, images_zip))
+
+    def fit_table(self, project_id: str, profile: Dict[str, Any], columns: Optional[list] = None,
+                  relationships: Optional[list] = None, **options) -> Dict[str, Any]:
+        """Locks a baseline from a profile. columns ([{name, type, monitor}])
+        and relationships ([{col_a, col_b}]) default to the profile's
+        proposals -- pass your own to override them. options: calibration_config,
+        schema_policy, alert_policy, model_version_label."""
+        if columns is None:
+            columns = [{"name": c["name"], "type": c["proposed_type"], "monitor": c["proposed_monitor"]}
+                       for c in profile["columns"]]
+        if relationships is None:
+            relationships = [{"col_a": r["col_a"], "col_b": r["col_b"]} for r in profile["relationships"] if r["proposed"]]
+        payload = {"stage_id": profile["stage_id"], "columns": columns, "relationships": relationships, **options}
+        resp = self.session.post(f"{self.base_url}/tables/{project_id}/fit", json=payload, timeout=self.timeout)
+        self._raise_for_status(resp)
+        return self.wait_for_job(resp.json()["job_id"])
+
+    def analyze_table(self, project_id: str, df: pd.DataFrame, images_zip: Optional[str] = None,
+                      idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+        """Analyzes a production batch; returns the combined report (column
+        drift, relationship drift, schema issues, data quality)."""
+        return self.wait_for_job(self._post_table(f"{self.base_url}/tables/{project_id}/analyze", f"{project_id}_batch",
+                                                  df, images_zip, headers=self._idempotency_headers(idempotency_key)))
 
     # ---------------------------------------------------------
     # management

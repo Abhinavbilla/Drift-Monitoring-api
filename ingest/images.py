@@ -24,6 +24,7 @@ import posixpath
 import re
 import warnings
 import zipfile
+import zlib
 from typing import Dict, List, Optional, Tuple
 
 from PIL import Image
@@ -183,5 +184,7 @@ def load_image(value, archive: Optional[ImageArchive]) -> Tuple[str, Optional[by
             raw = archive.read(entry)
         except ValueError:
             return "too_large", None
+        except (zipfile.BadZipFile, zlib.error, EOFError, OSError):
+            return "corrupt", None  # damaged compressed data / CRC mismatch inside the ZIP
     status = validate_image_bytes(raw)
     return status, (raw if status == "ok" else None)

@@ -1,0 +1,123 @@
+[petfinder] types={'Type': 'categorical', 'Age': 'numeric', 'Breed1': 'numeric', 'Gender': 'categorical', 'MaturitySize': 'categorical', 'Quantity': 'categorical', 'Fee': 'numeric', 'State': 'categorical', 'Description': 'text', 'Photo': 'image'}
+  relationships=[('Gender', 'Quantity', 'cat_cat'), ('Breed1', 'Type', 'num_cat'), ('Age', 'Quantity', 'num_cat'), ('Photo', 'Type', 'probe'), ('Description', 'Type', 'probe'), ('Description', 'Gender', 'probe'), ('Description', 'Photo', 'text_image')]
+  targets={'shuffle_num': 'Breed1', 'shuffle_cat': 'Type', 'shuffle_text': 'Description', 'shuffle_image': 'Photo'}
+  petfinder aa done (321s)
+  petfinder monotone done (49985s)
+  petfinder mix done (50443s)
+  petfinder shuffle_num done (51169s)
+  petfinder shuffle_cat done (51608s)
+  petfinder shuffle_text done (52064s)
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\linear_model\_logistic.py:599: ConvergenceWarning: lbfgs failed to converge after 20 iteration(s) (status=2):
+ABNORMAL: 
+
+You might also want to scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+Please also refer to the documentation for alternative solver options:
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+  n_iter_i = _check_optimize_result(
+  petfinder shuffle_image done (52616s)
+  petfinder subgroup done (53118s)
+    {'scenario': 'aa', 'draws': 100, 'changed_column': None, 'p_any_alarm': 0.0, 'p_any_relationship_alarm': 0.0, 'mean_family_size': 16.97}
+    {'scenario': 'monotone', 'draws': 100, 'changed_column': None, 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 0.0, 'mean_family_size': 16.99}
+    {'scenario': 'mix', 'draws': 100, 'changed_column': None, 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 0.01, 'mean_family_size': 17.0}
+    {'scenario': 'shuffle_num', 'draws': 100, 'changed_column': 'Breed1', 'p_any_alarm': 0.99, 'p_any_relationship_alarm': 0.99, 'mean_family_size': 17.0, 'p_column_alarm_on_changed': 0.0, 'attribution_precision': 1.0, 'p_detected_with_correct_pair': 0.99, 'latency_batches_k1m1': 1.01}
+    {'scenario': 'shuffle_cat', 'draws': 100, 'changed_column': 'Type', 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 1.0, 'mean_family_size': 16.97, 'p_column_alarm_on_changed': 0.0, 'attribution_precision': 1.0, 'p_detected_with_correct_pair': 1.0, 'latency_batches_k1m1': 1.0}
+    {'scenario': 'shuffle_text', 'draws': 100, 'changed_column': 'Description', 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 1.0, 'mean_family_size': 16.96, 'p_column_alarm_on_changed': 0.0, 'attribution_precision': 0.9966777408637874, 'p_detected_with_correct_pair': 1.0, 'latency_batches_k1m1': 1.0}
+    {'scenario': 'shuffle_image', 'draws': 100, 'changed_column': 'Photo', 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 1.0, 'mean_family_size': 16.98, 'p_column_alarm_on_changed': 0.0, 'attribution_precision': 1.0, 'p_detected_with_correct_pair': 1.0, 'latency_batches_k1m1': 1.0}
+    {'scenario': 'subgroup', 'draws': 100, 'changed_column': 'Breed1', 'p_any_alarm': 0.0, 'p_any_relationship_alarm': 0.0, 'mean_family_size': 16.97, 'p_column_alarm_on_changed': 0.0, 'attribution_precision': None, 'p_detected_with_correct_pair': 0.0, 'latency_batches_k1m1': None}
+   batch-level: {'relationship_drift_precision': 0.9975, 'recall': 0.798, 'f1': 0.8866666666666667, 'tp': 399, 'fp': 1, 'fn': 101}
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|##########| 103/103 [00:00<00:00, 1713.09it/s]
+[airbnb] types={'property_type': 'categorical', 'room_type': 'categorical', 'accommodates': 'categorical', 'bedrooms': 'numeric', 'price': 'numeric', 'minimum_nights': 'numeric', 'review_scores_rating': 'numeric', 'description': 'text'}
+  relationships=[('bedrooms', 'accommodates', 'num_cat'), ('property_type', 'room_type', 'cat_cat'), ('price', 'accommodates', 'num_cat'), ('price', 'property_type', 'num_cat'), ('bedrooms', 'price', 'num_num'), ('price', 'room_type', 'num_cat'), ('bedrooms', 'property_type', 'num_cat'), ('accommodates', 'room_type', 'cat_cat'), ('bedrooms', 'room_type', 'num_cat'), ('accommodates', 'property_type', 'cat_cat'), ('description', 'room_type', 'probe'), ('description', 'property_type', 'probe')]
+  targets={'shuffle_num': 'bedrooms', 'shuffle_cat': 'property_type', 'shuffle_text': 'description', 'shuffle_image': None}
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+  airbnb aa done (54243s)
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+  airbnb monotone done (54479s)
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+  airbnb mix done (54719s)
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+  airbnb shuffle_num done (54963s)
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+  airbnb shuffle_cat done (55205s)
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+  airbnb shuffle_text done (55447s)
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+C:\Users\abhin\AppData\Local\Programs\Python\Python314\Lib\site-packages\sklearn\metrics\_classification.py:2939: UserWarning: y_pred contains classes not in y_true
+  warnings.warn("y_pred contains classes not in y_true")
+  airbnb subgroup done (55690s)
+    {'scenario': 'aa', 'draws': 50, 'changed_column': None, 'p_any_alarm': 0.08, 'p_any_relationship_alarm': 0.02, 'mean_family_size': 20.0}
+    {'scenario': 'monotone', 'draws': 50, 'changed_column': None, 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 0.08, 'mean_family_size': 19.98}
+    {'scenario': 'mix', 'draws': 50, 'changed_column': None, 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 0.04, 'mean_family_size': 20.0}
+    {'scenario': 'shuffle_num', 'draws': 50, 'changed_column': 'bedrooms', 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 1.0, 'mean_family_size': 20.0, 'p_column_alarm_on_changed': 0.0, 'attribution_precision': 0.9849624060150376, 'p_detected_with_correct_pair': 1.0, 'latency_batches_k1m1': 1.0}
+    {'scenario': 'shuffle_cat', 'draws': 50, 'changed_column': 'property_type', 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 1.0, 'mean_family_size': 20.0, 'p_column_alarm_on_changed': 0.04, 'attribution_precision': 1.0, 'p_detected_with_correct_pair': 1.0, 'latency_batches_k1m1': 1.0}
+    {'scenario': 'shuffle_text', 'draws': 50, 'changed_column': 'description', 'p_any_alarm': 0.58, 'p_any_relationship_alarm': 0.54, 'mean_family_size': 19.96, 'p_column_alarm_on_changed': 0.0, 'attribution_precision': 0.9714285714285714, 'p_detected_with_correct_pair': 0.54, 'latency_batches_k1m1': 1.85}
+    {'scenario': 'subgroup', 'draws': 50, 'changed_column': 'bedrooms', 'p_any_alarm': 1.0, 'p_any_relationship_alarm': 1.0, 'mean_family_size': 19.94, 'p_column_alarm_on_changed': 0.0, 'attribution_precision': 0.9789473684210527, 'p_detected_with_correct_pair': 1.0, 'latency_batches_k1m1': 1.0}
+   batch-level: {'relationship_drift_precision': 0.9619565217391305, 'recall': 0.885, 'f1': 0.921875, 'tp': 177, 'fp': 7, 'fn': 23}

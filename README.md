@@ -439,11 +439,49 @@ To deploy your own instance on Render:
 
 > Note: The free Render tier spins the service down after inactivity. The first request after a period of inactivity may take 30–60 seconds to respond.
 
+**`Dockerfile` (single container, updated for table monitoring).** This is a multi-stage build:
+- it builds the React frontend and serves it with nginx at `/`;
+- the API is at `/api/`;
+- the old Streamlit dashboard is kept at `/streamlit/`.
+
+Build with `docker build --build-arg VITE_GOOGLE_CLIENT_ID=<id> .` and set the same backend variables as above. nginx accepts uploads up to 710 MB (a 200 MB table plus a 500 MB image ZIP). This Dockerfile has **not been build-tested** in this development environment, where Docker isn't available. The frontend stage's `npm run build` with `VITE_API_BASE_URL=/api` was verified locally.
+
+Table monitoring also has these requirements:
+- **Persistent storage:** staged uploads, embeddings and reference rows live under `DRIFT_DATA_DIR` (default `data/blobs`, which docker-compose mounts at `./data`). Mount a persistent disk there, and back it up together with `drift.db`.
+- **Background jobs:** they run in a worker thread inside the API process. A free-tier instance that spins down kills running jobs; they're marked `interrupted` on restart and must be resubmitted.
+- **CPU and memory:** image-heavy fits are expensive. On a 16-core desktop, about 15,000 descriptions took ~4 minutes and ~14,650 photos ~6 minutes to embed. A small instance will be far slower.
+- **Limits (env vars):** `DRIFT_MAX_ZIP_UPLOAD_BYTES`, `DRIFT_MAX_ZIP_ENTRIES`, `DRIFT_MAX_ZIP_UNCOMPRESSED`, `DRIFT_MAX_IMAGE_BYTES`, `DRIFT_MAX_IMAGE_PIXELS`.
+
 ---
 
 ## Usage
 
-### First-Time Setup
+### Table monitoring (recommended)
+
+One table, with any mix of numeric, categorical, text and image columns, is one project. In the dashboard, open a project's **Table Monitoring** tab:
+1. Upload the training table, plus a ZIP of images if a column holds image filenames.
+2. Review each column's proposed type and monitor flag.
+3. Review the proposed relationships.
+4. Lock the baseline.
+5. Upload production batches.
+
+From Python (`clients/python`):
+
+```python
+from drift_monitor_client import DriftClient
+
+client = DriftClient("http://localhost:8000", token="dm_...")      # personal access token
+profile = client.profile_table("pets", train_df, images_zip="train_images.zip")
+for col in profile["columns"]:
+    print(col["name"], col["proposed_type"], col["confidence"], col["reason"])
+fit = client.fit_table("pets", profile)          # accepts the proposals; pass columns=/relationships= to edit
+report = client.analyze_table("pets", batch_df, images_zip="batch_images.zip")
+print(report["overall"]["status"], report["overall"]["triggered_by"])
+```
+
+The same flow over HTTP: `POST /tables/pets/stage` (multipart `file`, optional `images`), poll `GET /jobs/{job_id}`, then `POST /tables/pets/fit` with the confirmed `columns` and `relationships`, then `POST /tables/pets/analyze`. See the [API Reference](#api-reference).
+
+### First-Time Setup (per-modality workflow)
 
 1. Open the dashboard and sign in with Google OAuth
 2. Upload your training data (CSV, Excel, JSON, Parquet, or ARFF)
@@ -541,12 +579,12 @@ What M1 does and does not do, plainly:
   | Same, 25% of rows shuffled | 3% / 2% | 0% / 0% |
 
   Flagged relationships involved the shuffled column 98–100% of the time. The 25% shuffle is not caught: its effect (about 0.03) is below the 0.05 materiality floor, by design. The relationship set came from the real profiler, which typed the integer breed code `Breed1` as numeric; one dataset only. Limitations: Spearman misses non-monotone dependence, and the numeric↔categorical test tracks relative position, not within-category spread.
-- **Text/image columns (milestone M3).** Each text/image column test now reports a p-value from this project's own reference embeddings: disjoint splits at the batch size, PCA-64, 200 draws, and a Gaussian tail beyond the draws. Step 2(e)'s synthetic grid was measured over-confident, which is why this replaces it. The decision is still the AUC > 0.65 rule, outside the Holm family, until the change below is approved.
-- **Relationships involving text/image (M3), report-only:**
-  - probes: a text/image column predicts a numeric or categorical column, scored by balanced accuracy or by Spearman of the predictions;
+- **Text/image columns (M3, decision approved in M4).** Each text/image column test uses a p-value from this project's own reference embeddings: disjoint splits at the batch size, PCA-64, 200 draws, and a Gaussian tail beyond the draws. Step 2(e)'s synthetic grid was measured over-confident. These tests are **in the Holm family**, with an AUC materiality floor of 0.55.
+- **Relationships involving text/image (M3):**
+  - probes: a text/image column predicts another column;
   - text↔image matching: does each row's image still go with its own text.
 
-  They are proposed at profile time; text/image columns are embedded once there and the vectors reused by the fit. They're shown with a status, but stay outside the family and **never alert** yet. A probe whose source column also drifted is marked `confounded_by`.
+  They're proposed at profile time; text/image columns are embedded once there and the vectors reused by the fit. Probes into **categorical** columns and matching are in the Holm family and alert. Probes into **numeric** columns are report-only (shown, never alerting), because they failed the population-mix check below. A probe whose source column also drifted is marked `confounded_by`.
 - **Measured for M3** (`scripts/validate_m3_embeddings.py`, cached PetFinder embeddings, seeded; `results/m3_embedding_validation.json`):
   - **PCA-64 vs raw embeddings:** the same or better detection (image, 25% cats: 10% vs 4%; 50% cats: 100% vs 98%), and 0% false alarms on unchanged data for both.
   - **Calibration (reference 1,000, 100 draws per cell):** with no drift, P(p < 0.05) was 1–5% in all four text/image cells, inside the 95% interval around 5%. A batch with 25% cats was detected 100% of the time at p < 0.05; the AUC > 0.65 rule caught it 6–10% of the time.
@@ -561,6 +599,30 @@ What M1 does and does not do, plainly:
     The numeric probe is not robust to a population-mix shift (cats and dogs differ in age), so it stays report-only for good.
 
   Live check (restarted server, 400 real pets with photos): shuffling descriptions between pets flagged exactly the three Description relationships and nothing else.
+- **Formal validation (M4)** (`scripts/validate_table_formal.py`; raw results in `results/m4_formal_validation.json`):
+  - **Setup:** reference 1,500 rows, batch 300, seeded. One Holm family, as in the API; probes into numeric columns left out.
+  - **PetFinder** (100 draws per scenario; numeric, categorical, text and image columns; 7 relationships proposed by the profiler).
+  - **Inside Airbnb Edinburgh** (CC BY 4.0, 50 draws per scenario; numeric, categorical and text columns; 12 relationships). Its photos are remote URLs the product never fetches.
+
+  | Scenario | PetFinder: any alarm / relationship alarm | Airbnb: any alarm / relationship alarm |
+  |---|---|---|
+  | No change | 0% / 0% | 8% / 2% |
+  | Monotone transform of the numeric columns in relationships | 100% / 0% | 100% / 8% |
+  | Category mix shifted | 100% / 1% | 100% / 4% |
+  | Numeric column shuffled (its own distribution unchanged) | relationship 99%, column 0% | 100%, column 0% |
+  | Categorical column shuffled | 100%, column 0% | 100%, column 4% |
+  | Text column shuffled | 100%, column 0% | 54%, column 0% |
+  | Image column shuffled | 100%, column 0% | — |
+  | Numeric column shuffled within one category's rows | 0% (see note) | 100% |
+
+  - **Attribution:** flagged relationship tests involved the changed column 97–100% of the time.
+  - **Batch-level relationship drift (shuffles and subgroup as positives):** precision 0.998, recall 0.80, F1 0.89 on PetFinder; 0.96 / 0.89 / 0.92 on Airbnb.
+  - **Detection latency:** wherever a shuffle is detected 99–100% of the time, it's caught on the first batch under the default alert policy (k=1 of m=1).
+
+  What this found:
+  - **PetFinder's subgroup scenario tested nothing.** Shuffling `Breed1` only among dogs leaves `Breed1↔Type`, its only monitored relationship, exactly intact. That's a flaw in the scenario design, not a detection failure.
+  - **Airbnb's no-change alarms (4 of 50) and its monotone-scenario relationship alarms all involve `property_type`.** It's a high-cardinality categorical, and hosts with many near-identical listings make rows clustered rather than independent. That violates the exchangeability assumption the nulls rely on and makes them too narrow. This is known and not fixed.
+  - **Airbnb text shuffles are caught 54% of the time.** Descriptions there predict room and property type only moderately.
 - **Not implemented (optional in the plan):** the experimental whole-row joint signal; the existing `/joint` endpoint is unchanged.
 - **Duplicate rows:** the fit removes only rows identical in every column, the same rule as the tabular `/fit`. A table without an identifier column can still lose legitimate repeated rows this way, which affects the tabular endpoints too; see `docs/PROGRESS.md`.
 - History, alert state machine, webhooks and idempotency all work for table projects; the original tabular/text/image/joint endpoints are unchanged.
@@ -753,7 +815,7 @@ Text, image, and joint all behaved exactly as expected on real (not synthetic) m
 
 **SQLite at scale:** SQLite is appropriate for moderate traffic and single-server deployments. High-concurrency production environments would benefit from migrating the storage layer to PostgreSQL.
 
-**Text/image validation is one dataset deep; joint is still only smoke-tested:** text and image now have measured false-alarm rates, power curves, and precision/recall/F1 (see [Text/Image Validation](#textimage-validation-step-2-e-petfindermy-2026-10-05)), but on a single dataset (English pet descriptions and photos), with fixed embedding models, and with drift defined by mixing two populations — not a general guarantee. Two concrete weaknesses it found: the calibrated p-value is over-confident on real embeddings (its null grid is synthetic Gaussian), so calibrated mode only adds detection if the AUC floor is lowered below 0.65, at the cost of >5% false alarms with small batches; and results are unreliable when the *reference* is tiny (20 vs 20 false-alarmed 10%–14%). Calibrated stays opt-in; it should not become the text/image default until the null is rebuilt from real embeddings and re-validated. Joint has no precision/recall/F1 numbers at all (only unit tests, manual checks, and the dog-vs-cat smoke test) and stays legacy-only; calibration for it isn't built.
+**Text/image validation is one dataset deep; joint is still only smoke-tested:** text and image now have measured false-alarm rates, power curves, and precision/recall/F1 (see [Text/Image Validation](#textimage-validation-step-2-e-petfindermy-2026-10-05)), but on a single dataset (English pet descriptions and photos), with fixed embedding models, and with drift defined by mixing two populations — not a general guarantee. Two concrete weaknesses it found: the calibrated p-value is over-confident on real embeddings (its null grid is synthetic Gaussian), so calibrated mode only adds detection if the AUC floor is lowered below 0.65, at the cost of >5% false alarms with small batches; and results are unreliable when the *reference* is tiny (20 vs 20 false-alarmed 10%–14%). On the per-modality text/image endpoints calibrated mode stays opt-in, because it still uses the synthetic grid. The unified table path uses each project's real-embedding null instead, validated in M3/M4 (see API Reference). Joint has no precision/recall/F1 numbers at all (only unit tests, manual checks, and the dog-vs-cat smoke test) and stays legacy-only; calibration for it isn't built.
 
 **Embedding model choice is fixed, not tunable:** `all-MiniLM-L6-v2` (text) and `resnet18` (image) were chosen for their small footprint on a free-tier deployment. There's no per-use-case model selection yet — a domain with very different characteristics (e.g. highly technical text, medical imaging) may see worse separability than these general-purpose embeddings provide.
 

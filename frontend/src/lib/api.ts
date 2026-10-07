@@ -37,7 +37,9 @@ async function request<T>(
              headers?: Record<string, string>; isForm?: boolean } = {},
 ): Promise<T> {
   const { method = "GET", body, params, headers = {}, isForm = false } = options;
-  const url = new URL(path, BASE_URL);
+  // Concatenate rather than resolve: new URL("/x", "https://host/api") would drop "/api".
+  // window.location.origin makes a relative base like "/api" (Docker/nginx) work too.
+  const url = new URL(BASE_URL.replace(/\/$/, "") + path, window.location.origin);
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined) url.searchParams.set(k, String(v));

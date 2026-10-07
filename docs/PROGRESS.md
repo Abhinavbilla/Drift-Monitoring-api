@@ -8,6 +8,32 @@ boundaries.
 
 ## HANDOFF — read this first if starting a fresh session (2026-09-30)
 
+**Unified table monitoring, milestone M4 (user-approved, 2026-10-07) — DONE.**
+Approved M3 decisions applied: text/image column tests in the Holm family
+(AUC floor 0.55); categorical probes + text<->image matching alert; numeric
+probes stay report-only. Core now routes extra family tests by group
+("column" -> feature_metrics, "relationship" -> relationship_metrics); the
+old outside-family `extra_metrics` path was removed. Dashboard: Table
+Monitoring first in nav, legacy pages labelled, History shows drifted
+columns/relationships; frontend API base works with a relative `/api`.
+Hardening: damaged ZIP entries -> per-row 'corrupt' (was a job crash); job
+failures log type + stack only (messages can echo values); fuzz tests
+(`tests/test_table_hardening.py`). Deployment: multi-stage Dockerfile
+(React via nginx at /, API /api/, Streamlit /streamlit/, 710m uploads),
+.dockerignore excludes datasets/node_modules -- NOT build-tested (no Docker
+here); frontend production build verified. Python client: profile_table /
+fit_table / analyze_table / wait_for_job. Formal validation
+(`scripts/validate_table_formal.py`, README table): PetFinder 100 draws/
+scenario, Airbnb Edinburgh 50 draws (amended budget, recorded in the
+script); A/A 0% (PetFinder) / 8% (Airbnb, all `property_type`-related --
+clustered listings break exchangeability); shuffles detected 99-100% with
+~1.0 attribution; Airbnb text shuffle 54%; PetFinder subgroup scenario was
+mis-designed (left the monitored pair intact). Full suite 362 passed. Live:
+shuffled descriptions -> alert from Description<->Type and
+Description<->Photo; numeric probe shown report-only.
+STILL OPEN for the user: exact-duplicate removal without an ID column
+(tabular + table); rotating the leaked OAuth secrets.
+
 **Unified table monitoring, milestone M3 (user-approved, 2026-10-06) — DONE.**
 `drift/embedding_tests.py`: PCA, tail-aware split-null p, column DCT with a
 real-embedding null, probes (embedding -> categorical: balanced accuracy;
