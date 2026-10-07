@@ -8,6 +8,7 @@ import type {
   Job,
   JobAccepted,
   LogEntry,
+  TableBaselineInfo,
   TableColumnChoice,
   TableRelationshipChoice,
   PredictResponse,
@@ -165,6 +166,7 @@ export const api = {
   analyzeTable: (projectId: string, file: File, images?: File) =>
     request<JobAccepted>(`/tables/${projectId}/analyze`, { method: "POST", body: tableForm(file, images), isForm: true }),
   getJob: <R,>(jobId: string) => request<Job<R>>(`/jobs/${jobId}`),
+  getTableBaseline: (projectId: string) => request<TableBaselineInfo>(`/tables/${projectId}/baseline`),
 };
 
 function tableForm(file: File, images?: File): FormData {

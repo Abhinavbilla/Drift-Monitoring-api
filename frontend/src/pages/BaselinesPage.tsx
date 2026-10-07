@@ -23,7 +23,7 @@ export function BaselinesPage() {
 
   return (
     <div>
-      <PageHeader title="Baselines" subtitle="Every version this project has been fit to, kept around in case you need to roll back." />
+      <PageHeader eyebrow="Saved baselines" title="Your saved baselines" subtitle="Each time you update what “normal” looks like, we keep the old version too — so you can switch back at any time." />
 
       {isLoading && (
         <div className="flex items-center justify-center py-16 text-slate-400">
@@ -42,8 +42,8 @@ export function BaselinesPage() {
               <tr>
                 <th className="px-5 py-3">Version</th>
                 <th className="px-5 py-3">Created</th>
-                <th className="px-5 py-3">Label</th>
-                <th className="px-5 py-3">Modality</th>
+                <th className="px-5 py-3">Name</th>
+                <th className="px-5 py-3">Kind</th>
                 <th className="px-5 py-3">Status</th>
                 <th className="px-5 py-3" />
               </tr>
@@ -53,10 +53,10 @@ export function BaselinesPage() {
                 <tr key={v.version}>
                   <td className="px-5 py-2.5 font-medium text-slate-700">v{v.version}</td>
                   <td className="px-5 py-2.5 text-slate-600">{new Date(v.created_at).toLocaleString()}</td>
-                  <td className="px-5 py-2.5 text-slate-600">{v.model_version_label ?? "--"}</td>
+                  <td className="px-5 py-2.5 text-slate-600">{v.model_version_label ?? "—"}</td>
                   <td className="px-5 py-2.5 text-slate-600 capitalize">{v.modality}</td>
                   <td className="px-5 py-2.5">
-                    {v.active ? <Badge tone="brand">Active</Badge> : <Badge tone="slate">Inactive</Badge>}
+                    {v.active ? <Badge tone="brand">In use</Badge> : <Badge tone="slate">Saved</Badge>}
                   </td>
                   <td className="px-5 py-2.5 text-right">
                     {!v.active && (
@@ -66,7 +66,7 @@ export function BaselinesPage() {
                         onClick={() => activateMutation.mutate(v.version)}
                         disabled={activateMutation.isPending}
                       >
-                        Activate
+                        Use this one
                       </Button>
                     )}
                   </td>

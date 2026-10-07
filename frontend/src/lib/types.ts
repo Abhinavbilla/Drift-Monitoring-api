@@ -1,4 +1,4 @@
-export type Modality = "tabular" | "text" | "image" | "joint";
+export type Modality = "tabular" | "text" | "image" | "joint" | "table";
 
 export interface FeatureMetric {
   statistic: number;
@@ -224,4 +224,13 @@ export interface TableReport {
   schema_report: Record<string, { issue: string; severity: string }[]>;
   data_quality: Record<string, { valid: number; invalid: Record<string, number> }>;
   family: { method: string; members: string[]; excluded: { test: string; why: string }[] };
+}
+
+export interface TableBaselineInfo {
+  project_id: string;
+  version: number;
+  schema: { column_name: string; proposed_type: TableColumnType | null; final_type: TableColumnType;
+            final_monitor: boolean; reason: string | null; decided_at: string }[];
+  relationships: { col_a: string; col_b: string; kind: RelationshipProposal["kind"]; final_monitor: boolean }[];
+  reference_rows: number;
 }

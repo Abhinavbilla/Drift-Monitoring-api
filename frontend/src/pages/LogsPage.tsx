@@ -14,7 +14,7 @@ export function LogsPage() {
 
   return (
     <div>
-      <PageHeader title="Audit Log" subtitle="Recent real-time /predict calls for this project (last 1000)." />
+      <PageHeader eyebrow="Activity log" title="Single-row checks" subtitle="The most recent rows checked one at a time with “Check a single row” (up to the last 1,000)." />
 
       {isLoading && (
         <div className="flex items-center justify-center py-16 text-slate-400">

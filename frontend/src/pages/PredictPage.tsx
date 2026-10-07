@@ -39,7 +39,7 @@ export function PredictPage() {
   if (!baseline || baseline.modality !== "tabular" || Object.keys(baseline.feature_types).length === 0) {
     return (
       <div>
-        <PageHeader title="Predict" subtitle="Real-time single-point anomaly check." />
+        <PageHeader eyebrow="Advanced tools" title="Check a single row" subtitle="See whether one row looks unusual compared with your baseline." />
         <EmptyState title="Not available" description="Predict requires a tabular baseline with monitored features." />
       </div>
     );
@@ -47,7 +47,7 @@ export function PredictPage() {
 
   return (
     <div>
-      <PageHeader title="Predict" subtitle="Score one incoming data point against the locked IQR fences." />
+      <PageHeader eyebrow="Advanced tools" title="Check a single row" subtitle="Enter one row of values to see whether any of them are unusually high or low compared with your baseline." />
 
       <Card className="max-w-xl p-6 space-y-4">
         {Object.entries(baseline.feature_types).map(([name, type]) => (

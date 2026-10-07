@@ -5,6 +5,11 @@ import { Badge, Button, Card, EmptyState, ErrorBanner, Field, PageHeader, Spinne
 import { api, ApiError } from "../lib/api";
 
 const EVENTS = ["opened", "resolved", "still_open"];
+const EVENT_LABELS: Record<string, string> = {
+  opened: "When changes start",
+  resolved: "When things are back to normal",
+  still_open: "After every check while changes continue",
+};
 
 export function WebhooksPage() {
   const { projectId = "" } = useParams();
@@ -39,32 +44,32 @@ export function WebhooksPage() {
 
   return (
     <div>
-      <PageHeader title="Webhooks" subtitle="Get notified the moment this project's alert state changes, with a signed request you can verify." />
+      <PageHeader eyebrow="Alerts & webhooks" title="Get told when something changes" subtitle="Send an automatic message to another system (like Slack or your own app) whenever this project starts or stops finding changes. Each message is signed so it can be verified." />
 
       <Card className="mb-6 max-w-xl p-6 space-y-4">
-        <Field label="Endpoint URL" hint="This needs to be publicly reachable. We'll reject anything pointing at localhost or a private network.">
+        <Field label="Where should we send messages?" hint="A web address that can receive messages — for example a Slack incoming webhook or your own app. It must be reachable from the internet.">
           <TextInput value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/drift-webhook" />
         </Field>
         <div>
-          <p className="mb-2 text-sm font-medium text-slate-700">Fire on</p>
-          <div className="flex gap-3">
+          <p className="mb-2 text-sm font-medium text-slate-700">Send a message…</p>
+          <div className="flex flex-col gap-2">
             {EVENTS.map((ev) => (
-              <label key={ev} className="flex items-center gap-1.5 text-sm text-slate-600">
-                <input type="checkbox" checked={events.includes(ev)} onChange={() => toggleEvent(ev)} />
-                {ev}
+              <label key={ev} className="flex items-center gap-2 text-sm text-slate-600">
+                <input type="checkbox" className="accent-brand-600" checked={events.includes(ev)} onChange={() => toggleEvent(ev)} />
+                {EVENT_LABELS[ev]}
               </label>
             ))}
           </div>
         </div>
         <Button onClick={() => registerMutation.mutate()} disabled={!url || events.length === 0 || registerMutation.isPending}>
-          {registerMutation.isPending ? "Registering..." : "Register Webhook"}
+          {registerMutation.isPending ? "Adding…" : "Add webhook"}
         </Button>
         {registerMutation.error && (
           <ErrorBanner message={registerMutation.error instanceof ApiError ? registerMutation.error.detail : "Failed to register."} />
         )}
         {newSecret && (
           <div className="space-y-1">
-            <SuccessBanner message="Webhook registered. Copy the signing secret now -- it won't be shown again." />
+            <SuccessBanner message="Webhook added. Copy this secret key now — it’s used to check messages really come from us, and it won’t be shown again." />
             <code className="block overflow-x-auto rounded-lg bg-slate-900 px-4 py-3 text-sm text-slate-100">{newSecret}</code>
           </div>
         )}
@@ -78,15 +83,15 @@ export function WebhooksPage() {
 
       {error && <ErrorBanner message={error instanceof ApiError ? error.detail : "Failed to load webhooks."} />}
 
-      {data && data.webhooks.length === 0 && <EmptyState title="No webhooks registered yet" />}
+      {data && data.webhooks.length === 0 && <EmptyState title="No webhooks yet" description="Add one above to get a message the moment this project starts (or stops) finding changes." />}
 
       {data && data.webhooks.length > 0 && (
         <Card className="overflow-hidden">
           <table className="w-full text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-5 py-3">URL</th>
-                <th className="px-5 py-3">Events</th>
+                <th className="px-5 py-3">Sends to</th>
+                <th className="px-5 py-3">When</th>
                 <th className="px-5 py-3">Status</th>
                 <th className="px-5 py-3" />
               </tr>
@@ -99,13 +104,13 @@ export function WebhooksPage() {
                     <div className="flex gap-1">
                       {wh.event_filter.map((e) => (
                         <Badge key={e} tone="slate">
-                          {e}
+                          {EVENT_LABELS[e] ?? e}
                         </Badge>
                       ))}
                     </div>
                   </td>
                   <td className="px-5 py-2.5">
-                    {wh.enabled ? <Badge tone="ok">Enabled</Badge> : <Badge tone="slate">Disabled</Badge>}
+                    {wh.enabled ? <Badge tone="ok">On</Badge> : <Badge tone="slate">Off</Badge>}
                   </td>
                   <td className="px-5 py-2.5 text-right">
                     <Button variant="danger" className="px-3 py-1 text-xs" onClick={() => deleteMutation.mutate(wh.id)}>

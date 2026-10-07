@@ -206,7 +206,7 @@ export function FitPage() {
 
   return (
     <div>
-      <PageHeader title="Fit Baseline" subtitle="Lock a reference distribution for this project." />
+      <PageHeader eyebrow="Advanced tools" title="Set up (older tool)" subtitle="The original setup for one kind of data at a time. For most projects, “Check my data” is simpler and watches more." />
 
       <div className="mb-6">
         <Tabs

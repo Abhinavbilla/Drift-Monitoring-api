@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, registerTokenGetter } from "./api";
 
 interface Session {
@@ -32,9 +32,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(() => loadSession());
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    registerTokenGetter(() => session?.token ?? null);
-  }, [session]);
+  // Registered during render, not in an effect: child components' queries start
+  // before a parent's effects run, so an effect left the very first requests of a
+  // page load (e.g. after a refresh) without a token.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  registerTokenGetter(() => sessionRef.current?.token ?? null);
 
   const loginWithGoogleIdToken = async (idToken: string) => {
     setLoading(true);

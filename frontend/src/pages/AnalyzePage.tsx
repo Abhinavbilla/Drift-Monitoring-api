@@ -64,7 +64,7 @@ export function AnalyzePage() {
 
   return (
     <div>
-      <PageHeader title="Analyze" subtitle="Compare a production batch against the locked baseline." />
+      <PageHeader eyebrow="Advanced tools" title="Check a batch (older tool)" subtitle="Compare new data with a baseline made by the older setup tool." />
 
       <div className="mb-6">
         <Tabs
