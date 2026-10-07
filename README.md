@@ -105,7 +105,7 @@ The older **per-modality workflows** still work unchanged for existing projects:
 
 ## Quick start
 
-**Prerequisites:** Python 3.12+, Node 20+, and a Google Cloud OAuth client ID (for dashboard sign-in).
+**Prerequisites:** Python 3.12+, Node 20+, and a Google Cloud OAuth client ID for Google sign-in. Email + password sign-in also needs an SMTP account (see below); without one, the sign-in page shows Google only.
 
 ```bash
 git clone https://github.com/Abhinavbilla/Drift-Monitoring-api.git
@@ -122,7 +122,9 @@ COOKIE_KEY=a-long-random-secret          # signs session tokens
 # optional
 GOOGLE_CLIENT_SECRET=...                 # only for the legacy Streamlit dashboard
 FRONTEND_URL=http://localhost:5173       # allowed CORS origins, comma-separated
-ALERT_EMAIL=... ALERT_PASSWORD=...       # SMTP for drift emails (otherwise printed to the log)
+ALERT_EMAIL=... ALERT_PASSWORD=...       # SMTP account: drift emails AND email sign-in codes
+SMTP_HOST=smtp.gmail.com SMTP_PORT=465   # defaults shown
+DRIFT_DEV_PRINT_EMAIL_CODES=1            # local development only: print sign-in codes to the server log
 DRIFT_DATA_DIR=data/blobs                # where staged uploads and embeddings are stored
 ```
 
@@ -155,7 +157,7 @@ python scripts/create_token.py create --email you@example.com --name ci   # prin
 
 ### Dashboard
 
-Sign in with Google, open or create a project, and go to **Table Monitoring**:
+Sign in with Google, or with an email and password, then open or create a project and go to **Check my data**:
 1. Upload the training table, and an image ZIP if a column names image files.
 2. Review the columns: change any proposed type and toggle monitoring. Expand **Evidence** to see why each type was proposed.
 3. Review the relationships: proposed pairs are pre-selected. Add or remove pairs; the page shows how many tests share the false-alarm budget.
@@ -223,7 +225,7 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: batch-42" \
 
 ## API reference
 
-All endpoints take `Authorization: Bearer <token>`: either a session token from the dashboard's Google login, or a personal access token (optionally scoped to project IDs; see `auth/tokens.py`). Full schemas are at `/docs`.
+All endpoints take `Authorization: Bearer <token>`: either a session token from signing in (Google or email + password), or a personal access token (optionally scoped to project IDs; see `auth/tokens.py`). Full schemas are at `/docs`.
 
 ### Table monitoring
 
@@ -253,6 +255,12 @@ All endpoints take `Authorization: Bearer <token>`: either a session token from 
 | `/predict/{project_id}` | POST | Real-time single-row IQR anomaly check |
 | `/profile` | POST | Profile a JSON table without fitting (tabular profiler) |
 | `/auth/google` | POST | Exchange a Google ID token for a session token |
+| `/auth/methods` | GET | Which sign-in methods this server offers (email needs SMTP) |
+| `/auth/email/register` | POST | `{email, password, name?}`: emails a 6-digit confirmation code |
+| `/auth/email/verify` | POST | `{email, code}`: confirms the address and returns a session token |
+| `/auth/email/login` | POST | `{email, password}`: returns a session token (only for confirmed accounts) |
+| `/auth/email/resend`, `/auth/email/forgot` | POST | `{email}`: new confirmation code / password-reset code |
+| `/auth/email/reset` | POST | `{email, code, new_password}`: sets a new password and signs in |
 
 ### Per-modality endpoints (legacy, unchanged)
 
@@ -575,7 +583,10 @@ Not committed: `.env`, `google_credentials.json`, `drift.db`, `data/` (blobs), `
 ## Security and privacy
 
 - **Authentication and isolation:**
-  - Google sign-in issues signed session tokens; scripts use hashed, revocable personal access tokens.
+  - Google sign-in and email + password sign-in issue the same signed session tokens; scripts use hashed, revocable personal access tokens.
+  - Email accounts must confirm the address with an emailed 6-digit code before they can sign in. Projects belong to an email address, so this is what stops someone opening another person's projects by typing their address. The same confirmed address sees the same projects whether it signs in with Google or a password.
+  - Passwords are hashed with scrypt and a per-user salt. Codes are stored only as keyed hashes; they expire after 15 minutes and allow 5 tries. Five wrong passwords lock sign-in for 15 minutes.
+  - Sign-in responses never reveal whether an account exists.
   - Every table endpoint checks ownership. Other users' projects, stages and jobs return `404`.
 - **No raw data in logs or history:**
   - history, job results, webhooks and alert events hold statistics only;

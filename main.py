@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from PIL import UnidentifiedImageError
 from drift.alerts import send_drift_email
 from drift import webhooks
+from auth import email_auth
 from auth.tokens import parse_prefix, verify_token_hash
 # Importing custom modules
 from models import (
@@ -386,13 +387,94 @@ def login_with_google(request: GoogleLoginRequest):
     email = claims.get("email")
     if not email or not claims.get("email_verified"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google account email not verified.")
-    name = claims.get("name", email)
+    return _session_response(email, claims.get("name", email))
 
+
+def _session_response(email: str, name: str) -> dict:
+    """The one session-token shape verify_access accepts, for every sign-in method."""
     session_token = jwt.encode(
         {"email": email.lower(), "name": name, "iat": int(time.time()), "exp": int(time.time()) + 3600},
         COOKIE_KEY, algorithm="HS256",
     )
     return {"session_token": session_token, "email": email.lower(), "name": name}
+
+
+# ---------------------------------------------------------
+# EMAIL + PASSWORD SIGN-IN (auth/email_auth.py)
+# ---------------------------------------------------------
+class EmailRegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = None
+
+
+class EmailLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class EmailCodeRequest(BaseModel):
+    email: str
+    code: str
+
+
+class EmailOnlyRequest(BaseModel):
+    email: str
+
+
+class PasswordResetRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+
+def _email_auth(fn, *args):
+    try:
+        return fn(*args)
+    except email_auth.AuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+
+
+@app.get("/auth/methods", tags=["Management"])
+def auth_methods():
+    """Which sign-in methods this server offers, so the sign-in page can hide email when SMTP isn't set up."""
+    return {"google": True, "email": email_auth.email_configured()}
+
+
+@app.post("/auth/email/register", tags=["Management"])
+def email_register(request: EmailRegisterRequest):
+    _email_auth(email_auth.register, request.email, request.password, request.name)
+    return {"status": "code_sent", "message": "If this address can be used, we've emailed it a 6-digit code."}
+
+
+@app.post("/auth/email/verify", tags=["Management"])
+def email_verify(request: EmailCodeRequest):
+    user = _email_auth(email_auth.verify_email, request.email, request.code)
+    return _session_response(user["email"], user["name"])
+
+
+@app.post("/auth/email/login", tags=["Management"])
+def email_login(request: EmailLoginRequest):
+    user = _email_auth(email_auth.login, request.email, request.password)
+    return _session_response(user["email"], user["name"])
+
+
+@app.post("/auth/email/resend", tags=["Management"])
+def email_resend(request: EmailOnlyRequest):
+    _email_auth(email_auth.resend_verification, request.email)
+    return {"status": "ok", "message": "If that account is waiting to be confirmed, we've sent a new code."}
+
+
+@app.post("/auth/email/forgot", tags=["Management"])
+def email_forgot(request: EmailOnlyRequest):
+    _email_auth(email_auth.forgot_password, request.email)
+    return {"status": "ok", "message": "If there's an account for that address, we've emailed it a reset code."}
+
+
+@app.post("/auth/email/reset", tags=["Management"])
+def email_reset(request: PasswordResetRequest):
+    user = _email_auth(email_auth.reset_password, request.email, request.code, request.new_password)
+    return _session_response(user["email"], user["name"])
 
 
 @app.get("/baseline/{project_id}", tags=["Management"])

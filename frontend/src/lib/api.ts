@@ -17,6 +17,12 @@ import type {
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
+export interface SessionResponse {
+  session_token: string;
+  email: string;
+  name: string;
+}
+
 export class ApiError extends Error {
   status: number;
   detail: string;
@@ -78,6 +84,17 @@ async function request<T>(
 
 export const api = {
   // -- auth --
+  authMethods: () => request<{ google: boolean; email: boolean }>("/auth/methods"),
+  emailRegister: (email: string, password: string, name?: string) =>
+    request<{ message: string }>("/auth/email/register", { method: "POST", body: { email, password, name } }),
+  emailVerify: (email: string, code: string) =>
+    request<SessionResponse>("/auth/email/verify", { method: "POST", body: { email, code } }),
+  emailLogin: (email: string, password: string) =>
+    request<SessionResponse>("/auth/email/login", { method: "POST", body: { email, password } }),
+  emailResend: (email: string) => request<{ message: string }>("/auth/email/resend", { method: "POST", body: { email } }),
+  emailForgot: (email: string) => request<{ message: string }>("/auth/email/forgot", { method: "POST", body: { email } }),
+  emailReset: (email: string, code: string, newPassword: string) =>
+    request<SessionResponse>("/auth/email/reset", { method: "POST", body: { email, code, new_password: newPassword } }),
   loginWithGoogle: (idToken: string) =>
     request<{ session_token: string; email: string; name: string }>("/auth/google", {
       method: "POST",

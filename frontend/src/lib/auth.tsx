@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, registerTokenGetter } from "./api";
+import { api, registerTokenGetter, type SessionResponse } from "./api";
 
 interface Session {
   token: string;
@@ -11,6 +11,8 @@ interface AuthContextValue {
   session: Session | null;
   loading: boolean;
   loginWithGoogleIdToken: (idToken: string) => Promise<void>;
+  /** Finishes any sign-in method that returns a session (email + password, codes). */
+  completeSignIn: (resp: SessionResponse) => void;
   logout: () => void;
 }
 
@@ -39,13 +41,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   sessionRef.current = session;
   registerTokenGetter(() => sessionRef.current?.token ?? null);
 
+  const completeSignIn = (resp: SessionResponse) => {
+    const next: Session = { token: resp.session_token, email: resp.email, name: resp.name };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    setSession(next);
+  };
+
   const loginWithGoogleIdToken = async (idToken: string) => {
     setLoading(true);
     try {
-      const resp = await api.loginWithGoogle(idToken);
-      const next: Session = { token: resp.session_token, email: resp.email, name: resp.name };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      setSession(next);
+      completeSignIn(await api.loginWithGoogle(idToken));
     } finally {
       setLoading(false);
     }
@@ -57,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const value = useMemo(
-    () => ({ session, loading, loginWithGoogleIdToken, logout }),
+    () => ({ session, loading, loginWithGoogleIdToken, completeSignIn, logout }),
     [session, loading],
   );
 

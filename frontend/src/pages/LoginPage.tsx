@@ -1,10 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
+import { EmailSignIn } from "../components/EmailSignIn";
 import { GoogleSignInButton } from "../components/GoogleSignInButton";
 import { Logo, LogoMark } from "../components/Logo";
 import { IconAlert, IconCheckCircle, IconLink, IconShield } from "../components/icons";
-import { ApiError } from "../lib/api";
+import { ApiError, api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 function HeroBackground() {
@@ -52,7 +54,8 @@ function Point({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 }
 
 export function LoginPage() {
-  const { session, loginWithGoogleIdToken } = useAuth();
+  const { session, loginWithGoogleIdToken, completeSignIn } = useAuth();
+  const methods = useQuery({ queryKey: ["authMethods"], queryFn: api.authMethods, retry: false });
   const [error, setError] = useState<string | null>(null);
 
   if (session) return <Navigate to="/" replace />;
@@ -107,20 +110,28 @@ export function LoginPage() {
             <LogoMark className="h-12 w-12" />
           </div>
           <h2 className="text-3xl font-bold text-slate-900">Welcome</h2>
-          <p className="mt-2 text-[15px] text-slate-500">Sign in with your Google account to see your projects.</p>
+          <p className="mt-2 text-[15px] text-slate-500">Sign in to see your projects.</p>
 
           <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-lift)]">
             <div className="flex justify-center">
               <GoogleSignInButton onToken={handleToken} />
             </div>
             {error && <p className="mt-4 text-center text-sm text-alert-600">{error}</p>}
+            {methods.data?.email && (
+              <>
+                <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-slate-400">
+                  <span className="h-px flex-1 bg-slate-200" /> or <span className="h-px flex-1 bg-slate-200" />
+                </div>
+                <EmailSignIn onSignedIn={completeSignIn} />
+              </>
+            )}
             <p className="mt-5 border-t border-slate-100 pt-4 text-center text-xs leading-relaxed text-slate-400">
               We only use your name and email to keep your projects private to you.
             </p>
           </div>
 
           <p className="mt-8 text-center text-xs text-slate-400">
-            New here? Signing in creates your workspace automatically.
+            New here? Signing in with Google, or creating an account, sets up your workspace automatically.
           </p>
         </div>
       </section>

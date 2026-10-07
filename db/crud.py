@@ -325,6 +325,34 @@ def init_db():
             PRIMARY KEY (project_id, version)
         )
     ''')
+    # Email + password accounts (Google sign-in needs no row here). An
+    # account can only sign in once `verified` -- projects are keyed by email,
+    # so an unverified address must never get a session.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            email TEXT PRIMARY KEY,
+            name TEXT,
+            password_hash TEXT NOT NULL,
+            verified INTEGER NOT NULL DEFAULT 0,
+            failed_logins INTEGER NOT NULL DEFAULT 0,
+            locked_until TEXT,
+            created_at TEXT NOT NULL
+        )
+    ''')
+    # One-time codes for verifying an email or resetting a password. Only a
+    # keyed hash of the code is stored.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS email_codes (
+            email TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            PRIMARY KEY (email, purpose)
+        )
+    ''')
+
     # Populated from M2 (relationship engine); created now so the version
     # layout is final and M2 needs no further schema change.
     cursor.execute('''
@@ -1595,5 +1623,65 @@ def delete_table_project_data(project_id: str) -> None:
     for table in ("table_schemas", "table_column_baselines", "table_reference_rows",
                   "table_relationships", "staged_uploads", "jobs"):
         conn.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------
+# Email + password accounts (auth/email_auth.py holds the logic)
+# ---------------------------------------------------------
+def get_user(email: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    rows = _rows_as_dicts(conn.execute("SELECT * FROM users WHERE email = ?", (email,)))
+    conn.close()
+    return rows[0] if rows else None
+
+
+def upsert_unverified_user(email: str, name: str, password_hash: str) -> None:
+    """Creates the account, or -- while it is still unverified -- replaces its
+    name and password, so a sign-up that was abandoned can simply be redone."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO users (email, name, password_hash, verified, created_at) VALUES (?, ?, ?, 0, ?) "
+        "ON CONFLICT(email) DO UPDATE SET name = excluded.name, password_hash = excluded.password_hash "
+        "WHERE users.verified = 0",
+        (email, name, password_hash, _now_iso()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_user(email: str, **fields) -> None:
+    _update_row("users", "email", email, {"password_hash", "verified", "failed_logins", "locked_until"}, fields)
+
+
+def save_email_code(email: str, purpose: str, code_hash: str, expires_at: str) -> None:
+    conn = get_connection()
+    conn.execute(
+        "INSERT OR REPLACE INTO email_codes (email, purpose, code_hash, attempts, created_at, expires_at) "
+        "VALUES (?, ?, ?, 0, ?, ?)",
+        (email, purpose, code_hash, _now_iso(), expires_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_email_code(email: str, purpose: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    rows = _rows_as_dicts(conn.execute("SELECT * FROM email_codes WHERE email = ? AND purpose = ?", (email, purpose)))
+    conn.close()
+    return rows[0] if rows else None
+
+
+def bump_email_code_attempts(email: str, purpose: str) -> None:
+    conn = get_connection()
+    conn.execute("UPDATE email_codes SET attempts = attempts + 1 WHERE email = ? AND purpose = ?", (email, purpose))
+    conn.commit()
+    conn.close()
+
+
+def delete_email_code(email: str, purpose: str) -> None:
+    conn = get_connection()
+    conn.execute("DELETE FROM email_codes WHERE email = ? AND purpose = ?", (email, purpose))
     conn.commit()
     conn.close()
