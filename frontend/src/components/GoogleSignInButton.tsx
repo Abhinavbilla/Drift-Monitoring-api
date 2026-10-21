@@ -2,38 +2,53 @@ import { useEffect, useRef } from "react";
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
-export function GoogleSignInButton({ onToken }: { onToken: (idToken: string) => void }) {
+// Google's library is global: initialize it once and route its callback to
+// whichever button is mounted, instead of re-initializing on every render.
+let initialized = false;
+let handleCredential: ((idToken: string) => void) | null = null;
+
+type ButtonText = "signin_with" | "signup_with" | "continue_with";
+
+export function GoogleSignInButton({ onToken, text = "signin_with" }: {
+  onToken: (idToken: string) => void;
+  text?: ButtonText;
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!ref.current) return;
+    handleCredential = onToken;
+  }, [onToken]);
 
+  useEffect(() => {
     let cancelled = false;
-    const tryInit = () => {
-      if (cancelled) return;
+    const render = () => {
+      if (cancelled || !ref.current || !CLIENT_ID) return;
       if (!window.google) {
-        setTimeout(tryInit, 100);
+        setTimeout(render, 100);
         return;
       }
-      window.google.accounts.id.initialize({
-        client_id: CLIENT_ID,
-        callback: (resp) => onToken(resp.credential),
-      });
-      if (ref.current) {
-        window.google.accounts.id.renderButton(ref.current, {
-          theme: "outline",
-          size: "large",
-          width: 280,
-          shape: "pill",
+      if (!initialized) {
+        window.google.accounts.id.initialize({
+          client_id: CLIENT_ID,
+          callback: (resp) => handleCredential?.(resp.credential),
         });
+        initialized = true;
       }
+      ref.current.innerHTML = "";
+      window.google.accounts.id.renderButton(ref.current, {
+        theme: "outline",
+        size: "large",
+        shape: "pill",
+        text,
+        logo_alignment: "center",
+        width: Math.min(400, ref.current.offsetWidth || 320),  // Google caps the button at 400px
+      });
     };
-    tryInit();
-
+    render();
     return () => {
       cancelled = true;
     };
-  }, [onToken]);
+  }, [text]);
 
   if (!CLIENT_ID) {
     return (
@@ -43,5 +58,5 @@ export function GoogleSignInButton({ onToken }: { onToken: (idToken: string) => 
     );
   }
 
-  return <div ref={ref} />;
+  return <div ref={ref} className="flex h-11 w-full justify-center" />;
 }

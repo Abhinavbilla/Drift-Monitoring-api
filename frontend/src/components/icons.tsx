@@ -101,3 +101,18 @@ export const IconPulse = (p: IconProps) => (
 export const IconFile = (p: IconProps) => (
   <Icon {...p}><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8l-5-5Z" /><path d="M14 3v5h5" /></Icon>
 );
+export const IconMail = (p: IconProps) => (
+  <Icon {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3.5 6.5 8.5 6.5 8.5-6.5" /></Icon>
+);
+export const IconLock = (p: IconProps) => (
+  <Icon {...p}><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></Icon>
+);
+export const IconUser = (p: IconProps) => (
+  <Icon {...p}><circle cx="12" cy="8" r="4" /><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0" /></Icon>
+);
+export const IconEye = (p: IconProps) => (
+  <Icon {...p}><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" /><circle cx="12" cy="12" r="3" /></Icon>
+);
+export const IconArrowLeft = (p: IconProps) => (
+  <Icon {...p}><path d="M19 12H5M11 18l-6-6 6-6" /></Icon>
+);
