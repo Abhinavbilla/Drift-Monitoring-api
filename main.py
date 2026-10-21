@@ -1,4 +1,3 @@
-import sqlite3
 import jwt
 import binascii
 import hashlib
@@ -35,7 +34,7 @@ from models import (
     TableFitRequest, JobAcceptedResponse,
 )
 import jobs
-from db import blob_store, crud
+from db import blob_store, crud, snapshot
 from drift import table_monitor
 from drift.detector import compute_iqr_anomalies, DistributionDetector
 from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES, RECOMMENDED_MIN_SAMPLES
@@ -159,7 +158,7 @@ PROJECT_NAMESPACE_SEP = "::"
 
 
 def _project_owner(project_id: str) -> Optional[str]:
-    conn = sqlite3.connect("drift.db")
+    conn = crud.get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT owner_email FROM projects WHERE id = ?", (project_id,))
     row = cursor.fetchone()
@@ -168,7 +167,7 @@ def _project_owner(project_id: str) -> Optional[str]:
 
 
 def _row_exists(internal_id: str) -> bool:
-    conn = sqlite3.connect("drift.db")
+    conn = crud.get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT 1 FROM projects WHERE id = ?", (internal_id,))
     row = cursor.fetchone()
@@ -177,7 +176,7 @@ def _row_exists(internal_id: str) -> bool:
 
 
 def _baseline_row_exists(project_id: str) -> bool:
-    conn = sqlite3.connect("drift.db")
+    conn = crud.get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT 1 FROM baselines WHERE project_id = ?", (project_id,))
     row = cursor.fetchone()
@@ -323,11 +322,13 @@ def verify_model_access(model_id: str, client: dict = Depends(verify_access)) ->
 # ---------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize main tables via your crud module
+    snapshot.restore()  # no-op unless DRIFT_DB_BACKUP_PATH is set (see db/snapshot.py)
     crud.init_db()
+    snapshot.start_periodic_save()
     webhooks.start_webhook_sweep_thread()  # Step 5 Part 2 -- no-op after the first call
     jobs.start_worker()  # unified table path -- also a no-op after the first call
     yield
+    snapshot.save()
 
 app = FastAPI(
     title="Drift Monitoring API",
@@ -480,9 +481,8 @@ def email_reset(request: PasswordResetRequest):
 @app.get("/baseline/{project_id}", tags=["Management"])
 def get_baseline(project_id: str, client: dict = Depends(verify_project_access)):
     """Returns the IQR fences, feature types, and modality for a project."""
-    import sqlite3
     import json
-    conn = sqlite3.connect("drift.db")
+    conn = crud.get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT iqr_fences, feature_types, modality FROM baselines WHERE project_id = ?",
                     (client["internal_project_id"],))
@@ -583,10 +583,9 @@ def delete_webhook(project_id: str, webhook_id: str, client: dict = Depends(veri
 @app.get("/logs/{project_id}", tags=["Management"])
 def get_logs(project_id: str, client: dict = Depends(verify_project_access)):
     """Returns the recent logs for a project (last 1000)."""
-    import sqlite3
     import json
     _require_existing_project(client["internal_project_id"])
-    conn = sqlite3.connect("drift.db")
+    conn = crud.get_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT input_data, score, is_ood FROM logs WHERE project_id = ? ORDER BY rowid DESC LIMIT 1000",
@@ -2041,7 +2040,7 @@ def list_projects(client: dict = Depends(verify_access)):
     displayed here with that prefix stripped, so a user always sees just
     the name they created it with, never their own email echoed back.
     """
-    conn = sqlite3.connect("drift.db")
+    conn = crud.get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id FROM projects WHERE owner_email = ?", (client["email"],))
     rows = cursor.fetchall()
@@ -2056,11 +2055,10 @@ def list_projects(client: dict = Depends(verify_access)):
 # ---------------------------------------------------------
 def _delete_project_data(project_id: str) -> str:
     import urllib.parse
-    import sqlite3
 
     clean_project_id = urllib.parse.unquote(project_id)
 
-    conn = sqlite3.connect("drift.db")
+    conn = crud.get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM projects WHERE id = ?", (clean_project_id,))

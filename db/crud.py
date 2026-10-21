@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import os
 import numpy as np
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Tuple
@@ -8,7 +9,7 @@ import pandas as pd
 
 from utils.profiler import coerce_numeric_column
 
-DB_PATH = "drift.db"
+DB_PATH = os.getenv("DRIFT_DB_PATH", "drift.db")
 
 # Matches utils/profiler.py's own "Low-cardinality text (Suitable for PSI)"
 # threshold -- a storage-layer safety net, not a duplicate classification

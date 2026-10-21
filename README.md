@@ -8,7 +8,7 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg?style=for-the-badge)](https://react.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge)](https://www.docker.com/)
 
-**Live demo:** [drift-monitoring-dashboard.onrender.com](https://drift-monitoring-dashboard.onrender.com/). It runs on Render's free tier, so the first load can take 30–60 s. It may still be running an older version until it's redeployed from this repository.
+**Live demo:** [drift-sentinal-bec6fsf2drh5ash9.indiasouthcentral-01.azurewebsites.net](https://drift-sentinal-bec6fsf2drh5ash9.indiasouthcentral-01.azurewebsites.net/), on Azure App Service. It redeploys from `main` automatically.
 
 ---
 
@@ -621,15 +621,18 @@ docker build --build-arg VITE_GOOGLE_CLIENT_ID=<client-id> -t drift-monitoring .
 docker run -p 80:80 --env-file .env -v $(pwd)/data:/app/data -v $(pwd)/drift.db:/app/drift.db drift-monitoring
 ```
 
-nginx accepts uploads up to 710 MB. The Dockerfile has **not been build-tested** in the development environment (no Docker there). The frontend production build (`npm run build` with `VITE_API_BASE_URL=/api`) was verified.
+nginx accepts uploads up to 710 MB (`nginx.conf`). The image is built by GitHub Actions (below); there is no Docker in the development environment.
 
-**Render.** The current live demo predates the React frontend. To redeploy, use `Dockerfile` as a web service and set:
-- `GOOGLE_CLIENT_ID` and `COOKIE_KEY`;
-- the build argument `VITE_GOOGLE_CLIENT_ID`;
-- optionally `FRONTEND_URL`.
+**Azure App Service (the live demo).** `.github/workflows/azure-deploy.yml` builds the image on every push to `main` and pushes it to the Azure Container Registry `driftsentinal`; the Linux Web App (B1) runs `drift-monitoring:latest`, and continuous deployment restarts it on each new image.
+- **GitHub secrets:** `ACR_USERNAME`, `ACR_PASSWORD` (registry → Access keys, Admin user on).
+- **Web App settings:** `WEBSITES_PORT=80`, `WEBSITES_CONTAINER_START_TIME_LIMIT=1800`, `GOOGLE_CLIENT_ID`, `COOKIE_KEY`, and `ALERT_EMAIL` / `ALERT_PASSWORD` (Gmail app password) for email sign-in. "Always on" keeps background jobs alive.
+- **Persistent data:** the container's disk is wiped on every restart, so set `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true`, `DRIFT_DATA_DIR=/home/drift/blobs` and `DRIFT_DB_BACKUP_PATH=/home/drift/drift.db`. Uploaded files live on `/home` directly. SQLite can't run safely on that network share, so the live database stays on local disk and `db/snapshot.py` saves a consistent copy to `/home` every 5 minutes (`DRIFT_DB_BACKUP_SECONDS`) and on shutdown, restoring it on startup. A crash, unlike a normal restart or redeploy, can lose the last few minutes of writes.
+- **Google sign-in:** add the site's URL to the OAuth client's Authorized JavaScript origins.
+
+Any other Docker host works the same way: build with `--build-arg VITE_GOOGLE_CLIENT_ID=...` and set the variables above. `DRIFT_DB_PATH` moves the database file itself.
 
 For table monitoring:
-- **Persistent disk** at `/app/data`, plus `drift.db`. Back them up together.
+- **Persistence:** keep `DRIFT_DATA_DIR` and the database (or its backup) together; restore them together.
 - **Background jobs** run inside the API process. A free-tier instance that sleeps kills running jobs; they're marked `interrupted` on restart and must be resubmitted.
 - **CPU and memory:** on a 16-core desktop, about 15,000 descriptions took ~4 min and ~14,650 photos ~6 min to embed. Small instances will be much slower.
 - **Limits (env vars):** `DRIFT_MAX_ZIP_UPLOAD_BYTES`, `DRIFT_MAX_ZIP_ENTRIES`, `DRIFT_MAX_ZIP_UNCOMPRESSED`, `DRIFT_MAX_IMAGE_BYTES`, `DRIFT_MAX_IMAGE_PIXELS`.
