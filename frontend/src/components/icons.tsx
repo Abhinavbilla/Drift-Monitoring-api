@@ -116,3 +116,12 @@ export const IconEye = (p: IconProps) => (
 export const IconArrowLeft = (p: IconProps) => (
   <Icon {...p}><path d="M19 12H5M11 18l-6-6 6-6" /></Icon>
 );
+export const IconCode = (p: IconProps) => (
+  <Icon {...p}><path d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 4l-3 16" /></Icon>
+);
+export const IconKey = (p: IconProps) => (
+  <Icon {...p}><circle cx="8" cy="15" r="4" /><path d="m10.8 12.2 8.7-8.7M16 7l2.5 2.5M18.5 4.5 21 7" /></Icon>
+);
+export const IconCopy = (p: IconProps) => (
+  <Icon {...p}><rect x="8.5" y="8.5" width="12" height="12" rx="2" /><path d="M15.5 8.5v-3a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3" /></Icon>
+);

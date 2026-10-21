@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { NavLink, Outlet, useParams } from "react-router-dom";
 import { Logo } from "../components/Logo";
 import {
-  IconBell, IconChevronDown, IconClock, IconGrid, IconHome, IconLayers, IconList, IconLogout, IconTable, IconWrench,
+  IconBell, IconChevronDown, IconClock, IconCode, IconGrid, IconHome, IconLayers, IconList, IconLogout, IconTable, IconWrench,
 } from "../components/icons";
 import { useAuth } from "../lib/auth";
 
@@ -62,6 +62,7 @@ export function AppShell() {
         <nav className="flex-1 space-y-6 overflow-y-auto px-3 pb-4">
           <div className="space-y-0.5">
             <SideLink to="/" end icon={<IconGrid />}>All projects</SideLink>
+            <SideLink to={projectId ? `/connect?project=${encodeURIComponent(projectId)}` : "/connect"} icon={<IconCode />}>Connect your model</SideLink>
           </div>
 
           {projectId && (

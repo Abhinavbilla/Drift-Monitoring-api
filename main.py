@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import json
+import uuid
 import ingest.readers as ingest_readers
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
@@ -18,7 +19,7 @@ from PIL import UnidentifiedImageError
 from drift.alerts import send_drift_email
 from drift import webhooks
 from auth import email_auth
-from auth.tokens import parse_prefix, verify_token_hash
+from auth.tokens import generate_token, parse_prefix, verify_token_hash
 # Importing custom modules
 from models import (
     FitBaselineRequest, FitBaselineResponse, FeatureCalibrationInfo,
@@ -96,8 +97,8 @@ bearer_scheme = HTTPBearer(auto_error=True)
 # tokens are matched by their (non-secret) prefix, then verified with a
 # constant-time hash comparison -- see auth/tokens.py. The plaintext
 # token is never logged; only its SHA-256 hash is ever persisted (see
-# db/crud.py's api_tokens table). Minted via scripts/create_token.py --
-# no UI exists or is planned until the React frontend (see HANDOFF).
+# db/crud.py's api_tokens table). Created from the dashboard's "Connect your
+# model" page (POST /tokens) or with scripts/create_token.py.
 def _verify_pat(token: str) -> dict:
     prefix = parse_prefix(token)
     row = crud.get_api_token_by_prefix(prefix)
@@ -191,6 +192,16 @@ def _internal_project_key(public_id: str, owner_email: str) -> str:
 def _display_project_id(internal_id: str, owner_email: str) -> str:
     prefix = f"{owner_email}{PROJECT_NAMESPACE_SEP}"
     return internal_id[len(prefix):] if internal_id.startswith(prefix) else internal_id
+
+
+def _owned_project_ids(owner_email: str) -> List[str]:
+    """The owner's projects, by the public name they created them with."""
+    conn = crud.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM projects WHERE owner_email = ?", (owner_email,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [_display_project_id(row[0], owner_email) for row in rows]
 
 
 def _resolve_project_key(public_id: str, client: dict) -> str:
@@ -476,6 +487,75 @@ def email_forgot(request: EmailOnlyRequest):
 def email_reset(request: PasswordResetRequest):
     user = _email_auth(email_auth.reset_password, request.email, request.code, request.new_password)
     return _session_response(user["email"], user["name"])
+
+
+# ---------------------------------------------------------
+# PERSONAL ACCESS TOKENS, managed from the dashboard
+# ---------------------------------------------------------
+# Same tokens as scripts/create_token.py. Only a signed-in session may manage
+# them: a token able to mint tokens would let a project-scoped token create an
+# unscoped one.
+TOKEN_EXPIRY_DAYS = (30, 90, 365)
+MAX_ACTIVE_TOKENS = 20
+
+
+class CreateTokenRequest(BaseModel):
+    name: str
+    expires_days: int = 90
+    project_ids: Optional[List[str]] = None  # None = all of the user's projects
+
+
+def _session_only(client: dict = Depends(verify_access)) -> dict:
+    if client["auth_type"] != "session":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Access tokens can only be managed from the dashboard.")
+    return client
+
+
+def _public_token(t: dict) -> dict:
+    return {k: t[k] for k in ("id", "name", "prefix", "project_scope", "created_at",
+                              "expires_at", "last_used_at", "revoked")}
+
+
+@app.get("/tokens", tags=["Management"])
+def list_tokens(client: dict = Depends(_session_only)):
+    return {"tokens": [_public_token(t) for t in crud.list_api_tokens(client["email"])]}
+
+
+@app.post("/tokens", tags=["Management"])
+def create_token(request: CreateTokenRequest, client: dict = Depends(_session_only)):
+    name = request.name.strip()
+    if not name or len(name) > 60:
+        raise HTTPException(status_code=422, detail="Give the token a name of up to 60 characters.")
+    if request.expires_days not in TOKEN_EXPIRY_DAYS:
+        raise HTTPException(status_code=422, detail="Expiry must be 30, 90 or 365 days.")
+    now = datetime.now(timezone.utc)
+    active = [t for t in crud.list_api_tokens(client["email"])
+              if not t["revoked"] and (not t["expires_at"] or datetime.fromisoformat(t["expires_at"]) > now)]
+    if len(active) >= MAX_ACTIVE_TOKENS:
+        raise HTTPException(status_code=409, detail="You have 20 active tokens. Revoke one you no longer use first.")
+    scope = ["*"]
+    if request.project_ids:
+        owned = set(_owned_project_ids(client["email"]))
+        unknown = [p for p in request.project_ids if p not in owned]
+        if unknown:
+            raise HTTPException(status_code=404, detail=f"Project not found: {unknown[0]}")
+        scope = list(dict.fromkeys(request.project_ids))
+
+    full_token, prefix, token_hash = generate_token()
+    token_id = str(uuid.uuid4())
+    expires_at = (now + timedelta(days=request.expires_days)).isoformat()
+    crud.create_api_token(token_id=token_id, user_email=client["email"], name=name, prefix=prefix,
+                          token_hash=token_hash, project_scope=scope,
+                          created_at=now.isoformat(), expires_at=expires_at)
+    return {"token": full_token, "id": token_id, "name": name, "project_scope": scope, "expires_at": expires_at}
+
+
+@app.delete("/tokens/{token_id}", tags=["Management"])
+def revoke_token(token_id: str, client: dict = Depends(_session_only)):
+    if not crud.revoke_api_token(token_id, client["email"]):
+        raise HTTPException(status_code=404, detail="Token not found or already revoked.")
+    return {"status": "revoked"}
 
 
 @app.get("/baseline/{project_id}", tags=["Management"])
@@ -2040,14 +2120,7 @@ def list_projects(client: dict = Depends(verify_access)):
     displayed here with that prefix stripped, so a user always sees just
     the name they created it with, never their own email echoed back.
     """
-    conn = crud.get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM projects WHERE owner_email = ?", (client["email"],))
-    rows = cursor.fetchall()
-    conn.close()
-
-    projects = [_display_project_id(row[0], client["email"]) for row in rows]
-    return {"projects": projects}
+    return {"projects": _owned_project_ids(client["email"])}
 
 
 # ---------------------------------------------------------

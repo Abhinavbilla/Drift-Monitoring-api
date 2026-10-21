@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { Badge, Button, Card, EmptyState, ErrorBanner, PageHeader, Spinner, StatCard } from "../components/ui";
-import { IconAlert, IconArrowRight, IconCheckCircle, IconClock, IconLayers, IconLink, IconTable, IconUpload } from "../components/icons";
+import { IconAlert, IconArrowRight, IconCode, IconCheckCircle, IconClock, IconLayers, IconLink, IconTable, IconUpload } from "../components/icons";
 import { COLUMN_TYPES, TypeIcon, connectionSentence } from "../components/vocab";
 import { api, ApiError } from "../lib/api";
 import { plural, timeAgo } from "../lib/format";
@@ -74,7 +74,10 @@ export function ProjectOverviewPage() {
   return (
     <div className="space-y-8">
       <PageHeader eyebrow="Project" title={decodeURIComponent(projectId)}
-                  subtitle="A quick look at what this project watches and how your latest data compared." />
+                  subtitle="A quick look at what this project watches and how your latest data compared."
+                  actions={<Button variant="outline" onClick={() => navigate(`/connect?project=${encodeURIComponent(projectId)}`)}>
+                    <IconCode className="h-4 w-4" /> Send data from code
+                  </Button>} />
 
       {baseline.isLoading && <div className="flex justify-center py-16 text-slate-400"><Spinner className="h-6 w-6" /></div>}
       {baseline.error && !notSetUp && (

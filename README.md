@@ -166,6 +166,8 @@ Sign in with Google, or with an email and password, then open or create a projec
 
 The **History**, **Baselines**, **Webhooks** and **Audit Log** pages cover the rest. The per-modality pages are under *Legacy*.
 
+Uploading in the dashboard is for trying things out. In production, a pipeline sends each batch through the API: the dashboard's **Connect your model** page creates access tokens and shows the Python and curl code for the chosen project.
+
 ### Python client (`clients/python`)
 
 ```python
@@ -225,7 +227,7 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: batch-42" \
 
 ## API reference
 
-All endpoints take `Authorization: Bearer <token>`: either a session token from signing in (Google or email + password), or a personal access token (optionally scoped to project IDs; see `auth/tokens.py`). Full schemas are at `/docs`.
+All endpoints take `Authorization: Bearer <token>`: either a session token from signing in (Google or email + password, valid 1 hour), or a personal access token for scripts (`dm_...`, optionally scoped to project IDs; see `auth/tokens.py`). Create access tokens on the dashboard's **Connect your model** page, or with `scripts/create_token.py` on the server. Full schemas are at `/docs`.
 
 ### Table monitoring
 
@@ -249,6 +251,8 @@ All endpoints take `Authorization: Bearer <token>`: either a session token from 
 | `/webhooks/{project_id}` | POST / GET | Register (secret returned once) / list webhooks |
 | `/webhooks/{project_id}/{webhook_id}` | DELETE | Remove a webhook |
 | `/projects` | GET | Your projects |
+| `/tokens` | GET / POST | List your access tokens / create one (`{name, expires_days: 30\|90\|365, project_ids?}`; the token is returned once). Signed-in sessions only, so a token can't create tokens |
+| `/tokens/{token_id}` | DELETE | Revoke an access token |
 | `/projects/{project_id}` | DELETE | Delete a project, including its stored files and embeddings |
 | `/logs/{project_id}` | GET | Recent `/predict` logs |
 | `/health/{project_id}` | GET | Burst check over recent point anomalies |

@@ -4,6 +4,7 @@ import { AppShell } from "./layout/AppShell";
 import { AuthProvider } from "./lib/auth";
 import { AnalyzePage } from "./pages/AnalyzePage";
 import { BaselinesPage } from "./pages/BaselinesPage";
+import { ConnectPage } from "./pages/ConnectPage";
 import { FitPage } from "./pages/FitPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -29,6 +30,7 @@ export default function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
                 <Route path="/" element={<ProjectsPage />} />
+                <Route path="/connect" element={<ConnectPage />} />
                 <Route path="/projects/:projectId" element={<ProjectOverviewPage />} />
                 <Route path="/projects/:projectId/table" element={<TableWorkflowPage />} />
                 <Route path="/projects/:projectId/fit" element={<FitPage />} />

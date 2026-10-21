@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button, Card, ErrorBanner, PageHeader, Spinner, StatusPill, TextInput } from "../components/ui";
-import { IconArrowRight, IconCheckCircle, IconLayers, IconPlus, IconTrash, IconUpload } from "../components/icons";
+import { IconArrowRight, IconCheckCircle, IconCode, IconLayers, IconPlus, IconTrash, IconUpload } from "../components/icons";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { greeting, timeAgo } from "../lib/format";
@@ -154,6 +154,20 @@ export function ProjectsPage() {
       <section>
         <h2 className="mb-4 text-lg font-semibold text-slate-900">How it works</h2>
         <HowItWorks />
+        <Card className="mt-4 flex flex-wrap items-center gap-4 p-5">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
+            <IconCode className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-slate-900">Uploading here is for trying things out</p>
+            <p className="mt-0.5 text-sm text-slate-500">
+              In production, your pipeline sends each new batch through the API and you come here to see the results.
+            </p>
+          </div>
+          <Link to="/connect">
+            <Button variant="outline">Connect your model <IconArrowRight className="h-4 w-4" /></Button>
+          </Link>
+        </Card>
       </section>
     </div>
   );

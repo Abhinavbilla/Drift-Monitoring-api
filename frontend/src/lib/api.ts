@@ -23,6 +23,20 @@ export interface SessionResponse {
   name: string;
 }
 
+export interface AccessToken {
+  id: string;
+  name: string;
+  prefix: string;
+  project_scope: string[] | null;
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  revoked: boolean;
+}
+
+/** Absolute API address, as a script outside the browser would need it. */
+export const PUBLIC_API_URL = new URL(BASE_URL, window.location.origin).href.replace(/\/$/, "");
+
 export class ApiError extends Error {
   status: number;
   detail: string;
@@ -103,6 +117,12 @@ export const api = {
 
   // -- projects --
   listProjects: () => request<{ projects: string[] }>("/projects"),
+  listTokens: () => request<{ tokens: AccessToken[] }>("/tokens"),
+  createToken: (name: string, expiresDays: number, projectIds?: string[]) =>
+    request<{ token: string; id: string; expires_at: string }>("/tokens", {
+      method: "POST", body: { name, expires_days: expiresDays, project_ids: projectIds },
+    }),
+  revokeToken: (id: string) => request<{ status: string }>(`/tokens/${id}`, { method: "DELETE" }),
   deleteProject: (projectId: string) => request<{ status: string }>(`/projects/${projectId}`, { method: "DELETE" }),
   getBaseline: (projectId: string) => request<BaselineInfo>(`/baseline/${projectId}`),
 

@@ -1,7 +1,8 @@
 """
-Personal access token management (Step 3a). Talks directly to drift.db via
-db.crud -- there is no HTTP endpoint or UI for token management (by design,
-per the 2026-09-30 instruction: no UI until the React frontend exists).
+Personal access token management from the server's command line. Talks
+directly to drift.db via db.crud. Users normally create tokens in the
+dashboard ("Connect your model", backed by /tokens); this script remains for
+admins and for tokens that never expire, which the dashboard doesn't offer.
 
 Usage:
     python scripts/create_token.py create --email alice@example.com --name "ci-pipeline" \
