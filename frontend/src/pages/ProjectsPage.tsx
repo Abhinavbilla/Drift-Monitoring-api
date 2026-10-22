@@ -77,14 +77,14 @@ export function ProjectsPage() {
     <div className="space-y-10">
       <PageHeader
         eyebrow={`${greeting()}${firstName ? `, ${firstName}` : ""}`}
-        title="Your projects"
-        subtitle="Each project watches one dataset — for example, the inputs to one model — and tells you when new data stops looking like it."
-        actions={<Button onClick={() => setCreating(true)}><IconPlus className="h-4 w-4" /> New project</Button>}
+        title="Your models"
+        subtitle="Each one watches the data an ML model receives and tells you when new data stops looking like what it learned from."
+        actions={<Button onClick={() => setCreating(true)}><IconPlus className="h-4 w-4" /> Add model</Button>}
       />
 
       {creating && (
         <Card className="animate-fade-up p-6">
-          <p className="font-semibold text-slate-900">Name your project</p>
+          <p className="font-semibold text-slate-900">Name the model to watch</p>
           <p className="mt-1 text-sm text-slate-500">Something you'll recognise later, like “house-prices” or “support-tickets”.</p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <TextInput autoFocus placeholder="e.g. house-prices" value={name}
@@ -98,7 +98,7 @@ export function ProjectsPage() {
       )}
 
       {isLoading && <div className="flex justify-center py-16 text-slate-400"><Spinner className="h-6 w-6" /></div>}
-      {error && <ErrorBanner message={error instanceof ApiError ? error.detail : "We couldn't load your projects."} />}
+      {error && <ErrorBanner message={error instanceof ApiError ? error.detail : "We couldn't load your models."} />}
 
       {hasProjects && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -129,7 +129,7 @@ export function ProjectsPage() {
               </div>
               <div className="mt-4"><ProjectStatus projectId={pid} /></div>
               <p className="mt-4 flex items-center gap-1 text-sm font-medium text-brand-600 opacity-0 transition-opacity group-hover:opacity-100">
-                Open project <IconArrowRight className="h-4 w-4" />
+                Open <IconArrowRight className="h-4 w-4" />
               </p>
             </Card>
           ))}
@@ -139,13 +139,13 @@ export function ProjectsPage() {
       {data && !hasProjects && (
         <Card className="overflow-hidden">
           <div className="bg-gradient-to-br from-brand-600 to-brand-700 px-8 py-10 text-white">
-            <h2 className="text-2xl font-bold">Let's set up your first project</h2>
+            <h2 className="text-2xl font-bold">Let's add your first model</h2>
             <p className="mt-2 max-w-xl text-brand-100">
               It takes a few minutes. You'll need the data your model was trained on — a CSV or Excel file is perfect.
             </p>
             <Button variant="outline" className="mt-6 border-white/30 bg-white text-brand-700 hover:bg-brand-50"
                     onClick={() => setCreating(true)}>
-              <IconPlus className="h-4 w-4" /> Create a project
+              <IconPlus className="h-4 w-4" /> Add a model
             </Button>
           </div>
         </Card>

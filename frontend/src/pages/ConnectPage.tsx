@@ -34,7 +34,7 @@ function FlowCard({ icon, when, title, body }: { icon: ReactNode; when: string; 
 }
 
 function scopeLabel(t: AccessToken) {
-  return !t.project_scope || t.project_scope.includes("*") ? "All projects" : t.project_scope.join(", ");
+  return !t.project_scope || t.project_scope.includes("*") ? "All models" : t.project_scope.join(", ");
 }
 
 function tokenState(t: AccessToken): { label: string; tone: "ok" | "slate" | "alert" } {
@@ -78,7 +78,7 @@ function TokenManager({ projects, project }: { projects: string[]; project: stri
           <span className="mb-1.5 block text-sm font-medium text-slate-700">Can access</span>
           <select value={canScope ? scope : "all"} onChange={(e) => setScope(e.target.value as "all" | "project")}
                   className="h-[42px] rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100">
-            <option value="all">All my projects</option>
+            <option value="all">All my models</option>
             {canScope && <option value="project">Only “{project}”</option>}
           </select>
         </label>
@@ -175,7 +175,7 @@ export function ConnectPage() {
   const [typed, setTyped] = useState(params.get("project") ?? "");
   const project = typed || list[0] || "my-model";
   const type = (value: string) => {
-    const id = value.replace(/\s+/g, "-");  // same rule as "New project"
+    const id = value.replace(/\s+/g, "-");  // same rule as "Add model"
     setTyped(id);
     setParams(id ? { project: id } : {}, { replace: true });
   };
@@ -269,7 +269,7 @@ curl -s -H "Authorization: Bearer $DRIFT_TOKEN" "$API/jobs/<job_id>"`,
 
       <Card className="flex flex-wrap items-center gap-x-6 gap-y-3 p-5">
         <label className="flex items-center gap-3 text-sm">
-          <span className="font-medium text-slate-700">Project</span>
+          <span className="font-medium text-slate-700">Model</span>
           <TextInput list="connect-projects" value={typed} onChange={(e) => type(e.target.value)}
                      className="w-56" placeholder={list[0] || "my-model"} />
           <datalist id="connect-projects">{list.map((p) => <option key={p} value={p} />)}</datalist>
@@ -279,7 +279,7 @@ curl -s -H "Authorization: Bearer $DRIFT_TOKEN" "$API/jobs/<job_id>"`,
           <code className="truncate rounded-lg bg-slate-100 px-2.5 py-1 font-mono text-[13px] text-slate-700">{PUBLIC_API_URL}</code>
           <CopyButton text={PUBLIC_API_URL} className="text-slate-500 hover:bg-slate-100 hover:text-slate-800" />
         </div>
-        <p className="w-full text-xs text-slate-400">The examples below fill in this project and address for you. A new name creates the project on first upload.</p>
+        <p className="w-full text-xs text-slate-400">The examples below fill in this name and address for you; in the API it's the <code className="font-mono">project_id</code>. A new name is created on its first upload.</p>
       </Card>
 
       <div className="space-y-10">
@@ -314,7 +314,7 @@ curl -s -H "Authorization: Bearer $DRIFT_TOKEN" "$API/jobs/<job_id>"`,
         <Step n={4} title="Check every new batch">
           <p>
             We never fetch data on our own: each call is one batch, sent whenever your code decides. It's compared
-            with the baseline and saved to the project's history.
+            with the baseline and saved to the model's history.
           </p>
           <dl className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white text-sm">
             {[

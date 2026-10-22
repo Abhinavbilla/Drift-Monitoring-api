@@ -8,7 +8,7 @@ type Tab = "login" | "signup";
 type Step = Tab | "verify" | "forgot" | "reset";
 
 const HEADINGS: Record<Step, [string, string]> = {
-  login: ["Welcome back", "Log in to see your projects."],
+  login: ["Welcome back", "Log in to see your models."],
   signup: ["Create your account", "Start watching your data in a couple of minutes."],
   verify: ["Check your inbox", "Enter the 6-digit code we just emailed you."],
   forgot: ["Forgot your password?", "No problem. We'll email you a code to reset it."],
@@ -253,7 +253,7 @@ export function AuthPanel({ emailEnabled, onSession, onGoogleToken }: {
         </p>
       )}
       <p className="mt-4 text-center text-xs leading-relaxed text-slate-400">
-        We only use your name and email to keep your projects private to you.
+        We only use your name and email to keep your models private to you.
       </p>
     </div>
   );

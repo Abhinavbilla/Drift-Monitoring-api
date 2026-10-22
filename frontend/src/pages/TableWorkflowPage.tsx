@@ -544,7 +544,7 @@ export function TableWorkflowPage() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Check my data"
-        title={mode === "check" ? "Check new data" : hasTableBaseline ? "Update your baseline" : "Set up this project"}
+        title={mode === "check" ? "Check new data" : hasTableBaseline ? "Update your baseline" : "Set up this model"}
         subtitle={mode === "check"
           ? "Upload a recent batch. We'll compare it with your baseline and tell you, in plain words, what changed."
           : "Show us what normal looks like. It takes a few minutes and you can change anything we suggest."}

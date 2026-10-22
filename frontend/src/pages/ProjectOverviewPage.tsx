@@ -73,23 +73,23 @@ export function ProjectOverviewPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader eyebrow="Project" title={decodeURIComponent(projectId)}
-                  subtitle="A quick look at what this project watches and how your latest data compared."
+      <PageHeader eyebrow="Model" title={decodeURIComponent(projectId)}
+                  subtitle="A quick look at what this model watches and how your latest data compared."
                   actions={<Button variant="outline" onClick={() => navigate(`/connect?project=${encodeURIComponent(projectId)}`)}>
                     <IconCode className="h-4 w-4" /> Send data from code
                   </Button>} />
 
       {baseline.isLoading && <div className="flex justify-center py-16 text-slate-400"><Spinner className="h-6 w-6" /></div>}
       {baseline.error && !notSetUp && (
-        <ErrorBanner message={baseline.error instanceof ApiError ? baseline.error.detail : "We couldn't load this project."} />
+        <ErrorBanner message={baseline.error instanceof ApiError ? baseline.error.detail : "We couldn't load this model."} />
       )}
 
       {notSetUp && (
         <EmptyState
           icon={<IconTable />}
-          title="This project isn't set up yet"
+          title="This model isn't set up yet"
           description="Show us the data your model learned from. We'll suggest what to watch, you confirm, and you're ready to check new data."
-          action={<Button onClick={() => go("table")}>Set up this project <IconArrowRight className="h-4 w-4" /></Button>}
+          action={<Button onClick={() => go("table")}>Set up this model <IconArrowRight className="h-4 w-4" /></Button>}
         />
       )}
 
@@ -101,7 +101,7 @@ export function ProjectOverviewPage() {
             <StatCard label="Columns watched" value={isTable ? watched.length : Object.keys(baseline.data.feature_types).length}
                       icon={<IconTable className="h-[18px] w-[18px]" />} />
             <StatCard label="Connections watched" value={isTable ? connections.length : "—"}
-                      icon={<IconLink className="h-[18px] w-[18px]" />} hint={!isTable ? "Available in table projects" : undefined} />
+                      icon={<IconLink className="h-[18px] w-[18px]" />} hint={!isTable ? "Available with the table setup" : undefined} />
             <StatCard label="Checks so far" value={history.data?.total ?? "—"} icon={<IconClock className="h-[18px] w-[18px]" />} />
             <StatCard label="Baseline" value={table.data ? `Version ${table.data.version}` : "Saved"}
                       hint={table.data ? `${plural(table.data.reference_rows, "row")} of usual data` : undefined}
@@ -144,7 +144,7 @@ export function ProjectOverviewPage() {
 
           {!isTable && (
             <Card className="p-6">
-              <h2 className="font-semibold text-slate-900">This project uses an older setup</h2>
+              <h2 className="font-semibold text-slate-900">This model uses an older setup</h2>
               <p className="mt-1 text-sm text-slate-500">
                 It watches <span className="font-medium capitalize">{baseline.data.modality}</span> data with the older tools
                 (under “Advanced tools” in the menu). Setting it up again with “Check my data” adds connections between columns

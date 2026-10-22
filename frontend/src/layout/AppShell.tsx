@@ -16,7 +16,7 @@ const projectLinks = [
   { to: "logs", label: "Activity log", icon: <IconList /> },
 ];
 
-// The per-type tools from before the table workflow; kept for older projects.
+// The per-type tools from before the table workflow; kept for older models.
 const advancedLinks = [
   { to: "fit", label: "Set up (older tool)" },
   { to: "analyze", label: "Check a batch (older tool)" },
@@ -61,7 +61,7 @@ export function AppShell() {
 
         <nav className="flex-1 space-y-6 overflow-y-auto px-3 pb-4">
           <div className="space-y-0.5">
-            <SideLink to="/" end icon={<IconGrid />}>All projects</SideLink>
+            <SideLink to="/" end icon={<IconGrid />}>All models</SideLink>
             <SideLink to={projectId ? `/connect?project=${encodeURIComponent(projectId)}` : "/connect"} icon={<IconCode />}>Connect your model</SideLink>
           </div>
 

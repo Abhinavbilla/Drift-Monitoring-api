@@ -63,7 +63,7 @@ def send_drift_email(project_id: str, owner_email: str, flagged_features: list):
     msg.set_content(f"""
     Drift Sentinel has detected a significant distribution shift in your production data.
     
-    Project ID: {project_id}
+    Model: {project_id}
     Time Detected: {current_time}
     Flagged Features: {features_str}
     

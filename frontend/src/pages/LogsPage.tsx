@@ -25,7 +25,7 @@ export function LogsPage() {
       {error && <ErrorBanner message={error instanceof ApiError ? error.detail : "Failed to load logs."} />}
 
       {data && data.length === 0 && (
-        <EmptyState title="No logs yet" description="Logs appear here after you call /predict for this project." />
+        <EmptyState title="No logs yet" description="Logs appear here after you call /predict for this model." />
       )}
 
       {data && data.length > 0 && (

@@ -44,7 +44,7 @@ export function WebhooksPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Alerts & webhooks" title="Get told when something changes" subtitle="Send an automatic message to another system (like Slack or your own app) whenever this project starts or stops finding changes. Each message is signed so it can be verified." />
+      <PageHeader eyebrow="Alerts & webhooks" title="Get told when something changes" subtitle="Send an automatic message to another system (like Slack or your own app) whenever this model's data starts or stops showing changes. Each message is signed so it can be verified." />
 
       <Card className="mb-6 max-w-xl p-6 space-y-4">
         <Field label="Where should we send messages?" hint="A web address that can receive messages — for example a Slack incoming webhook or your own app. It must be reachable from the internet.">
@@ -83,7 +83,7 @@ export function WebhooksPage() {
 
       {error && <ErrorBanner message={error instanceof ApiError ? error.detail : "Failed to load webhooks."} />}
 
-      {data && data.webhooks.length === 0 && <EmptyState title="No webhooks yet" description="Add one above to get a message the moment this project starts (or stops) finding changes." />}
+      {data && data.webhooks.length === 0 && <EmptyState title="No webhooks yet" description="Add one above to get a message the moment this model's data starts (or stops) showing changes." />}
 
       {data && data.webhooks.length > 0 && (
         <Card className="overflow-hidden">

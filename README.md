@@ -166,6 +166,8 @@ Sign in with Google, or with an email and password, then open or create a projec
 
 The **History**, **Baselines**, **Webhooks** and **Audit Log** pages cover the rest. The per-modality pages are under *Legacy*.
 
+The dashboard calls each monitored dataset a **model** (one per ML model it watches); the API calls the same thing a project (`project_id`, `/projects`).
+
 Uploading in the dashboard is for trying things out. In production, a pipeline sends each batch through the API: the dashboard's **Connect your model** page creates access tokens and shows the Python and curl code for the chosen project.
 
 ### Python client (`clients/python`)

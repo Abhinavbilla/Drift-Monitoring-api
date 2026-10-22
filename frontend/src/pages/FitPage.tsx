@@ -206,7 +206,7 @@ export function FitPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Advanced tools" title="Set up (older tool)" subtitle="The original setup for one kind of data at a time. For most projects, “Check my data” is simpler and watches more." />
+      <PageHeader eyebrow="Advanced tools" title="Set up (older tool)" subtitle="The original setup for one kind of data at a time. For most models, “Check my data” is simpler and watches more." />
 
       <div className="mb-6">
         <Tabs

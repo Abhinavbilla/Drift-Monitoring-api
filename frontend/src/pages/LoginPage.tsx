@@ -78,7 +78,7 @@ export function LoginPage() {
           <ul className="mt-8 max-w-lg space-y-4">
             <Point icon={<IconCheckCircle className="h-4 w-4" />}>Works with numbers, categories, written text and photos — all in one table.</Point>
             <Point icon={<IconLink className="h-4 w-4" />}>Notices when columns stop going together, even if each looks fine on its own.</Point>
-            <Point icon={<IconShield className="h-4 w-4" />}>Keeps statistics, not your raw data. Only you can see your projects.</Point>
+            <Point icon={<IconShield className="h-4 w-4" />}>Keeps statistics, not your raw data. Only you can see your models.</Point>
           </ul>
         </div>
 
