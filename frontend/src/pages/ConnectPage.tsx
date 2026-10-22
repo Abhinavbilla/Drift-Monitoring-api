@@ -306,15 +306,31 @@ curl -s -H "Authorization: Bearer $DRIFT_TOKEN" "$API/jobs/<job_id>"`,
 
         <Step n={4} title="Check every new batch">
           <p>
-            Put this wherever new data reaches your model. Each call compares the batch with the baseline and saves
-            the result to the project's history.
+            We never fetch data on our own: each call is one batch, sent whenever your code decides. It's compared
+            with the baseline and saved to the project's history.
           </p>
+          <dl className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white text-sm">
+            {[
+              ["Batch scoring", "e.g. a nightly job", "Send the same inputs right after the job scores them."],
+              ["Live API", "one request at a time", "Log each request's inputs; a scheduled job sends them hourly or daily. One row can't show drift."],
+              ["Events", "releases, data deliveries", "Send once per event, alongside your other release checks."],
+            ].map(([how, example, when]) => (
+              <div key={how} className="grid gap-1 px-4 py-3 sm:grid-cols-[180px_1fr] sm:gap-4">
+                <dt>
+                  <span className="font-medium text-slate-800">{how}</span>
+                  <span className="block text-xs text-slate-400">{example}</span>
+                </dt>
+                <dd className="text-slate-600">{when}</dd>
+              </div>
+            ))}
+          </dl>
           <CodeBlock snippets={[{ label: "Python", code: python.batch }, { label: "curl", code: curl.batch }]} />
           <div className="flex gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
             <IconAlert className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
             <span>
-              Aim for a few hundred rows per batch (300+ if a column has many categories); very small batches give
-              unreliable answers. Send the same columns you trained on — extra or missing columns are flagged in the report.
+              Let batch size set the schedule: aim for a few hundred rows (300+ if a column has many categories) — if an
+              hour brings 50 rows, send daily. Using the date as <code className="font-mono text-[13px]">batch_id</code> makes
+              reruns safe. Send the columns you trained on; extra or missing ones are flagged in the report.
             </span>
           </div>
         </Step>
