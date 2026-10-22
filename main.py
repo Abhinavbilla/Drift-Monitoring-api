@@ -532,6 +532,11 @@ def create_token(request: CreateTokenRequest, client: dict = Depends(_session_on
     now = datetime.now(timezone.utc)
     active = [t for t in crud.list_api_tokens(client["email"])
               if not t["revoked"] and (not t["expires_at"] or datetime.fromisoformat(t["expires_at"]) > now)]
+    # Names are only labels, but two active tokens with one name make it unclear
+    # which to revoke. Revoked/expired names can be reused.
+    if any(t["name"].lower() == name.lower() for t in active):
+        raise HTTPException(status_code=409, detail=f"You already have an active token named '{name}'. "
+                                                    "Pick another name or revoke the old one.")
     if len(active) >= MAX_ACTIVE_TOKENS:
         raise HTTPException(status_code=409, detail="You have 20 active tokens. Revoke one you no longer use first.")
     scope = ["*"]

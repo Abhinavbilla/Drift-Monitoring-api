@@ -5,6 +5,7 @@ Run:
     python -m pytest tests/test_dashboard_tokens.py -v
 """
 
+import itertools
 import sqlite3
 import sys
 
@@ -36,8 +37,11 @@ def project():
     conn.close()
 
 
+_names = itertools.count()
+
+
 def _create(**body):
-    return client.post("/tokens", json={"name": "ci", **body}, headers=SESSION)
+    return client.post("/tokens", json={"name": f"ci-{next(_names)}", **body}, headers=SESSION)
 
 
 def test_created_token_works_once_shown_and_can_be_revoked():
@@ -78,3 +82,12 @@ def test_input_is_validated():
     other = {"Authorization": f"Bearer {mint_session_token('someone-else@dashboard-tokens-test.example')}"}
     mine = _create().json()["id"]
     assert client.delete(f"/tokens/{mine}", headers=other).status_code == 404
+
+
+def test_active_token_names_are_unique_but_reusable_after_revoke():
+    first = client.post("/tokens", json={"name": "Nightly"}, headers=SESSION)
+    assert first.status_code == 200
+    clash = client.post("/tokens", json={"name": "nightly "}, headers=SESSION)  # case/space-insensitive
+    assert clash.status_code == 409 and "already have an active token" in clash.json()["detail"]
+    assert client.delete(f"/tokens/{first.json()['id']}", headers=SESSION).status_code == 200
+    assert client.post("/tokens", json={"name": "Nightly"}, headers=SESSION).status_code == 200
