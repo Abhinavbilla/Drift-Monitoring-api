@@ -50,9 +50,10 @@ function TokenManager({ projects, project }: { projects: string[]; project: stri
   const [scope, setScope] = useState<"all" | "project">("all");
   const [days, setDays] = useState(90);
   const [created, setCreated] = useState<string | null>(null);
+  const canScope = projects.includes(project);
 
   const create = useMutation({
-    mutationFn: () => api.createToken(name.trim(), days, scope === "project" ? [project] : undefined),
+    mutationFn: () => api.createToken(name.trim(), days, scope === "project" && canScope ? [project] : undefined),
     onSuccess: (resp) => {
       setCreated(resp.token);
       setName("");
@@ -63,7 +64,6 @@ function TokenManager({ projects, project }: { projects: string[]; project: stri
     mutationFn: (id: string) => api.revokeToken(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tokens"] }),
   });
-  const canScope = projects.includes(project);
   const list = tokens.data?.tokens ?? [];
 
   return (
@@ -76,7 +76,7 @@ function TokenManager({ projects, project }: { projects: string[]; project: stri
         </label>
         <label className="block">
           <span className="mb-1.5 block text-sm font-medium text-slate-700">Can access</span>
-          <select value={scope} onChange={(e) => setScope(e.target.value as "all" | "project")}
+          <select value={canScope ? scope : "all"} onChange={(e) => setScope(e.target.value as "all" | "project")}
                   className="h-[42px] rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100">
             <option value="all">All my projects</option>
             {canScope && <option value="project">Only “{project}”</option>}
@@ -171,8 +171,15 @@ export function ConnectPage() {
   const [params, setParams] = useSearchParams();
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.listProjects });
   const list = projects.data?.projects ?? [];
-  const project = params.get("project") || list[0] || "my-model";
-  const pick = (p: string) => setParams(p ? { project: p } : {}, { replace: true });
+  // What's typed stays as typed (even empty); the snippets fall back to a sensible name.
+  const [typed, setTyped] = useState(params.get("project") ?? "");
+  const project = typed || list[0] || "my-model";
+  const type = (value: string) => {
+    const id = value.replace(/\s+/g, "-");  // same rule as "New project"
+    setTyped(id);
+    setParams(id ? { project: id } : {}, { replace: true });
+  };
+  const today = new Date().toLocaleDateString("en-CA");  // local YYYY-MM-DD
 
   const python = {
     install: `pip install "${REPO_CLIENT}"`,
@@ -203,7 +210,7 @@ client.fit_table("${project}", profile)`,
     return report
 
 
-check_batch(pd.read_parquet("todays_inputs.parquet"), batch_id="2026-10-22")`,
+check_batch(pd.read_parquet("todays_inputs.parquet"), batch_id="${today}")`,
   };
 
   const curl = {
@@ -226,7 +233,7 @@ curl -s -H "Authorization: Bearer $DRIFT_TOKEN" -H "Content-Type: application/js
           "relationships": []}' \\
      "$API/tables/${project}/fit"`,
     batch: `# Send a batch -> {"job_id": "..."}. The Idempotency-Key makes retries safe.
-curl -s -H "Authorization: Bearer $DRIFT_TOKEN" -H "Idempotency-Key: 2026-10-22" \\
+curl -s -H "Authorization: Bearer $DRIFT_TOKEN" -H "Idempotency-Key: ${today}" \\
      -F file=@todays_inputs.csv "$API/tables/${project}/analyze"
 
 # Then poll the job; when it succeeds, "result" is the full report
@@ -263,8 +270,8 @@ curl -s -H "Authorization: Bearer $DRIFT_TOKEN" "$API/jobs/<job_id>"`,
       <Card className="flex flex-wrap items-center gap-x-6 gap-y-3 p-5">
         <label className="flex items-center gap-3 text-sm">
           <span className="font-medium text-slate-700">Project</span>
-          <TextInput list="connect-projects" value={params.get("project") ?? project} onChange={(e) => pick(e.target.value.trim())}
-                     className="w-56" placeholder="my-model" />
+          <TextInput list="connect-projects" value={typed} onChange={(e) => type(e.target.value)}
+                     className="w-56" placeholder={list[0] || "my-model"} />
           <datalist id="connect-projects">{list.map((p) => <option key={p} value={p} />)}</datalist>
         </label>
         <div className="flex min-w-0 items-center gap-2 text-sm">
@@ -342,8 +349,8 @@ curl -s -H "Authorization: Bearer $DRIFT_TOKEN" "$API/jobs/<job_id>"`,
           </p>
           <CodeBlock snippets={[{ label: "Report (abridged)", code: report }]} />
           <p>
-            To be told without polling, add a webhook — we'll call your URL (Slack, PagerDuty, your own service) whenever
-            a batch drifts.{" "}
+            To be told without polling, add a webhook: we call your URL (Slack, PagerDuty, your own service) when an
+            alert opens, on each drifting batch while it stays open, and once more when the data is back to normal.{" "}
             {list.includes(project) && (
               <Link className="inline-flex items-center gap-1 font-medium text-brand-600 hover:text-brand-700"
                     to={`/projects/${encodeURIComponent(project)}/webhooks`}>
