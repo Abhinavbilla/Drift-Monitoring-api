@@ -16,6 +16,7 @@ import csv
 import gzip
 import importlib.util
 import io
+import json
 import zipfile
 
 import pandas as pd
@@ -43,6 +44,45 @@ def read_csv_with_encoding_fallback(raw_bytes: bytes, **kwargs) -> pd.DataFrame:
             last_error = e
             continue
     raise ValueError(f"Could not decode file with any common encoding. Last error: {last_error}")
+
+
+def _read_json(raw_bytes: bytes) -> pd.DataFrame:
+    """A JSON array of records, a column-oriented object, JSON Lines, or an
+    object that wraps one list of records alongside metadata, e.g.
+    {"count": 281, "points": [{...}, ...]} -- that list is the table."""
+    try:
+        data = json.loads(raw_bytes.decode("utf-8-sig"))
+    except ValueError:  # not a single JSON document (JSONDecodeError and UnicodeDecodeError are ValueErrors)
+        return pd.read_json(io.BytesIO(raw_bytes), lines=True)
+    if isinstance(data, dict):
+        record_lists = [v for v in data.values()
+                        if isinstance(v, list) and v and all(isinstance(r, dict) for r in v)]
+        if len(record_lists) > 1:
+            raise ValueError("The JSON object holds several lists of records; upload one table per file.")
+        if record_lists:
+            return pd.read_json(io.StringIO(json.dumps(record_lists[0])))
+    return pd.read_json(io.BytesIO(raw_bytes))
+
+
+def flatten_nested_cells(df: pd.DataFrame) -> pd.DataFrame:
+    """JSON cells can hold objects or arrays, which the profiler can't count
+    or compare. Objects become dotted columns (location.lat), in place;
+    anything still nested (arrays) is kept as its JSON text."""
+    pieces = []
+    for col in df.columns:
+        values = df[col]
+        if values.dtype == object and values.map(lambda v: isinstance(v, dict)).any():
+            expanded = pd.json_normalize([v if isinstance(v, dict) else {} for v in values])
+            expanded.columns = [f"{col}.{c}" for c in expanded.columns]
+            expanded.index = df.index
+            pieces.append(expanded)
+        else:
+            pieces.append(values.to_frame())
+    out = pd.concat(pieces, axis=1) if pieces else df
+    for col in out.columns:
+        if out[col].dtype == object and out[col].map(lambda v: isinstance(v, (dict, list))).any():
+            out[col] = out[col].map(lambda v: json.dumps(v) if isinstance(v, (dict, list)) else v)
+    return out
 
 
 def read_uploaded_file(filename: str, raw_bytes: bytes) -> pd.DataFrame:
@@ -159,10 +199,7 @@ def read_uploaded_file(filename: str, raw_bytes: bytes) -> pd.DataFrame:
     # 4. JSON and JSON Lines (.json, .jsonl, .ndjson)
     # --------------------------------------------------------
     if filename.endswith((".json", ".jsonl", ".ndjson")):
-        try:
-            return pd.read_json(io.BytesIO(raw_bytes))
-        except ValueError:
-            return pd.read_json(io.BytesIO(raw_bytes), lines=True)
+        return flatten_nested_cells(_read_json(raw_bytes))
 
     # --------------------------------------------------------
     # 5. Parquet

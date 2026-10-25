@@ -58,6 +58,27 @@ class TestJSON:
         raw = json.dumps(EXPECTED_ROWS).encode()
         _assert_matches_expected(read_uploaded_file("data.json", raw))
 
+    def test_records_wrapped_in_an_object_with_metadata(self):
+        raw = json.dumps({"category": "shops", "count": 3, "points": EXPECTED_ROWS}).encode()
+        _assert_matches_expected(read_uploaded_file("data.json", raw))
+
+    def test_column_oriented_object_still_reads_as_columns(self):
+        raw = json.dumps({"a": [1, 2, 3], "b": ["x", "y", "z"]}).encode()
+        _assert_matches_expected(read_uploaded_file("data.json", raw))
+
+    def test_several_record_lists_are_rejected(self):
+        raw = json.dumps({"left": EXPECTED_ROWS, "right": EXPECTED_ROWS}).encode()
+        with pytest.raises(ValueError):
+            read_uploaded_file("data.json", raw)
+
+    def test_nested_objects_flatten_and_arrays_become_text(self):
+        rows = [{"id": i, "loc": {"lat": 12.0 + i, "lon": 80.0}, "tags": ["a", "b"]} for i in range(3)]
+        df = read_uploaded_file("data.json", json.dumps(rows).encode())
+        assert list(df.columns) == ["id", "loc.lat", "loc.lon", "tags"]
+        assert df["loc.lat"].tolist() == [12.0, 13.0, 14.0]
+        assert df["tags"].tolist() == ['["a", "b"]'] * 3
+        assert df.map(lambda v: isinstance(v, (dict, list))).sum().sum() == 0
+
     def test_jsonl(self):
         raw = "\n".join(json.dumps(r) for r in EXPECTED_ROWS).encode()
         _assert_matches_expected(read_uploaded_file("data.jsonl", raw))
