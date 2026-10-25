@@ -17,7 +17,7 @@ Questions an examiner is likely to ask, with answers grounded in this repository
 7. [Text and image drift](#7-text-and-image-drift)
 8. [Validation and results](#8-validation-and-results)
 9. [Hard and critical questions](#9-hard-and-critical-questions)
-10. [System design and architecture](#10-system-design-and-architecture)
+10. [Tech stack, system design and architecture](#10-tech-stack-system-design-and-architecture)
 11. [Security and privacy](#11-security-and-privacy)
 12. [Deployment](#12-deployment)
 13. [Frontend and user experience](#13-frontend-and-user-experience)
@@ -355,7 +355,41 @@ It failed a pre-registered check: in the "category mix shifted" scenario it alar
 
 ---
 
-## 10. System design and architecture
+## 10. Tech stack, system design and architecture
+
+**Q: What tech stack did you use?**
+Short version (20 seconds):
+> The backend is **Python with FastAPI**, and the statistics use **SciPy, NumPy, pandas and scikit-learn**. Text and images are turned into vectors with **sentence-transformers (MiniLM)** and **PyTorch/torchvision (ResNet-18)**. Data is stored in **SQLite** plus files on disk. The frontend is **React with TypeScript, Vite and Tailwind**. Everything is packaged in **Docker** with **nginx**, and deployed on **Azure App Service** through **GitHub Actions**.
+
+If asked for detail, layer by layer:
+
+| Layer | What I used | Why, in one line |
+|---|---|---|
+| API | FastAPI, Uvicorn, Pydantic | Fast, typed request checks, and the docs page is generated automatically |
+| Statistics | SciPy (KS test), NumPy, pandas, scikit-learn (logistic regression, PCA, ridge) | Standard, well-tested scientific libraries; no need to write the maths from scratch |
+| Embeddings | sentence-transformers `all-MiniLM-L6-v2` (text), torchvision `resnet18` (images) | Small, ready-made models that run on CPU, with no training needed |
+| Storage | SQLite in WAL mode, plus a file store (NumPy `.npz`, Parquet) | No setup, transactional, enough for moderate traffic; large arrays live in files, never pickles |
+| Background work | Own job queue: a worker thread with jobs saved in the database | Embedding thousands of images takes minutes, too long for one web request |
+| Auth | Google Identity Services, email + password (scrypt), JWT session tokens, hashed personal access tokens | People sign in with a browser; scripts use revocable tokens |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS, TanStack Query, Recharts | A modern, typed UI; TanStack Query handles data loading and caching; Recharts draws the trend charts |
+| Packaging | Docker (multi-stage build), nginx, supervisord | One container: nginx serves the React app and forwards `/api` to FastAPI |
+| Cloud and CI/CD | Azure App Service, Azure Container Registry, GitHub Actions | Every push to main builds the image and redeploys automatically |
+| Testing | pytest (about 380 tests) | Unit, end-to-end, security and statistical-property tests |
+| Legacy | Streamlit | The first dashboard; kept running, but React replaced it |
+
+**Q: Why FastAPI and not Flask or Django?**
+FastAPI gives typed validation and automatic API docs, and handles file uploads well. Django is heavier than this API needs.
+
+**Q: Why not PostgreSQL?**
+SQLite was enough for one server and needs no setup. All database access goes through one helper, so moving to PostgreSQL later is a contained change.
+
+**Q: Why not Celery or Redis for background jobs?**
+It would mean one more service to run and pay for. A database-backed queue survives restarts and was enough for this scale, and the worker can be split out later.
+
+**Q: Why not a bigger embedding model?**
+These two run on CPU in minutes, and the tests are calibrated on whatever model is used. The trade-off, which is a known limitation, is weaker results on specialised data such as medical images.
+
+**Tip:** pair every tool with its reason ("FastAPI because…, SQLite because…"). Examiners care more about why you chose something than what you chose.
 
 **Q: Describe the architecture.**
 - **FastAPI** (`main.py`): auth, isolation, endpoints, tabular core.
