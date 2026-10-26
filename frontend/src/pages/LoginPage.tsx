@@ -52,7 +52,7 @@ function Point({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 }
 
 export function LoginPage() {
-  const { session, loginWithGoogleIdToken, completeSignIn } = useAuth();
+  const { session, expired, loginWithGoogleIdToken, completeSignIn } = useAuth();
   const methods = useQuery({ queryKey: ["authMethods"], queryFn: api.authMethods, retry: false });
 
   if (session) return <Navigate to="/" replace />;
@@ -98,6 +98,11 @@ export function LoginPage() {
           <div className="mb-10 flex justify-center lg:hidden">
             <LogoMark className="h-12 w-12" />
           </div>
+          {expired && (
+            <p role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Your session ended after an hour. Sign in again to pick up where you left off.
+            </p>
+          )}
           <AuthPanel emailEnabled={!!methods.data?.email} onSession={completeSignIn} onGoogleToken={loginWithGoogleIdToken} />
         </div>
       </section>

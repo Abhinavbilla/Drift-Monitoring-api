@@ -24,7 +24,7 @@ function FeatureMetricsTable({ metrics }: { metrics: Record<string, FeatureMetri
         {rows.map(([name, m]) => (
           <tr key={name}>
             <td className="px-5 py-2.5 font-medium text-slate-700">{name}</td>
-            <td className="px-5 py-2.5 text-slate-600">{m.statistic.toFixed(4)}</td>
+            <td className="px-5 py-2.5 text-slate-600">{m.statistic != null ? m.statistic.toFixed(4) : "--"}</td>
             <td className="px-5 py-2.5 text-slate-600">{m.p_value != null ? m.p_value.toExponential(3) : "--"}</td>
             <td className="px-5 py-2.5">
               {m.drift_detected ? <Badge tone="alert">Drifted</Badge> : <Badge tone="ok">Stable</Badge>}

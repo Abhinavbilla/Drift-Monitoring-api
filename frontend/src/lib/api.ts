@@ -52,6 +52,19 @@ export function registerTokenGetter(fn: () => string | null) {
   getToken = fn;
 }
 
+const STATUS_MESSAGES: Record<number, string> = {
+  413: "That file is larger than the server accepts (tables up to 200 MB, photo ZIPs up to 500 MB).",
+  502: "The server is restarting. Try again in a minute.",
+  503: "The server is restarting. Try again in a minute.",
+  504: "The server took too long to answer. Try again in a minute.",
+};
+
+let onUnauthorized: () => void = () => {};
+/** Called when the server rejects the session we sent (it expired or was signed out elsewhere). */
+export function registerUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn;
+}
+
 async function request<T>(
   path: string,
   options: { method?: string; body?: unknown; params?: Record<string, string | number | boolean | undefined>;
@@ -81,9 +94,16 @@ async function request<T>(
     }
   }
 
-  const resp = await fetch(url.toString(), { method, headers: finalHeaders, body: payload });
+  let resp: Response;
+  try {
+    resp = await fetch(url.toString(), { method, headers: finalHeaders, body: payload });
+  } catch {
+    throw new ApiError(0, "Couldn't reach the server. Check your connection and try again.");
+  }
   if (!resp.ok) {
-    let detail = resp.statusText;
+    if (resp.status === 401 && token) onUnauthorized();
+    // Proxy errors have no JSON body, and over HTTP/2 statusText is empty.
+    let detail = STATUS_MESSAGES[resp.status] ?? (resp.statusText || `Request failed (${resp.status}).`);
     try {
       const data = await resp.json();
       if (data?.detail) detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
@@ -215,8 +235,20 @@ function tableForm(file: File, images?: File): FormData {
 
 /** Polls a job until it finishes; resolves with its result or throws its error. */
 export async function waitForJob<R>(jobId: string, onProgress?: (job: Job<R>) => void): Promise<R> {
+  let misses = 0;
   for (;;) {
-    const job = await api.getJob<R>(jobId);
+    let job: Job<R>;
+    try {
+      job = await api.getJob<R>(jobId);
+      misses = 0;
+    } catch (e) {
+      // The job keeps running on the server; ride out a dropped connection or a
+      // gateway error during a restart (about a minute) before giving up.
+      const transient = !(e instanceof ApiError) || e.status === 0 || e.status >= 500;
+      if (!transient || ++misses > 20) throw e;
+      await new Promise((r) => setTimeout(r, 3000));
+      continue;
+    }
     onProgress?.(job);
     if (job.status === "succeeded") return job.result as R;
     if (job.status === "failed" || job.status === "interrupted") throw new ApiError(422, job.error || "Job failed.");

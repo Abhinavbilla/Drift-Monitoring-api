@@ -367,7 +367,7 @@ function ColumnCard({ name, r }: { name: string; r: ColumnDrift }) {
       <p className="mt-3 text-sm text-slate-600">{columnSentence(r)}</p>
       <div className="mt-2">
         <Details>
-          <p>Test: {r.test}{r.statistic !== undefined ? ` · statistic ${r.statistic.toFixed(3)}` : ""}</p>
+          <p>Test: {r.test}{r.statistic != null ? ` · statistic ${r.statistic.toFixed(3)}` : ""}</p>
           {r.p_value_adjusted != null && <p>Adjusted p-value: {r.p_value_adjusted.toPrecision(3)}</p>}
           {r.threshold_used && <p>Rule: {r.threshold_used}</p>}
           <p>{r.in_family ? "Counted in the batch-wide false-alarm control." : "Not counted in the batch-wide false-alarm control."}</p>
