@@ -1037,16 +1037,22 @@ def insert_analysis_run(
     return run_id
 
 
+def _loads_finite(text: str):
+    """json.dumps writes NaN/Infinity for missing statistics, but they aren't valid
+    JSON for the API or a webhook receiver; read them back as null."""
+    return json.loads(text, parse_constant=lambda _: None)
+
+
 def _row_to_analysis_run(row) -> Dict[str, Any]:
     return {
         "id": row[0], "project": row[1], "baseline_version": row[2], "ts": row[3],
         "batch_size": row[4], "idempotency_key": row[5], "payload_hash": row[6],
         "decision_mode": row[7], "system_alert": bool(row[8]),
         "sustained_alert": None if row[9] is None else bool(row[9]),
-        "feature_results": json.loads(row[10]) if row[10] else {},
-        "schema_report": json.loads(row[11]) if row[11] else None,
+        "feature_results": _loads_finite(row[10]) if row[10] else {},
+        "schema_report": _loads_finite(row[11]) if row[11] else None,
         "windows_considered": row[12],
-        "relationship_metrics": json.loads(row[13]) if row[13] else {},
+        "relationship_metrics": _loads_finite(row[13]) if row[13] else {},
     }
 
 
@@ -1300,7 +1306,7 @@ def enqueue_webhook_delivery(
 def _row_to_delivery(row) -> Dict[str, Any]:
     return {
         "id": row[0], "webhook_id": row[1], "event_id": row[2], "event_type": row[3],
-        "payload": json.loads(row[4]), "attempt_number": row[5], "status": row[6],
+        "payload": _loads_finite(row[4]), "attempt_number": row[5], "status": row[6],
         "status_code": row[7], "success": None if row[8] is None else bool(row[8]),
         "response_snippet": row[9], "next_retry_at": row[10],
         "created_at": row[11], "updated_at": row[12],
@@ -1457,7 +1463,7 @@ def create_job(job_id: str, owner_email: str, owner_name: str, project_id: str, 
 
 def _decode_job(row: Dict[str, Any]) -> Dict[str, Any]:
     for k in ("payload", "result"):
-        row[k] = json.loads(row[k]) if row.get(k) else None
+        row[k] = _loads_finite(row[k]) if row.get(k) else None
     return row
 
 

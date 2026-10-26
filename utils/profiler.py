@@ -27,7 +27,7 @@ def coerce_numeric_column(values: List[Any], threshold: float = NUMERIC_COERCION
         return [], 0
 
     series = pd.Series(non_null)
-    coerced = pd.to_numeric(series, errors="coerce")
+    coerced = pd.to_numeric(series, errors="coerce").replace([float("inf"), float("-inf")], float("nan"))
     if coerced.notna().mean() <= threshold:
         return None, 0
 

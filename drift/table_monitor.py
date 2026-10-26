@@ -33,7 +33,7 @@ from drift.calibration import CalibrationConfig
 from drift.embedding_detector import EmbeddingDriftDetector, HARD_MIN_SAMPLES
 from ingest import readers
 from ingest.images import ArchiveError, ImageArchive, load_image
-from utils.profiler import profile_table, remove_duplicate_records
+from utils.profiler import NUMERIC_COERCION_THRESHOLD, profile_table, remove_duplicate_records
 
 N_MAX_REFERENCE = 5000      # seeded sample cap for embeddings and the row-aligned store
 REFERENCE_SAMPLE_SEED = 42
@@ -79,7 +79,8 @@ def _open_stage(stage: Optional[dict], allowed_status: Tuple[str, ...]) -> Tuple
     try:
         df = readers.read_uploaded_file(stage["table_filename"], blob_store.get_bytes(stage["table_blob"]))
     except (ValueError, ImportError) as e:
-        raise jobs.JobError(f"Could not parse the uploaded table ({type(e).__name__}).")
+        raise jobs.JobError(f"Could not read the uploaded file as a table ({type(e).__name__}). Check that it is a "
+                            "CSV, Excel, JSON or Parquet file with one row per record and a header row.")
     if df.empty:
         raise jobs.JobError("The uploaded table has zero rows.")
     df.columns = [str(c) for c in df.columns]
@@ -258,6 +259,14 @@ def run_fit(job: dict, persist_fit: Callable[..., Any], split_high_cardinality: 
         df = df.reset_index(drop=True)
         cache = (stage["profile"] or {}).get("embedding_cache") or {}
 
+        # A column confirmed as numeric that mostly isn't would otherwise be
+        # quietly refitted as categorical (or dropped) and never tested.
+        for col in by_type["numeric"]:
+            present = df[col].dropna()
+            if len(present) and pd.to_numeric(present, errors="coerce").notna().mean() <= NUMERIC_COERCION_THRESHOLD:
+                raise jobs.JobError(f"Column '{col}' is marked numeric, but most of its values aren't numbers. "
+                                    f"Pick another type for it (text or categorical) or turn monitoring off.")
+
         # Embed text/image columns FIRST: a failure here must not leave a
         # half-written baseline version behind.
         embedded: Dict[str, Tuple[np.ndarray, np.ndarray, Dict[str, Any]]] = {}
@@ -323,7 +332,7 @@ def run_fit(job: dict, persist_fit: Callable[..., Any], split_high_cardinality: 
     if numcat:
         rows = df[numcat].iloc[_cap_rows(len(df))].copy()
         for c in numcat:
-            rows[c] = pd.to_numeric(rows[c], errors="coerce") if inferred[c] == "continuous" \
+            rows[c] = pd.to_numeric(rows[c], errors="coerce").replace([np.inf, -np.inf], np.nan) if inferred[c] == "continuous" \
                 else rows[c].map(lambda v: None if pd.isna(v) else str(v).strip())
         rows.insert(0, "row_id", rows.index.astype(int))
         buf = io.BytesIO()
@@ -625,6 +634,13 @@ def _embedding_relationship_tests(table: dict, monitored: Dict[str, str], df: pd
     return tests, out
 
 
+_NOT_TESTED_REASONS = {
+    "missing_column": "The column is missing from this batch.",
+    "dtype_change": "No usable values: none of this batch's values are numbers.",
+    "null_rate": "No usable values: the column is empty in this batch.",
+}
+
+
 def build_report(resp, monitored: Dict[str, str], version: int, n_rows: int,
                  data_quality: Dict[str, dict], not_tested: Dict[str, str],
                  rel_details: Optional[Dict[str, dict]] = None, dct_details: Optional[Dict[str, dict]] = None) -> dict:
@@ -636,7 +652,8 @@ def build_report(resp, monitored: Dict[str, str], version: int, n_rows: int,
         in_family = calibrated and m is not None
         if m is None:
             reason = not_tested.get(col) or next(
-                (i["issue"] for i in resp.schema_report.get(col, [])), "Not tested in this batch.")
+                (_NOT_TESTED_REASONS.get(i["issue"], i["issue"]) for i in resp.schema_report.get(col, [])),
+                "No usable values in this batch.")
             column_drift[col] = {"type": col_type, "test": _TEST_BY_TYPE[col_type], "status": "NOT_TESTED",
                                  "in_family": False, "reason": reason}
             excluded.append({"test": col, "why": reason})
@@ -671,7 +688,9 @@ def build_report(resp, monitored: Dict[str, str], version: int, n_rows: int,
         if calibrated:
             members.append(name)
     has_alert_issue = any(i.get("severity") == "alert" for issues in resp.schema_report.values() for i in issues)
-    status = "DRIFT" if resp.system_alert_triggered else ("DATA_ISSUES" if has_alert_issue else "STABLE")
+    # A watched column that couldn't be tested isn't "stable" -- the batch didn't say anything about it.
+    untested = any(r["status"] == "NOT_TESTED" for r in column_drift.values())
+    status = "DRIFT" if resp.system_alert_triggered else ("DATA_ISSUES" if has_alert_issue or untested else "STABLE")
     return {
         "baseline_version": version,
         "n_rows": n_rows,

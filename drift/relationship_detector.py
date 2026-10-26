@@ -312,7 +312,9 @@ def finish_test(prepared: Dict[str, Any], draws: int, seed: int) -> Dict[str, An
 # ---------------------------------------------------------
 def _clean_numeric(values) -> np.ndarray:
     import pandas as pd
-    return pd.to_numeric(pd.Series(values), errors="coerce").to_numpy(dtype=float)
+    arr = np.array(pd.to_numeric(pd.Series(values), errors="coerce"), dtype=float)  # writable copy
+    arr[~np.isfinite(arr)] = np.nan  # inf is as unusable as a missing value
+    return arr
 
 
 def _clean_categorical(values) -> np.ndarray:

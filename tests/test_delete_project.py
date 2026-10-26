@@ -52,3 +52,17 @@ class TestDeleteProjects:
         resp = client.delete("/models/test_del_proj_b", headers=HEADERS)
         assert resp.status_code == 200
         assert client.get("/baseline/test_del_proj_b", headers=HEADERS).status_code == 404
+
+    def test_recreated_project_starts_empty(self):
+        # A model re-created under a deleted model's name used to inherit its
+        # history, baseline versions, alert state and still-firing webhooks.
+        _fit("test_del_proj_c")
+        client.post("/analyze/test_del_proj_c", json={"production_data": {"x": [9.9, 8.8, 7.7] * 20}}, headers=HEADERS)
+        assert client.get("/history/test_del_proj_c", headers=HEADERS).json()["total"] == 1
+        client.delete("/projects/test_del_proj_c", headers=HEADERS)
+
+        _fit("test_del_proj_c")
+        assert client.get("/history/test_del_proj_c", headers=HEADERS).json()["total"] == 0
+        versions = client.get("/baselines/test_del_proj_c", headers=HEADERS).json()
+        assert [v["version"] for v in versions["versions"]] == [1]
+        client.delete("/projects/test_del_proj_c", headers=HEADERS)

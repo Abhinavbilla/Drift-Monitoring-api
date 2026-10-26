@@ -95,3 +95,60 @@ def test_server_survives_bad_requests():
     assert client.get("/jobs/does-not-exist", headers=H).status_code == 404
     assert client.post(f"/tables/{PREFIX}fuzz/analyze", headers=H, files={"file": ("b.csv", b"a\n1")}).status_code == 404
     assert client.get("/jobs/x").status_code in (401, 403)  # unauthenticated
+
+
+def test_missing_and_infinite_numbers_keep_history_readable():
+    # inf and empty numeric cells used to leave NaN statistics in the stored
+    # report, after which GET /jobs and GET /history answered 500 for good.
+    import numpy as np
+    import pandas as pd
+    from test_table_unified import _analyze, _fit
+
+    from db import crud
+
+    assert crud._loads_finite('{"statistic": NaN, "p": Infinity}') == {"statistic": None, "p": None}
+    project = f"{PREFIX}nonfinite"
+    client.delete(f"/projects/{project}", headers=H)
+    rng = np.random.default_rng(3)
+    ref = pd.DataFrame({"fee": rng.normal(100, 20, 200), "kind": rng.choice(["a", "b", "c"], 200)})
+    ref.loc[::9, "fee"] = np.inf
+    _fit(project, ref)
+    batch = ref.head(120).assign(fee=np.nan)
+    job = _wait(_analyze(project, batch).json()["job_id"])
+    assert job["status"] == "succeeded", job
+    resp = client.get(f"/history/{project}", headers=H)
+    assert resp.status_code == 200 and resp.json()["total"] == 1
+    client.delete(f"/projects/{project}", headers=H)
+
+
+def test_column_with_no_usable_values_is_not_tested_and_flags_the_batch():
+    import numpy as np
+    import pandas as pd
+    from test_table_unified import _analyze, _fit
+
+    project = f"{PREFIX}unusable"
+    client.delete(f"/projects/{project}", headers=H)
+    rng = np.random.default_rng(4)
+    ref = pd.DataFrame({"fee": rng.normal(100, 20, 200), "kind": rng.choice(["a", "b", "c"], 200)})
+    _fit(project, ref)
+    report = _wait(_analyze(project, ref.head(120).assign(fee="n/a")).json()["job_id"])["result"]
+    assert report["column_drift"]["fee"]["status"] == "NOT_TESTED"
+    assert "fee" not in report["family"]["members"]
+    assert report["overall"]["status"] == "DATA_ISSUES"
+    client.delete(f"/projects/{project}", headers=H)
+
+
+def test_fit_rejects_a_numeric_choice_for_a_column_that_is_not_numbers():
+    import pandas as pd
+    from test_table_unified import _confirmed, _stage
+
+    project = f"{PREFIX}not_numbers"
+    client.delete(f"/projects/{project}", headers=H)
+    df = pd.DataFrame({"fee": range(60), "kind": [f"label {i % 7}" for i in range(60)]})
+    staged = _stage(project, df)
+    profile = _wait(staged["job_id"])["result"]
+    resp = client.post(f"/tables/{project}/fit", headers=H, json={
+        "stage_id": staged["stage_id"], "columns": _confirmed(profile, {"kind": "numeric"}), "relationships": []})
+    job = _wait(resp.json()["job_id"])
+    assert job["status"] == "failed" and "marked numeric" in job["error"]
+    client.delete(f"/projects/{project}", headers=H)

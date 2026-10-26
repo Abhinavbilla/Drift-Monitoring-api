@@ -1392,12 +1392,14 @@ def _build_schema_report_and_clean(state: dict, production_data: dict):
         non_null_values = [v for v, skip in zip(values, is_null) if not skip]
 
         if feature_types[col] == "continuous":
-            numeric = pd.to_numeric(pd.Series(non_null_values), errors="coerce") if non_null_values else pd.Series([], dtype=float)
+            numeric = pd.to_numeric(pd.Series(non_null_values), errors="coerce").replace([np.inf, -np.inf], np.nan) \
+                if non_null_values else pd.Series([], dtype=float)
             bad_dtype_count = int(numeric.isna().sum())
             if bad_dtype_count:
                 _add(col, "dtype_change", "default", dropped=bad_dtype_count, batch_size=total)
             cleaned_values = numeric.dropna().tolist()
-            cleaned[col] = cleaned_values
+            if cleaned_values:  # nothing usable left: report it, don't test an empty sample
+                cleaned[col] = cleaned_values
             if len(cleaned_values) > 1 and len(set(cleaned_values)) == 1:
                 _add(col, "constant_column", "default", value=cleaned_values[0])
         else:
@@ -1407,7 +1409,8 @@ def _build_schema_report_and_clean(state: dict, production_data: dict):
                 unseen = sorted(set(str_values) - allowed)
                 if unseen:
                     _add(col, "unseen_categories", "default", values=unseen[:20], count=len(unseen))
-            cleaned[col] = str_values
+            if str_values:
+                cleaned[col] = str_values
             if len(str_values) > 1 and len(set(str_values)) == 1:
                 _add(col, "constant_column", "default", value=str_values[0])
 
@@ -2142,6 +2145,13 @@ def _delete_project_data(project_id: str) -> str:
         cursor.execute("DELETE FROM projects WHERE id = ?", (clean_project_id,))
         cursor.execute("DELETE FROM baselines WHERE project_id = ?", (clean_project_id,))
         cursor.execute("DELETE FROM logs WHERE project_id = ?", (clean_project_id,))
+        # Without these, a new model created under the same name inherited the old
+        # one's history, baseline versions and alert state -- and its webhooks kept firing.
+        cursor.execute("DELETE FROM webhook_deliveries WHERE webhook_id IN "
+                       "(SELECT id FROM webhooks WHERE project = ?)", (clean_project_id,))
+        for table, key in (("webhooks", "project"), ("analysis_runs", "project"), ("alert_events", "project"),
+                           ("baseline_versions", "project_id"), ("baseline_active_version", "project_id")):
+            cursor.execute(f"DELETE FROM {table} WHERE {key} = ?", (clean_project_id,))
         conn.commit()
     except Exception as e:
         conn.rollback()
