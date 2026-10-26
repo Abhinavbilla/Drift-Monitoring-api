@@ -27,6 +27,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
 
+# Bake the embedding models into the image. Otherwise the first text or photo
+# upload after every restart downloads them (~140 MB) and fails if that times out.
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2'); \
+from torchvision import models; models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)"
+
 # Copy the rest of the application
 COPY . .
 
