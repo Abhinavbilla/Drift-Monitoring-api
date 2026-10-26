@@ -87,7 +87,7 @@ def mint_session_token(user_info: dict) -> str:
         "email": user_info.get("email", "").lower(),
         "name": user_info.get("name", "User"),
         "iat": int(time.time()),
-        "exp": int(time.time()) + 3600,
+        "exp": int(time.time()) + 2 * 3600,
     }
     return jwt.encode(payload, os.getenv("COOKIE_KEY"), algorithm="HS256")
 

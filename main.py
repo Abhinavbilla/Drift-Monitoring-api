@@ -402,10 +402,13 @@ def login_with_google(request: GoogleLoginRequest):
     return _session_response(email, claims.get("name", email))
 
 
+SESSION_TTL_SECONDS = 2 * 3600
+
+
 def _session_response(email: str, name: str) -> dict:
     """The one session-token shape verify_access accepts, for every sign-in method."""
     session_token = jwt.encode(
-        {"email": email.lower(), "name": name, "iat": int(time.time()), "exp": int(time.time()) + 3600},
+        {"email": email.lower(), "name": name, "iat": int(time.time()), "exp": int(time.time()) + SESSION_TTL_SECONDS},
         COOKIE_KEY, algorithm="HS256",
     )
     return {"session_token": session_token, "email": email.lower(), "name": name}

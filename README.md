@@ -229,7 +229,7 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: batch-42" \
 
 ## API reference
 
-All endpoints take `Authorization: Bearer <token>`: either a session token from signing in (Google or email + password, valid 1 hour), or a personal access token for scripts (`dm_...`, optionally scoped to project IDs; see `auth/tokens.py`). Create access tokens on the dashboard's **Connect your model** page, or with `scripts/create_token.py` on the server. Full schemas are at `/docs`.
+All endpoints take `Authorization: Bearer <token>`: either a session token from signing in (Google or email + password, valid 2 hours), or a personal access token for scripts (`dm_...`, optionally scoped to project IDs; see `auth/tokens.py`). Create access tokens on the dashboard's **Connect your model** page, or with `scripts/create_token.py` on the server. Full schemas are at `/docs`.
 
 ### Table monitoring
 

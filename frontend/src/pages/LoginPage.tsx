@@ -100,7 +100,7 @@ export function LoginPage() {
           </div>
           {expired && (
             <p role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              Your session ended after an hour. Sign in again to pick up where you left off.
+              Your session ended after two hours. Sign in again to pick up where you left off.
             </p>
           )}
           <AuthPanel emailEnabled={!!methods.data?.email} onSession={completeSignIn} onGoogleToken={loginWithGoogleIdToken} />

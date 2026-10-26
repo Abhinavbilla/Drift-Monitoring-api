@@ -441,7 +441,7 @@ Its numeric/categorical part reuses the tabular storage and code, and a regressi
 **Q: How does authentication work?**
 - **Google sign-in:** Google Identity Services gives an ID token; the backend verifies it and issues its own session token.
 - **Email + password:** sign-up sends a 6-digit code; the account works only after confirming it.
-- **Session token:** a JWT signed with HS256 using `COOKIE_KEY`, valid 1 hour.
+- **Session token:** a JWT signed with HS256 using `COOKIE_KEY`, valid 2 hours.
 - **Personal access tokens** for scripts: `dm_<prefix>_<secret>`, stored as SHA-256 hashes, looked up by prefix, revocable, optionally scoped to specific projects, expiring after 30/90/365 days.
 
 **Q: How are passwords stored?**
@@ -576,7 +576,7 @@ Writing down the scenarios, metrics and pass criteria **before** running the exp
 | Text model | all-MiniLM-L6-v2, 384-dim |
 | Image model | resnet18 penultimate layer, 512-dim |
 | Relationship cap | 25 numeric/categorical + 15 embedding pairs |
-| Session token | JWT HS256, 1 hour |
+| Session token | JWT HS256, 2 hours |
 | Access token | `dm_<prefix>_<secret>`, SHA-256 hashed, 30/90/365 days, max 20 active |
 | Password hashing | scrypt, per-user salt |
 | Webhook signing | HMAC-SHA256, `X-Drift-Signature-256` |
