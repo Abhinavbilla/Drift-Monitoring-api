@@ -42,6 +42,11 @@ class TestCSV:
         raw = "a,b\n1,x\n2,y\n3,z\n".encode("utf-8-sig")
         _assert_matches_expected(read_uploaded_file("data.csv", raw))
 
+    def test_single_column_csv(self):
+        # the delimiter sniffer can't choose a delimiter with only one column
+        df = read_uploaded_file("data.csv", b"note\nfriendly dog looking for a home\ncalm cat likes kids\n")
+        assert list(df.columns) == ["note"] and len(df) == 2
+
     def test_csv_latin1_encoded(self):
         raw = "a,b\n1,x\n2,y\n3,z\n".encode("latin1")
         _assert_matches_expected(read_uploaded_file("data.csv", raw))

@@ -16,6 +16,7 @@ import csv
 import gzip
 import importlib.util
 import io
+import itertools
 import json
 import zipfile
 
@@ -31,12 +32,36 @@ def is_module_available(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
 
 
+def _detect_delimiter(raw_bytes: bytes, encoding: str) -> str:
+    """pandas' sep=None uses csv.Sniffer, which can pick any character: a
+    one-column file of sentences was split on a letter, and quoted text holding
+    both ',' and ';' fooled it either way. Instead, parse the first rows with
+    each real delimiter and keep the one giving a steady width above one
+    column; failing that it's a comma-separated (or one-column) file."""
+    sample = raw_bytes[:65536]
+    text = sample.decode(encoding, errors="ignore")
+    best, best_score = ",", (0.0, 1)
+    for delim in ",;\t|":
+        rows = list(itertools.islice(csv.reader(io.StringIO(text), delimiter=delim), 50))
+        if len(sample) == 65536 and len(rows) > 1:
+            rows = rows[:-1]  # the sample may cut the last row short
+        if not rows or len(rows[0]) < 2:
+            continue
+        steady = sum(len(r) == len(rows[0]) for r in rows) / len(rows)
+        if (steady, len(rows[0])) > best_score:
+            best, best_score = delim, (steady, len(rows[0]))
+    return best
+
+
 def read_csv_with_encoding_fallback(raw_bytes: bytes, **kwargs) -> pd.DataFrame:
     """Tries multiple encodings until one works."""
     last_error = None
     for enc in ENCODINGS:
         try:
-            return pd.read_csv(io.BytesIO(raw_bytes), encoding=enc, **kwargs)
+            options = kwargs
+            if kwargs.get("sep", ",") is None:
+                options = {**kwargs, "sep": _detect_delimiter(raw_bytes, enc)}
+            return pd.read_csv(io.BytesIO(raw_bytes), encoding=enc, **options)
         except UnicodeDecodeError as e:
             last_error = e
             continue
